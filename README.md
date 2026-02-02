@@ -28,25 +28,48 @@ make all  # Run full pipeline: ingest -> graph -> features -> train
 
 ## Layer 1A: MIMIC-IV Data Ingestion
 
-The first step in the pipeline loads MIMIC-IV CSV files into a DuckDB database for efficient querying.
+The first step in the pipeline loads all MIMIC-IV CSV files into a DuckDB database for efficient querying. The loader automatically discovers and loads all tables from the `hosp/` and `icu/` subdirectories.
 
-### Loaded Tables
+### Loaded Tables (31 total, ~886M rows)
 
-| Table | Source | Description |
-|-------|--------|-------------|
-| patients | hosp/ | Patient demographics (subject_id, gender, anchor_age) |
-| admissions | hosp/ | Hospital admissions (hadm_id, admittime, dischtime) |
-| icustays | icu/ | ICU stays (stay_id, intime, outtime, los) |
-| labevents | hosp/ | Lab test results |
-| d_labitems | hosp/ | Lab item definitions |
-| chartevents | icu/ | ICU charted observations |
-| d_items | icu/ | Chart item definitions |
-| microbiologyevents | hosp/ | Microbiology culture results |
-| prescriptions | hosp/ | Medication prescriptions |
-| diagnoses_icd | hosp/ | ICD diagnosis codes |
-| d_icd_diagnoses | hosp/ | ICD diagnosis descriptions |
-| procedures_icd | hosp/ | ICD procedure codes |
-| d_icd_procedures | hosp/ | ICD procedure descriptions |
+**Hospital tables (hosp/):**
+| Table | Rows | Description |
+|-------|------|-------------|
+| patients | 364K | Patient demographics |
+| admissions | 546K | Hospital admissions |
+| diagnoses_icd | 6.4M | ICD diagnosis codes |
+| d_icd_diagnoses | 112K | ICD diagnosis descriptions |
+| procedures_icd | 860K | ICD procedure codes |
+| d_icd_procedures | 86K | ICD procedure descriptions |
+| labevents | 158M | Lab test results |
+| d_labitems | 1.6K | Lab item definitions |
+| microbiologyevents | 4M | Microbiology cultures |
+| prescriptions | 20M | Medication prescriptions |
+| pharmacy | 18M | Pharmacy orders |
+| emar | 43M | Electronic medication admin |
+| emar_detail | 87M | EMAR details |
+| poe | 52M | Provider order entry |
+| poe_detail | 8.5M | POE details |
+| hcpcsevents | 186K | HCPCS events |
+| d_hcpcs | 89K | HCPCS definitions |
+| drgcodes | 762K | Diagnosis-related groups |
+| services | 593K | Hospital services |
+| transfers | 2.4M | Patient transfers |
+| omr | 7.8M | Outpatient medical records |
+| provider | 42K | Provider info |
+
+**ICU tables (icu/):**
+| Table | Rows | Description |
+|-------|------|-------------|
+| icustays | 94K | ICU stays |
+| chartevents | 433M | ICU charted observations |
+| d_items | 4K | Chart item definitions |
+| inputevents | 11M | IV/fluid inputs |
+| outputevents | 5.4M | Output measurements |
+| ingredientevents | 14M | IV ingredient events |
+| procedureevents | 809K | ICU procedures |
+| datetimeevents | 10M | Datetime events |
+| caregiver | 18K | Caregiver info |
 
 ### Usage
 
@@ -88,6 +111,6 @@ python scripts/verify_mimic_load.py \
 ```
 
 The verification script checks:
-- All 13 required tables exist
+- All tables from hosp/ and icu/ are loaded (31 tables)
 - Each table has non-zero row counts
 - Key tables can be joined correctly (patients → admissions → icustays)

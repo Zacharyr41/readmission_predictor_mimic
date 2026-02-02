@@ -1,14 +1,13 @@
 """Tests for MIMIC-IV DuckDB loader."""
 
 import pytest
-import duckdb
 from pathlib import Path
 
-from src.ingestion.mimic_loader import load_mimic_to_duckdb
+from src.ingestion.mimic_loader import load_mimic_to_duckdb, get_loaded_tables
 
 
-# Required tables from the plan
-REQUIRED_TABLES = [
+# Tables that must exist in synthetic test data (subset of full MIMIC)
+SYNTHETIC_TABLES = [
     "patients",
     "admissions",
     "icustays",
@@ -54,18 +53,19 @@ class TestLoadMimicToDuckDB:
         assert db_path.exists()
         conn.close()
 
-    def test_all_required_tables_exist(self, synthetic_mimic_dir: Path, tmp_path: Path):
-        """Check all 13 required tables exist."""
+    def test_discovers_and_loads_all_tables(self, synthetic_mimic_dir: Path, tmp_path: Path):
+        """Check all tables from synthetic data are discovered and loaded."""
         db_path = tmp_path / "test.duckdb"
         conn = load_mimic_to_duckdb(synthetic_mimic_dir, db_path)
 
-        tables = conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-        ).fetchall()
-        table_names = {t[0] for t in tables}
+        loaded_tables = get_loaded_tables(conn)
 
-        for required_table in REQUIRED_TABLES:
-            assert required_table in table_names, f"Missing table: {required_table}"
+        # All synthetic tables should be loaded
+        for table in SYNTHETIC_TABLES:
+            assert table in loaded_tables, f"Missing table: {table}"
+
+        # Should have exactly the tables we put in synthetic data
+        assert len(loaded_tables) == len(SYNTHETIC_TABLES)
 
         conn.close()
 
@@ -104,12 +104,18 @@ class TestLoadMimicToDuckDB:
         assert first_count == second_count, "Row count changed after second load"
 
     @pytest.mark.integration
-    def test_row_counts_nonzero(self, real_mimic_dir: Path, tmp_path: Path):
-        """Integration test with real data - verify tables have rows."""
+    def test_loads_all_mimic_tables(self, real_mimic_dir: Path, tmp_path: Path):
+        """Integration test - verify all MIMIC-IV tables are loaded with data."""
         db_path = tmp_path / "mimiciv.duckdb"
         conn = load_mimic_to_duckdb(real_mimic_dir, db_path)
 
-        for table in REQUIRED_TABLES:
+        loaded_tables = get_loaded_tables(conn)
+
+        # Should have many tables (hosp has ~22, icu has ~10)
+        assert len(loaded_tables) >= 30, f"Expected 30+ tables, got {len(loaded_tables)}"
+
+        # Verify all tables have rows
+        for table in loaded_tables:
             count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             assert count > 0, f"Table {table} has no rows"
 

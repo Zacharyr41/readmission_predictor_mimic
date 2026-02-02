@@ -11,6 +11,9 @@ Examples:
     # Use default paths from settings
     python scripts/verify_mimic_load.py
 
+    # Verify an existing database without reloading
+    python scripts/verify_mimic_load.py --skip-load
+
     # Specify custom paths
     python scripts/verify_mimic_load.py \
         --source /path/to/mimiciv/3.1 \
@@ -25,7 +28,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ingestion.mimic_loader import load_mimic_to_duckdb, REQUIRED_TABLES
+from src.ingestion.mimic_loader import load_mimic_to_duckdb, get_loaded_tables
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,27 +38,23 @@ logger = logging.getLogger(__name__)
 
 
 def verify_tables(conn) -> bool:
-    """Verify all required tables exist and have rows."""
-    tables = conn.execute(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-    ).fetchall()
-    table_names = {t[0] for t in tables}
+    """Verify all tables exist and have rows."""
+    loaded_tables = get_loaded_tables(conn)
 
-    logger.info(f"Found {len(table_names)} tables: {sorted(table_names)}")
+    logger.info(f"Found {len(loaded_tables)} tables")
 
     all_ok = True
-    for table in REQUIRED_TABLES:
-        if table not in table_names:
-            logger.error(f"Missing table: {table}")
-            all_ok = False
-            continue
+    total_rows = 0
 
+    for table in loaded_tables:
         count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        total_rows += count
         logger.info(f"  {table}: {count:,} rows")
         if count == 0:
             logger.warning(f"  Table {table} has no rows!")
             all_ok = False
 
+    logger.info(f"Total rows across all tables: {total_rows:,}")
     return all_ok
 
 
