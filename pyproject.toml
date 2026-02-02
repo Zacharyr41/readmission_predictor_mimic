@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "readmission-predictor-mimic"
+version = "0.1.0"
+description = "Temporal knowledge graph for hospital readmission prediction using MIMIC-IV"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = "MIT"
+dependencies = [
+    "duckdb>=1.1",
+    "rdflib>=7.0",
+    "pandas>=2.0",
+    "numpy",
+    "scikit-learn>=1.4",
+    "xgboost>=2.0",
+    "pydantic>=2.0",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+]
+graph = [
+    "neo4j>=5.0",
+    "networkx>=3.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+addopts = "-v"
