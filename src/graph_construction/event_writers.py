@@ -384,13 +384,14 @@ def write_antibiotic_event(
 
     # Temporal bounds
     begin_uri = MIMIC_NS[f"AAEBegin_{hadm_id}_{drug_slug}"]
-    end_uri = MIMIC_NS[f"AAEEnd_{hadm_id}_{drug_slug}"]
-
     _write_instant(graph, begin_uri, rx_data["starttime"])
-    _write_instant(graph, end_uri, rx_data["stoptime"])
-
     graph.add((event_uri, TIME_NS.hasBeginning, begin_uri))
-    graph.add((event_uri, TIME_NS.hasEnd, end_uri))
+
+    # End time may be NULL for ongoing prescriptions
+    if rx_data.get("stoptime") is not None:
+        end_uri = MIMIC_NS[f"AAEEnd_{hadm_id}_{drug_slug}"]
+        _write_instant(graph, end_uri, rx_data["stoptime"])
+        graph.add((event_uri, TIME_NS.hasEnd, end_uri))
 
     # Properties
     graph.add((event_uri, MIMIC_NS.hasDrugName, Literal(drug, datatype=XSD.string)))
