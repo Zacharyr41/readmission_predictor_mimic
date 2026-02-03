@@ -24,6 +24,42 @@ from src.feature_extraction.graph_features import (
 )
 
 
+def _extract_subject_ids(graph: Graph) -> pd.DataFrame:
+    """Extract subject_id for each admission via SPARQL.
+
+    This is needed for patient-level train/test splitting to prevent data leakage.
+
+    Args:
+        graph: RDF graph containing patient and admission data.
+
+    Returns:
+        DataFrame with columns: hadm_id, subject_id
+    """
+    query = """
+    SELECT ?hadmId ?subjectId
+    WHERE {
+        ?patient rdf:type mimic:Patient ;
+                 mimic:hasSubjectId ?subjectId ;
+                 mimic:hasAdmission ?admission .
+        ?admission mimic:hasAdmissionId ?hadmId .
+    }
+    """
+
+    results = list(graph.query(query))
+
+    data = []
+    for row in results:
+        hadm_id = int(row[0])
+        subject_id = int(row[1])
+
+        data.append({
+            "hadm_id": hadm_id,
+            "subject_id": subject_id,
+        })
+
+    return pd.DataFrame(data)
+
+
 def _extract_labels(graph: Graph) -> pd.DataFrame:
     """Extract readmission labels for each admission.
 
@@ -78,7 +114,7 @@ def _fill_missing_values(df: pd.DataFrame, label_cols: list[str]) -> pd.DataFram
     df = df.copy()
 
     for col in df.columns:
-        if col in label_cols or col == "hadm_id":
+        if col in label_cols or col in ["hadm_id", "subject_id"]:
             continue
 
         if df[col].isna().any():
@@ -126,12 +162,17 @@ def build_feature_matrix(
     temporal_features = extract_temporal_features(graph)
     graph_structure_features = extract_graph_structure_features(graph)
 
-    # Extract labels
+    # Extract labels and subject IDs
     labels = _extract_labels(graph)
+    subject_ids = _extract_subject_ids(graph)
 
     # Merge all features on hadm_id
     # Start with labels as the base (ensures we have all admissions)
     df = labels.copy()
+
+    # Add subject_id for patient-level splitting
+    if not subject_ids.empty:
+        df = df.merge(subject_ids, on="hadm_id", how="left")
 
     feature_dfs = [
         demographics,
