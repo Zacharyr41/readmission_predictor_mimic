@@ -47,6 +47,7 @@ def build_graph(
     microbiology_limit: int = 0,
     prescriptions_limit: int = 0,
     diagnoses_limit: int = 0,
+    skip_allen_relations: bool = False,
 ) -> Graph:
     """Build RDF graph from MIMIC-IV DuckDB database.
 
@@ -56,7 +57,7 @@ def build_graph(
     3. Select cohort based on ICD prefixes
     4. Initialize graph with ontologies
     5. Process each patient with their admissions, ICU stays, and events
-    6. Compute Allen temporal relations
+    6. Compute Allen temporal relations (optional)
     7. Serialize graph to output file
 
     Args:
@@ -70,6 +71,7 @@ def build_graph(
         microbiology_limit: Maximum microbiology events per ICU stay (0 = no limit).
         prescriptions_limit: Maximum prescriptions per admission (0 = no limit).
         diagnoses_limit: Maximum diagnoses per admission (0 = no limit).
+        skip_allen_relations: If True, skip Allen relation computation (faster).
 
     Returns:
         The constructed RDF graph.
@@ -124,6 +126,7 @@ def build_graph(
             microbiology_limit=microbiology_limit,
             prescriptions_limit=prescriptions_limit,
             diagnoses_limit=diagnoses_limit,
+            skip_allen_relations=skip_allen_relations,
         )
 
         # Update statistics
@@ -183,6 +186,7 @@ def _process_patient(
     microbiology_limit: int,
     prescriptions_limit: int,
     diagnoses_limit: int,
+    skip_allen_relations: bool = False,
 ) -> dict[str, int]:
     """Process a single patient and their associated data.
 
@@ -196,6 +200,7 @@ def _process_patient(
         microbiology_limit: Maximum microbiology events per ICU stay.
         prescriptions_limit: Maximum prescriptions per admission.
         diagnoses_limit: Maximum diagnoses per admission.
+        skip_allen_relations: If True, skip Allen relation computation (faster).
 
     Returns:
         Dictionary with counts of created entities.
@@ -256,19 +261,19 @@ def _process_patient(
             stats["icu_days"] += len(icu_day_metadata)
 
             # Write lab events (biomarkers)
-            lab_events = _query_lab_events(conn, stay_id, biomarkers_limit)
+            lab_events = _query_lab_events(conn, stay_data, biomarkers_limit)
             for lab_data in lab_events:
                 write_biomarker_event(graph, lab_data, icu_stay_uri, icu_day_metadata)
                 stats["biomarkers"] += 1
 
             # Write vital events (clinical signs)
-            vital_events = _query_vital_events(conn, stay_id, vitals_limit)
+            vital_events = _query_vital_events(conn, stay_data, vitals_limit)
             for vital_data in vital_events:
                 write_clinical_sign_event(graph, vital_data, icu_stay_uri, icu_day_metadata)
                 stats["vitals"] += 1
 
             # Write microbiology events
-            micro_events = _query_microbiology_events(conn, stay_id, microbiology_limit)
+            micro_events = _query_microbiology_events(conn, stay_data, microbiology_limit)
             for micro_data in micro_events:
                 write_microbiology_event(graph, micro_data, icu_stay_uri, icu_day_metadata)
                 stats["microbiology"] += 1
@@ -289,9 +294,10 @@ def _process_patient(
     if len(admission_uris) > 1:
         link_sequential_admissions(graph, admission_uris)
 
-    # Compute Allen relations for this patient
-    allen_count = compute_allen_relations_for_patient(graph, patient_uri)
-    stats["allen_relations"] = allen_count
+    # Compute Allen relations for this patient (optional - can be slow for many events)
+    if not skip_allen_relations:
+        allen_count = compute_allen_relations_for_patient(graph, patient_uri)
+        stats["allen_relations"] = allen_count
 
     return stats
 
@@ -409,25 +415,31 @@ def _query_icu_stays(conn: duckdb.DuckDBPyConnection, hadm_id: int) -> list[dict
 
 
 def _query_lab_events(
-    conn: duckdb.DuckDBPyConnection, stay_id: int, limit: int
+    conn: duckdb.DuckDBPyConnection, stay_data: dict, limit: int
 ) -> list[dict]:
     """Query lab events for an ICU stay.
 
+    Filters labevents by hadm_id and charttime within ICU stay window.
+    Note: MIMIC-IV labevents doesn't have stay_id, so we filter by time window.
+
     Args:
         conn: DuckDB connection.
-        stay_id: ICU stay ID.
+        stay_data: ICU stay dictionary with hadm_id, stay_id, intime, outtime.
         limit: Maximum number of events (0 = no limit).
 
     Returns:
         List of lab event dictionaries.
     """
     limit_clause = f"LIMIT {limit}" if limit > 0 else ""
+    hadm_id = stay_data["hadm_id"]
+    stay_id = stay_data["stay_id"]
+    intime = stay_data["intime"]
+    outtime = stay_data["outtime"]
 
     result = conn.execute(
         f"""
         SELECT
             l.labevent_id,
-            l.stay_id,
             l.itemid,
             l.charttime,
             d.label,
@@ -439,46 +451,50 @@ def _query_lab_events(
             l.ref_range_upper
         FROM labevents l
         JOIN d_labitems d ON l.itemid = d.itemid
-        WHERE l.stay_id = ?
+        WHERE l.hadm_id = ?
+          AND l.charttime >= ?
+          AND l.charttime <= ?
+          AND l.valuenum IS NOT NULL
         ORDER BY l.charttime
         {limit_clause}
         """,
-        [stay_id],
+        [hadm_id, intime, outtime],
     ).fetchall()
 
     events = []
     for row in result:
         events.append({
             "labevent_id": row[0],
-            "stay_id": row[1],
-            "itemid": row[2],
-            "charttime": row[3],
-            "label": row[4],
-            "fluid": row[5],
-            "category": row[6],
-            "valuenum": row[7],
-            "valueuom": row[8],
-            "ref_range_lower": row[9],
-            "ref_range_upper": row[10],
+            "stay_id": stay_id,  # Add stay_id for downstream use
+            "itemid": row[1],
+            "charttime": row[2],
+            "label": row[3],
+            "fluid": row[4],
+            "category": row[5],
+            "valuenum": row[6],
+            "valueuom": row[7],
+            "ref_range_lower": row[8],
+            "ref_range_upper": row[9],
         })
 
     return events
 
 
 def _query_vital_events(
-    conn: duckdb.DuckDBPyConnection, stay_id: int, limit: int
+    conn: duckdb.DuckDBPyConnection, stay_data: dict, limit: int
 ) -> list[dict]:
     """Query vital sign events for an ICU stay.
 
     Args:
         conn: DuckDB connection.
-        stay_id: ICU stay ID.
+        stay_data: ICU stay dictionary with stay_id.
         limit: Maximum number of events (0 = no limit).
 
     Returns:
         List of vital event dictionaries.
     """
     limit_clause = f"LIMIT {limit}" if limit > 0 else ""
+    stay_id = stay_data["stay_id"]
 
     result = conn.execute(
         f"""
@@ -492,6 +508,7 @@ def _query_vital_events(
         FROM chartevents c
         JOIN d_items d ON c.itemid = d.itemid
         WHERE c.stay_id = ?
+          AND c.valuenum IS NOT NULL
         ORDER BY c.charttime
         {limit_clause}
         """,
@@ -513,44 +530,52 @@ def _query_vital_events(
 
 
 def _query_microbiology_events(
-    conn: duckdb.DuckDBPyConnection, stay_id: int, limit: int
+    conn: duckdb.DuckDBPyConnection, stay_data: dict, limit: int
 ) -> list[dict]:
     """Query microbiology events for an ICU stay.
 
+    Filters microbiologyevents by hadm_id and charttime within ICU stay window.
+    Note: MIMIC-IV microbiologyevents doesn't have stay_id.
+
     Args:
         conn: DuckDB connection.
-        stay_id: ICU stay ID.
+        stay_data: ICU stay dictionary with hadm_id, stay_id, intime, outtime.
         limit: Maximum number of events (0 = no limit).
 
     Returns:
         List of microbiology event dictionaries.
     """
     limit_clause = f"LIMIT {limit}" if limit > 0 else ""
+    hadm_id = stay_data["hadm_id"]
+    stay_id = stay_data["stay_id"]
+    intime = stay_data["intime"]
+    outtime = stay_data["outtime"]
 
     result = conn.execute(
         f"""
         SELECT
             microevent_id,
-            stay_id,
             charttime,
             spec_type_desc,
             org_name
         FROM microbiologyevents
-        WHERE stay_id = ?
+        WHERE hadm_id = ?
+          AND charttime >= ?
+          AND charttime <= ?
         ORDER BY charttime
         {limit_clause}
         """,
-        [stay_id],
+        [hadm_id, intime, outtime],
     ).fetchall()
 
     events = []
     for row in result:
         events.append({
             "microevent_id": row[0],
-            "stay_id": row[1],
-            "charttime": row[2],
-            "spec_type_desc": row[3],
-            "org_name": row[4],
+            "stay_id": stay_id,  # Add stay_id for downstream use
+            "charttime": row[1],
+            "spec_type_desc": row[2],
+            "org_name": row[3],
         })
 
     return events

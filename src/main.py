@@ -102,6 +102,9 @@ def run_pipeline(
         icd_prefixes=settings.cohort_icd_codes,
         patients_limit=settings.patients_limit,
         biomarkers_limit=settings.biomarkers_limit,
+        vitals_limit=settings.vitals_limit,
+        diagnoses_limit=settings.diagnoses_limit,
+        skip_allen_relations=settings.skip_allen_relations,
     )
 
     result["graph_triples"] = len(graph)
@@ -284,6 +287,29 @@ def main():
         help="Maximum number of patients to process (0 = no limit)",
     )
     parser.add_argument(
+        "--biomarkers-limit",
+        type=int,
+        default=0,
+        help="Maximum biomarker events per ICU stay (0 = no limit)",
+    )
+    parser.add_argument(
+        "--vitals-limit",
+        type=int,
+        default=0,
+        help="Maximum vital events per ICU stay (0 = no limit)",
+    )
+    parser.add_argument(
+        "--diagnoses-limit",
+        type=int,
+        default=0,
+        help="Maximum diagnoses per admission (0 = no limit)",
+    )
+    parser.add_argument(
+        "--skip-allen",
+        action="store_true",
+        help="Skip Allen temporal relation computation (faster)",
+    )
+    parser.add_argument(
         "--icd-codes",
         nargs="+",
         default=["I63", "I61", "I60"],
@@ -326,15 +352,22 @@ def main():
     settings = Settings()
 
     # Override settings from CLI args
+    updates = {}
     if args.patients_limit > 0:
-        settings = settings.model_copy(
-            update={"patients_limit": args.patients_limit}
-        )
-
+        updates["patients_limit"] = args.patients_limit
+    if args.biomarkers_limit > 0:
+        updates["biomarkers_limit"] = args.biomarkers_limit
+    if args.vitals_limit > 0:
+        updates["vitals_limit"] = args.vitals_limit
+    if args.diagnoses_limit > 0:
+        updates["diagnoses_limit"] = args.diagnoses_limit
+    if args.skip_allen:
+        updates["skip_allen_relations"] = True
     if args.icd_codes:
-        settings = settings.model_copy(
-            update={"cohort_icd_codes": args.icd_codes}
-        )
+        updates["cohort_icd_codes"] = args.icd_codes
+
+    if updates:
+        settings = settings.model_copy(update=updates)
 
     # Setup paths
     paths = DEFAULT_PATHS.copy()

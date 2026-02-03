@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     readmission_window_days: int = Field(default=30)
     patients_limit: int = Field(default=0)  # 0 = no limit
     biomarkers_limit: int = Field(default=0)  # 0 = no limit
+    vitals_limit: int = Field(default=0)  # 0 = no limit
+    diagnoses_limit: int = Field(default=0)  # 0 = no limit
+    skip_allen_relations: bool = Field(default=False)  # Skip Allen relation computation
 
 
 settings = Settings()
