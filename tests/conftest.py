@@ -52,17 +52,18 @@ def synthetic_duckdb(tmp_path: Path) -> duckdb.DuckDBPyConnection:
             admittime TIMESTAMP,
             dischtime TIMESTAMP,
             admission_type VARCHAR,
-            discharge_location VARCHAR
+            discharge_location VARCHAR,
+            hospital_expire_flag INTEGER
         )
     """)
     conn.execute("""
         INSERT INTO admissions VALUES
-        (101, 1, '2150-01-15 08:00:00', '2150-01-20 14:00:00', 'EMERGENCY', 'HOME'),
-        (102, 1, '2150-02-10 10:00:00', '2150-02-15 12:00:00', 'EMERGENCY', 'HOME'),
-        (103, 2, '2151-03-01 06:00:00', '2151-03-10 16:00:00', 'ELECTIVE', 'SNF'),
-        (104, 3, '2152-05-20 14:00:00', '2152-05-25 10:00:00', 'EMERGENCY', 'HOME'),
-        (105, 4, '2150-07-01 09:00:00', '2150-07-05 11:00:00', 'URGENT', 'HOME'),
-        (106, 5, '2151-04-10 12:00:00', '2151-04-20 08:00:00', 'EMERGENCY', 'HOSPICE')
+        (101, 1, '2150-01-15 08:00:00', '2150-01-20 14:00:00', 'EMERGENCY', 'HOME', 0),
+        (102, 1, '2150-02-10 10:00:00', '2150-02-15 12:00:00', 'EMERGENCY', 'HOME', 0),
+        (103, 2, '2151-03-01 06:00:00', '2151-03-10 16:00:00', 'ELECTIVE', 'SNF', 0),
+        (104, 3, '2152-05-20 14:00:00', '2152-05-25 10:00:00', 'EMERGENCY', 'HOME', 0),
+        (105, 4, '2150-07-01 09:00:00', '2150-07-05 11:00:00', 'URGENT', 'HOME', 0),
+        (106, 5, '2151-04-10 12:00:00', '2151-04-20 08:00:00', 'EMERGENCY', 'HOSPICE', 1)
     """)
 
     # Create icustays table

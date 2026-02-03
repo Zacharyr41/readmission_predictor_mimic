@@ -43,6 +43,7 @@ htmlcov/
 .env
 
 # Data (keep structure, ignore large files)
+data/raw
 data/processed/*.duckdb
 data/features/*.parquet
 data/features/*.csv
