@@ -316,3 +316,175 @@ def patient_with_multiple_admissions() -> tuple[dict, list[dict]]:
         },
     ]
     return patient, admissions
+
+
+# ==================== Layer 2C: Clinical Event Fixtures ====================
+
+
+@pytest.fixture
+def sample_icu_stay_data() -> dict:
+    """Sample ICU stay data for testing."""
+    return {
+        "stay_id": 300,
+        "hadm_id": 200,
+        "subject_id": 100,
+        "intime": datetime(2150, 1, 1, 8, 0, 0),
+        "outtime": datetime(2150, 1, 4, 14, 0, 0),
+        "los": 3.25,
+    }
+
+
+@pytest.fixture
+def sample_biomarker_data() -> dict:
+    """Sample biomarker (lab) data for testing."""
+    return {
+        "labevent_id": 1001,
+        "stay_id": 300,
+        "itemid": 50912,
+        "charttime": datetime(2150, 1, 2, 6, 0, 0),  # Day 2
+        "label": "Creatinine",
+        "fluid": "Blood",
+        "category": "Chemistry",
+        "valuenum": 1.2,
+        "valueuom": "mg/dL",
+        "ref_range_lower": 0.7,
+        "ref_range_upper": 1.3,
+    }
+
+
+@pytest.fixture
+def sample_clinical_sign_data() -> dict:
+    """Sample clinical sign (vital) data for testing."""
+    return {
+        "stay_id": 300,
+        "itemid": 220045,
+        "charttime": datetime(2150, 1, 1, 12, 0, 0),  # Day 1
+        "label": "Heart Rate",
+        "category": "Routine Vital Signs",
+        "valuenum": 78.0,
+    }
+
+
+@pytest.fixture
+def sample_antibiotic_data() -> dict:
+    """Sample antibiotic prescription data for testing."""
+    return {
+        "hadm_id": 200,
+        "stay_id": 300,
+        "drug": "Vancomycin",
+        "starttime": datetime(2150, 1, 1, 10, 0, 0),
+        "stoptime": datetime(2150, 1, 3, 10, 0, 0),
+        "dose_val_rx": 1000.0,
+        "dose_unit_rx": "mg",
+        "route": "IV",
+    }
+
+
+@pytest.fixture
+def sample_diagnosis_data() -> dict:
+    """Sample diagnosis data for testing."""
+    return {
+        "hadm_id": 200,
+        "seq_num": 1,
+        "icd_code": "I63.0",
+        "icd_version": 10,
+        "long_title": "Cerebral infarction due to thrombosis of precerebral arteries",
+    }
+
+
+@pytest.fixture
+def sample_comorbidity_data() -> dict:
+    """Sample comorbidity data for testing."""
+    return {
+        "subject_id": 100,
+        "name": "diabetes",
+        "value": True,
+    }
+
+
+@pytest.fixture
+def full_patient_with_events() -> dict:
+    """Complete patient data with all event types for SPARQL integration test.
+
+    Patient: 1 admission, 1 ICU stay (3 days), 2 biomarkers, 1 vital, 1 antibiotic, 1 diagnosis.
+    """
+    return {
+        "patient": {"subject_id": 500, "gender": "M", "anchor_age": 70},
+        "admission": {
+            "hadm_id": 501,
+            "subject_id": 500,
+            "admittime": datetime(2150, 3, 1, 6, 0, 0),
+            "dischtime": datetime(2150, 3, 10, 12, 0, 0),
+            "admission_type": "EMERGENCY",
+            "discharge_location": "HOME",
+            "readmitted_30d": False,
+            "readmitted_60d": False,
+        },
+        "icu_stay": {
+            "stay_id": 502,
+            "hadm_id": 501,
+            "subject_id": 500,
+            "intime": datetime(2150, 3, 1, 8, 0, 0),
+            "outtime": datetime(2150, 3, 4, 8, 0, 0),  # Exactly 3 days
+            "los": 3.0,
+        },
+        "biomarkers": [
+            {
+                "labevent_id": 5001,
+                "stay_id": 502,
+                "itemid": 50912,
+                "charttime": datetime(2150, 3, 1, 10, 0, 0),  # Day 1
+                "label": "Creatinine",
+                "fluid": "Blood",
+                "category": "Chemistry",
+                "valuenum": 1.1,
+                "valueuom": "mg/dL",
+                "ref_range_lower": 0.7,
+                "ref_range_upper": 1.3,
+            },
+            {
+                "labevent_id": 5002,
+                "stay_id": 502,
+                "itemid": 50971,
+                "charttime": datetime(2150, 3, 2, 8, 0, 0),  # Day 2
+                "label": "Sodium",
+                "fluid": "Blood",
+                "category": "Chemistry",
+                "valuenum": 140.0,
+                "valueuom": "mEq/L",
+                "ref_range_lower": 136.0,
+                "ref_range_upper": 145.0,
+            },
+        ],
+        "vitals": [
+            {
+                "stay_id": 502,
+                "itemid": 220045,
+                "charttime": datetime(2150, 3, 1, 12, 0, 0),  # Day 1
+                "label": "Heart Rate",
+                "category": "Routine Vital Signs",
+                "valuenum": 82.0,
+            },
+        ],
+        "antibiotics": [
+            {
+                "hadm_id": 501,
+                "stay_id": 502,
+                "drug": "Vancomycin",
+                "starttime": datetime(2150, 3, 1, 10, 0, 0),
+                "stoptime": datetime(2150, 3, 3, 10, 0, 0),
+                "dose_val_rx": 1000.0,
+                "dose_unit_rx": "mg",
+                "route": "IV",
+            },
+        ],
+        "diagnoses": [
+            {
+                "hadm_id": 501,
+                "seq_num": 1,
+                "icd_code": "I63.0",
+                "icd_version": 10,
+                "long_title": "Cerebral infarction due to thrombosis of precerebral arteries",
+            },
+        ],
+    }

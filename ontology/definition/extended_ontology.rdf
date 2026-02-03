@@ -141,4 +141,146 @@
         <rdfs:comment>Whether the patient died during this hospital admission.</rdfs:comment>
     </owl:DatatypeProperty>
 
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Additional Properties for Clinical Events (Layer 2C)
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- Object Properties -->
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDiagnosis -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDiagnosis">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent"/>
+        <rdfs:comment>Links a hospital admission to its diagnoses.</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#diagnosisOf -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#diagnosisOf">
+        <owl:inverseOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDiagnosis"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:comment>Links a diagnosis to the hospital admission (inverse of hasDiagnosis).</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!-- Datatype Properties -->
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasItemId -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasItemId">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:comment>The item identifier from the MIMIC-IV dictionary tables (d_items, d_labitems).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasFluid -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasFluid">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BioMarkerEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The body fluid tested (e.g., Blood, Urine).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDrugName -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDrugName">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The name of the prescribed drug.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseValue -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseValue">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+        <rdfs:comment>The numeric dose value of the prescription.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseUnit -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseUnit">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The unit of the dose (e.g., mg, g, mL).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRoute -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRoute">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The route of administration (e.g., IV, PO, IM).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasIcdCode -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasIcdCode">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The ICD diagnosis code.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasIcdVersion -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasIcdVersion">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:comment>The ICD version (9 or 10).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasLongTitle -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasLongTitle">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The long title description of the ICD code.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasSequenceNumber -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasSequenceNumber">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:comment>The sequence number indicating diagnosis priority (1 = primary).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasComorbidityName -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasComorbidityName">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Comorbidity"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The name of the comorbidity (e.g., diabetes, hypertension).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasComorbidityValue -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasComorbidityValue">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Comorbidity"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+        <rdfs:comment>Whether the patient has this comorbidity (true/false).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDayNumber -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDayNumber">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:comment>The day number within the ICU stay (1-indexed).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasOrganismName -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasOrganismName">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#MicrobiologyEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The name of the organism found in a microbiology test.</rdfs:comment>
+    </owl:DatatypeProperty>
+
 </rdf:RDF>
