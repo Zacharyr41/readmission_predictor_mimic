@@ -45,8 +45,12 @@ htmlcov/
 # Data (keep structure, ignore large files)
 data/raw
 data/processed/*.duckdb
+data/processed/*.rdf
 data/features/*.parquet
 data/features/*.csv
+
+# Generated outputs
+outputs/
 
 # Ontology outputs
 ontology/output/*.ttl
@@ -63,3 +67,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# uv lock file
+uv.lock
