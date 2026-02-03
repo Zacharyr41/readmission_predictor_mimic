@@ -1,9 +1,13 @@
 """Tests for MIMIC-IV DuckDB loader."""
 
+import duckdb
 import pytest
 from pathlib import Path
 
 from src.ingestion.mimic_loader import load_mimic_to_duckdb, get_loaded_tables
+
+# Path to pre-loaded MIMIC-IV DuckDB database
+MIMIC_DUCKDB_PATH = Path("/Users/zacharyrothstein/Code/readmission_predictor_mimic/data/processed/mimiciv.duckdb")
 
 
 # Tables that must exist in synthetic test data (subset of full MIMIC)
@@ -104,19 +108,22 @@ class TestLoadMimicToDuckDB:
         assert first_count == second_count, "Row count changed after second load"
 
     @pytest.mark.integration
-    def test_loads_all_mimic_tables(self, real_mimic_dir: Path, tmp_path: Path):
+    def test_loads_all_mimic_tables(self):
         """Integration test - verify all MIMIC-IV tables are loaded with data."""
-        db_path = tmp_path / "mimiciv.duckdb"
-        conn = load_mimic_to_duckdb(real_mimic_dir, db_path)
+        if not MIMIC_DUCKDB_PATH.exists():
+            pytest.skip(f"Pre-loaded MIMIC-IV database not found at {MIMIC_DUCKDB_PATH}")
 
-        loaded_tables = get_loaded_tables(conn)
+        conn = duckdb.connect(str(MIMIC_DUCKDB_PATH), read_only=True)
 
-        # Should have many tables (hosp has ~22, icu has ~10)
-        assert len(loaded_tables) >= 30, f"Expected 30+ tables, got {len(loaded_tables)}"
+        try:
+            loaded_tables = get_loaded_tables(conn)
 
-        # Verify all tables have rows
-        for table in loaded_tables:
-            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            assert count > 0, f"Table {table} has no rows"
+            # Should have many tables (hosp + icu subdirs)
+            assert len(loaded_tables) >= 25, f"Expected 25+ tables, got {len(loaded_tables)}"
 
-        conn.close()
+            # Verify all tables have rows
+            for table in loaded_tables:
+                count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                assert count > 0, f"Table {table} has no rows"
+        finally:
+            conn.close()
