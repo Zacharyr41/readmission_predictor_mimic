@@ -112,6 +112,141 @@ def synthetic_duckdb(tmp_path: Path) -> duckdb.DuckDBPyConnection:
 
 
 @pytest.fixture
+def synthetic_duckdb_with_events(synthetic_duckdb: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+    """Extend synthetic_duckdb with clinical event tables."""
+    conn = synthetic_duckdb
+
+    # d_labitems - lab item definitions
+    conn.execute("""
+        CREATE TABLE d_labitems (
+            itemid INTEGER PRIMARY KEY,
+            label VARCHAR,
+            fluid VARCHAR,
+            category VARCHAR
+        )
+    """)
+    conn.execute("""
+        INSERT INTO d_labitems VALUES
+        (50912, 'Creatinine', 'Blood', 'Chemistry'),
+        (50971, 'Sodium', 'Blood', 'Chemistry'),
+        (51265, 'Platelet Count', 'Blood', 'Hematology')
+    """)
+
+    # labevents - lab results
+    conn.execute("""
+        CREATE TABLE labevents (
+            labevent_id INTEGER PRIMARY KEY,
+            subject_id INTEGER,
+            hadm_id INTEGER,
+            stay_id INTEGER,
+            itemid INTEGER,
+            charttime TIMESTAMP,
+            valuenum DOUBLE,
+            valueuom VARCHAR,
+            ref_range_lower DOUBLE,
+            ref_range_upper DOUBLE
+        )
+    """)
+    conn.execute("""
+        INSERT INTO labevents VALUES
+        (1, 1, 101, 1001, 50912, '2150-01-16 06:00:00', 1.2, 'mg/dL', 0.7, 1.3),
+        (2, 1, 101, 1001, 50971, '2150-01-16 06:00:00', 140.0, 'mEq/L', 136.0, 145.0),
+        (3, 2, 103, 1002, 50912, '2151-03-03 08:00:00', 0.9, 'mg/dL', 0.7, 1.3),
+        (4, 5, 106, 1003, 50912, '2151-04-12 10:00:00', 1.5, 'mg/dL', 0.7, 1.3)
+    """)
+
+    # d_items - chartevents item definitions
+    conn.execute("""
+        CREATE TABLE d_items (
+            itemid INTEGER PRIMARY KEY,
+            label VARCHAR,
+            category VARCHAR
+        )
+    """)
+    conn.execute("""
+        INSERT INTO d_items VALUES
+        (220045, 'Heart Rate', 'Routine Vital Signs'),
+        (220179, 'Non Invasive Blood Pressure systolic', 'Routine Vital Signs'),
+        (220180, 'Non Invasive Blood Pressure diastolic', 'Routine Vital Signs')
+    """)
+
+    # chartevents - vital signs
+    conn.execute("""
+        CREATE TABLE chartevents (
+            subject_id INTEGER,
+            hadm_id INTEGER,
+            stay_id INTEGER,
+            itemid INTEGER,
+            charttime TIMESTAMP,
+            valuenum DOUBLE
+        )
+    """)
+    conn.execute("""
+        INSERT INTO chartevents VALUES
+        (1, 101, 1001, 220045, '2150-01-16 08:00:00', 78.0),
+        (1, 101, 1001, 220179, '2150-01-16 08:00:00', 120.0),
+        (2, 103, 1002, 220045, '2151-03-03 10:00:00', 82.0),
+        (5, 106, 1003, 220045, '2151-04-12 12:00:00', 95.0)
+    """)
+
+    # microbiologyevents - culture results
+    conn.execute("""
+        CREATE TABLE microbiologyevents (
+            microevent_id INTEGER PRIMARY KEY,
+            subject_id INTEGER,
+            hadm_id INTEGER,
+            stay_id INTEGER,
+            charttime TIMESTAMP,
+            spec_type_desc VARCHAR,
+            org_name VARCHAR
+        )
+    """)
+    conn.execute("""
+        INSERT INTO microbiologyevents VALUES
+        (1, 1, 101, 1001, '2150-01-16 12:00:00', 'BLOOD CULTURE', 'STAPHYLOCOCCUS AUREUS'),
+        (2, 2, 103, 1002, '2151-03-04 14:00:00', 'URINE', 'ESCHERICHIA COLI')
+    """)
+
+    # prescriptions - medications
+    conn.execute("""
+        CREATE TABLE prescriptions (
+            subject_id INTEGER,
+            hadm_id INTEGER,
+            starttime TIMESTAMP,
+            stoptime TIMESTAMP,
+            drug VARCHAR,
+            dose_val_rx DOUBLE,
+            dose_unit_rx VARCHAR,
+            route VARCHAR
+        )
+    """)
+    conn.execute("""
+        INSERT INTO prescriptions VALUES
+        (1, 101, '2150-01-15 12:00:00', '2150-01-18 12:00:00', 'Vancomycin', 1000.0, 'mg', 'IV'),
+        (2, 103, '2151-03-02 10:00:00', '2151-03-07 10:00:00', 'Ceftriaxone', 2000.0, 'mg', 'IV')
+    """)
+
+    # d_icd_diagnoses - diagnosis code descriptions
+    conn.execute("""
+        CREATE TABLE d_icd_diagnoses (
+            icd_code VARCHAR,
+            icd_version INTEGER,
+            long_title VARCHAR
+        )
+    """)
+    conn.execute("""
+        INSERT INTO d_icd_diagnoses VALUES
+        ('I639', 10, 'Cerebral infarction, unspecified'),
+        ('I634', 10, 'Cerebral infarction due to embolism of cerebral arteries'),
+        ('I630', 10, 'Cerebral infarction due to thrombosis of precerebral arteries'),
+        ('G409', 10, 'Epilepsy, unspecified'),
+        ('I251', 10, 'Atherosclerotic heart disease of native coronary artery')
+    """)
+
+    return conn
+
+
+@pytest.fixture
 def base_ontology_graph() -> Graph:
     """Minimal rdflib Graph with base ontology loaded."""
     g = Graph()
