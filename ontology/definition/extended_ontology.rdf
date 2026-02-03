@@ -1,0 +1,144 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://www.cnam.fr/MIMIC4-ICU-BSI/V1/"
+     xml:base="http://www.cnam.fr/MIMIC4-ICU-BSI/V1/"
+     xmlns:V1="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:time="http://www.w3.org/2006/time#">
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Extended Ontology for Hospital Readmission Prediction
+    // Adds HospitalAdmission class and readmission-related properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2006/time#Interval"/>
+        <rdfs:comment>A hospital admission episode, representing a patient's stay from admission to discharge.</rdfs:comment>
+    </owl:Class>
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmission -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmission">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:comment>Links a patient to their hospital admissions.</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#admissionOf -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#admissionOf">
+        <owl:inverseOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmission"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:comment>Links a hospital admission to its patient (inverse of hasAdmission).</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#followedBy -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#followedBy">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:comment>Links a hospital admission to a subsequent admission (readmission).</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#containsICUStay -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#containsICUStay">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+        <rdfs:comment>Links a hospital admission to ICU stays that occurred during it.</rdfs:comment>
+    </owl:ObjectProperty>
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Datatype Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmissionId -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmissionId">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:comment>The unique hospital admission identifier (hadm_id).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDischargeLocation -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDischargeLocation">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The discharge location (e.g., HOME, SNF, HOSPICE).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmissionType -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAdmissionType">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The type of admission (e.g., EMERGENCY, ELECTIVE, URGENT).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#readmittedWithin30Days -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#readmittedWithin30Days">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+        <rdfs:comment>Whether the patient was readmitted within 30 days of discharge.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#readmittedWithin60Days -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#readmittedWithin60Days">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+        <rdfs:comment>Whether the patient was readmitted within 60 days of discharge.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#daysToReadmission -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#daysToReadmission">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:comment>Number of days until next readmission (NULL if no readmission).</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hospitalExpireFlag -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hospitalExpireFlag">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#HospitalAdmission"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+        <rdfs:comment>Whether the patient died during this hospital admission.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+</rdf:RDF>

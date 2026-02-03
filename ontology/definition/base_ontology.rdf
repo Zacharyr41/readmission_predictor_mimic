@@ -1,0 +1,498 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://www.cnam.fr/MIMIC4-ICU-BSI/V1/"
+     xml:base="http://www.cnam.fr/MIMIC4-ICU-BSI/V1/"
+     xmlns:V1="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:skos="http://www.w3.org/2004/02/skos/core#"
+     xmlns:time="http://www.w3.org/2006/time#"
+     xmlns:terms="http://purl.org/dc/terms/">
+  
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#associatedWithICUDay -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#associatedWithICUDay">
+        <owl:inverseOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUDayEvent"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#associatedWithICUStay -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#associatedWithICUStay">
+        <owl:inverseOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUStayEvent"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#concernsPatient -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#concernsPatient">
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#cultureResult -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#cultureResult">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#MicrobiologyEvent"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#CultureResult"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAntibioticTest -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAntibioticTest">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#MicrobiologyEvent"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticTest"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasComorbidity -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasComorbidity">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Comorbidity"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasEvent -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasEvent">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUDay -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUDay">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUDayEvent -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUDayEvent">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUStay -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUStay">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUStayEvent -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasICUStayEvent">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasSpecimenType -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasSpecimenType"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasTestInterpretation -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasTestInterpretation">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticTest"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Interpretation"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#oragnismFound -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#oragnismFound">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#MicrobiologyEvent"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Organism"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#partOf -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#partOf">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#testedAntibiotic -->
+
+    <owl:ObjectProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#testedAntibiotic">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticTest"/>
+        <rdfs:range rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Antibiotic"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAge -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasAge">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasBiomarkerType -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasBiomarkerType"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasCategory -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasCategory"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasClinicalSignName -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasClinicalSignName">
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasGender -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasGender">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRefRangeLower -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRefRangeLower">
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRefRangeUpper -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRefRangeUpper">
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasStayId -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasStayId">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasSubjectId -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasSubjectId">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasUnit -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasUnit"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasValue -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasValue">
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#isSepsis -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#isSepsis">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICDCode"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Antibiotic -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Antibiotic"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent">
+        <rdfs:subClassOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticTest -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticTest"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BioMarkerEvent -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BioMarkerEvent">
+        <rdfs:subClassOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BiomarkerCategory -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BiomarkerCategory"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BiomarkerType -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#BiomarkerType"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ClinicalSignCategory -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ClinicalSignCategory"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ClinicalSignEvent -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ClinicalSignEvent">
+        <rdfs:subClassOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ClinicalSignType -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ClinicalSignType"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Comorbidity -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Comorbidity"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#CultureResult -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#CultureResult"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#DiagnosisEvent">
+        <rdfs:subClassOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2006/time#TemporalEntity"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICDCode -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICDCode"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDay">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2006/time#Interval"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2006/time#Interval"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStayDuration -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStayDuration">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2006/time#Duration"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Interpretation -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Interpretation"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#MicrobiologyEvent -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#MicrobiologyEvent">
+        <rdfs:subClassOf rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Event"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Organism -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Organism"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Patient">
+        <rdfs:comment>Patient in ICU</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#SpecimenType -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#SpecimenType"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Unit -->
+
+    <owl:Class rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#Unit"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#CategoryEvent_RoutineVitalSigns -->
+
+    <owl:NamedIndividual rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#CategoryEvent_RoutineVitalSigns"/>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDayBegin_10000690_37081114_001 -->
+
+    <owl:NamedIndividual rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDayBegin_10000690_37081114_001">
+        <time:inXSDDateTimeStamp rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTimeStamp">2150-11-02T00:00:00.000Z</time:inXSDDateTimeStamp>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDayEnd_10000690_37081114_001 -->
+
+    <owl:NamedIndividual rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUDayEnd_10000690_37081114_001">
+        <time:inXSDDateTimeStamp rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTimeStamp">2150-11-02T23:59:59.000Z</time:inXSDDateTimeStamp>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay_Begin_10000690_37081114 -->
+
+    <owl:NamedIndividual rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay_Begin_10000690_37081114">
+        <time:inXSDDateTimeStamp rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTimeStamp">2150-11-02T19:37:00.000Z</time:inXSDDateTimeStamp>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay_End_10000690_37081114 -->
+
+    <owl:NamedIndividual rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#ICUStay_End_10000690_37081114">
+        <time:inXSDDateTimeStamp rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTimeStamp">2150-11-06T17:03:17.000Z</time:inXSDDateTimeStamp>
+    </owl:NamedIndividual>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29.2024-05-13T12:11:03Z) https://github.com/owlcs/owlapi -->
+
