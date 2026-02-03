@@ -4,7 +4,14 @@ from datetime import datetime
 from pathlib import Path
 from rdflib import Graph, Namespace, RDF, RDFS, OWL
 from config.settings import Settings
-from src.graph_construction.ontology import initialize_graph
+from src.graph_construction.ontology import initialize_graph, MIMIC_NS
+from src.graph_construction.patient_writer import write_patient, write_admission
+from src.graph_construction.event_writers import (
+    write_icu_stay,
+    write_icu_days,
+    write_biomarker_event,
+    write_clinical_sign_event,
+)
 
 
 # Path to real MIMIC-IV data
@@ -623,3 +630,157 @@ def full_patient_with_events() -> dict:
             },
         ],
     }
+
+
+# ==================== Layer 3: Graph Analysis Fixtures ====================
+
+
+@pytest.fixture
+def synthetic_analysis_graph(graph_with_ontology: Graph) -> Graph:
+    """Graph with known structure for graph analysis tests.
+
+    Structure:
+    - 2 Patients (PA-1, PA-2)
+    - 2 HospitalAdmissions (HA-1, HA-2)
+    - 2 ICUStays (IS-1, IS-2) with 3-day LOS spanning 4 calendar days = 8 ICUDays
+    - 6 Events: 4 BioMarkerEvents + 2 ClinicalSignEvents (3 per stay)
+    """
+    g = graph_with_ontology
+
+    # Patient 1 data
+    patient1 = {"subject_id": 1, "gender": "M", "anchor_age": 65}
+    admission1 = {
+        "hadm_id": 1,
+        "subject_id": 1,
+        "admittime": datetime(2150, 1, 1, 8, 0, 0),
+        "dischtime": datetime(2150, 1, 10, 14, 0, 0),
+        "admission_type": "EMERGENCY",
+        "discharge_location": "HOME",
+        "readmitted_30d": False,
+        "readmitted_60d": False,
+    }
+    icu_stay1 = {
+        "stay_id": 1,
+        "hadm_id": 1,
+        "subject_id": 1,
+        "intime": datetime(2150, 1, 1, 10, 0, 0),
+        "outtime": datetime(2150, 1, 4, 10, 0, 0),  # 3 days
+        "los": 3.0,
+    }
+
+    # Patient 2 data
+    patient2 = {"subject_id": 2, "gender": "F", "anchor_age": 55}
+    admission2 = {
+        "hadm_id": 2,
+        "subject_id": 2,
+        "admittime": datetime(2150, 2, 1, 6, 0, 0),
+        "dischtime": datetime(2150, 2, 10, 12, 0, 0),
+        "admission_type": "ELECTIVE",
+        "discharge_location": "SNF",
+        "readmitted_30d": True,
+        "readmitted_60d": True,
+    }
+    icu_stay2 = {
+        "stay_id": 2,
+        "hadm_id": 2,
+        "subject_id": 2,
+        "intime": datetime(2150, 2, 2, 8, 0, 0),
+        "outtime": datetime(2150, 2, 5, 8, 0, 0),  # 3 days
+        "los": 3.0,
+    }
+
+    # Write patients and admissions
+    patient1_uri = write_patient(g, patient1)
+    admission1_uri = write_admission(g, admission1, patient1_uri)
+
+    patient2_uri = write_patient(g, patient2)
+    admission2_uri = write_admission(g, admission2, patient2_uri)
+
+    # Write ICU stays and days
+    icu_stay1_uri = write_icu_stay(g, icu_stay1, admission1_uri)
+    icu_day_metadata1 = write_icu_days(g, icu_stay1, icu_stay1_uri)
+
+    icu_stay2_uri = write_icu_stay(g, icu_stay2, admission2_uri)
+    icu_day_metadata2 = write_icu_days(g, icu_stay2, icu_stay2_uri)
+
+    # Write events for ICU stay 1: 2 BioMarkerEvents, 1 ClinicalSignEvent
+    biomarker1_1 = {
+        "labevent_id": 1001,
+        "stay_id": 1,
+        "itemid": 50912,
+        "charttime": datetime(2150, 1, 1, 12, 0, 0),  # Day 1
+        "label": "Creatinine",
+        "fluid": "Blood",
+        "category": "Chemistry",
+        "valuenum": 1.2,
+        "valueuom": "mg/dL",
+        "ref_range_lower": 0.7,
+        "ref_range_upper": 1.3,
+    }
+    biomarker1_2 = {
+        "labevent_id": 1002,
+        "stay_id": 1,
+        "itemid": 50971,
+        "charttime": datetime(2150, 1, 2, 8, 0, 0),  # Day 2
+        "label": "Sodium",
+        "fluid": "Blood",
+        "category": "Chemistry",
+        "valuenum": 140.0,
+        "valueuom": "mEq/L",
+        "ref_range_lower": 136.0,
+        "ref_range_upper": 145.0,
+    }
+    vital1 = {
+        "stay_id": 1,
+        "itemid": 220045,
+        "charttime": datetime(2150, 1, 3, 10, 0, 0),  # Day 3
+        "label": "Heart Rate",
+        "category": "Routine Vital Signs",
+        "valuenum": 78.0,
+    }
+
+    write_biomarker_event(g, biomarker1_1, icu_stay1_uri, icu_day_metadata1)
+    write_biomarker_event(g, biomarker1_2, icu_stay1_uri, icu_day_metadata1)
+    write_clinical_sign_event(g, vital1, icu_stay1_uri, icu_day_metadata1)
+
+    # Write events for ICU stay 2: 2 BioMarkerEvents, 1 ClinicalSignEvent
+    biomarker2_1 = {
+        "labevent_id": 2001,
+        "stay_id": 2,
+        "itemid": 50912,
+        "charttime": datetime(2150, 2, 2, 10, 0, 0),  # Day 1
+        "label": "Creatinine",
+        "fluid": "Blood",
+        "category": "Chemistry",
+        "valuenum": 0.9,
+        "valueuom": "mg/dL",
+        "ref_range_lower": 0.7,
+        "ref_range_upper": 1.3,
+    }
+    biomarker2_2 = {
+        "labevent_id": 2002,
+        "stay_id": 2,
+        "itemid": 51265,
+        "charttime": datetime(2150, 2, 3, 6, 0, 0),  # Day 2
+        "label": "Platelet Count",
+        "fluid": "Blood",
+        "category": "Hematology",
+        "valuenum": 200.0,
+        "valueuom": "K/uL",
+        "ref_range_lower": 150.0,
+        "ref_range_upper": 400.0,
+    }
+    vital2 = {
+        "stay_id": 2,
+        "itemid": 220179,
+        "charttime": datetime(2150, 2, 4, 12, 0, 0),  # Day 3
+        "label": "Non Invasive Blood Pressure systolic",
+        "category": "Routine Vital Signs",
+        "valuenum": 120.0,
+    }
+
+    write_biomarker_event(g, biomarker2_1, icu_stay2_uri, icu_day_metadata2)
+    write_biomarker_event(g, biomarker2_2, icu_stay2_uri, icu_day_metadata2)
+    write_clinical_sign_event(g, vital2, icu_stay2_uri, icu_day_metadata2)
+
+    return g
