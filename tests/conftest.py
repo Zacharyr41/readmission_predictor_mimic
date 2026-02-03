@@ -1,8 +1,10 @@
 import pytest
 import duckdb
+from datetime import datetime
 from pathlib import Path
 from rdflib import Graph, Namespace, RDF, RDFS, OWL
 from config.settings import Settings
+from src.graph_construction.ontology import initialize_graph
 
 
 # Path to real MIMIC-IV data
@@ -254,3 +256,63 @@ def real_mimic_dir() -> Path:
     if not REAL_MIMIC_IV_PATH.exists():
         pytest.skip(f"MIMIC-IV data not found at {REAL_MIMIC_IV_PATH}")
     return REAL_MIMIC_IV_PATH
+
+
+# Path to ontology files
+ONTOLOGY_DIR = Path(__file__).parent.parent / "ontology" / "definition"
+
+
+@pytest.fixture
+def graph_with_ontology() -> Graph:
+    """Graph with both base and extended ontologies loaded."""
+    return initialize_graph(ONTOLOGY_DIR)
+
+
+@pytest.fixture
+def sample_patient_data() -> dict:
+    """Sample patient data for testing."""
+    return {"subject_id": 100, "gender": "M", "anchor_age": 65}
+
+
+@pytest.fixture
+def sample_admission_data() -> dict:
+    """Sample admission data for testing."""
+    return {
+        "hadm_id": 200,
+        "subject_id": 100,
+        "admittime": datetime(2150, 1, 1, 8, 0, 0),
+        "dischtime": datetime(2150, 1, 10, 14, 0, 0),
+        "admission_type": "EMERGENCY",
+        "discharge_location": "HOME",
+        "readmitted_30d": True,
+        "readmitted_60d": True,
+    }
+
+
+@pytest.fixture
+def patient_with_multiple_admissions() -> tuple[dict, list[dict]]:
+    """Patient with 2 admissions for followedBy test."""
+    patient = {"subject_id": 300, "gender": "F", "anchor_age": 55}
+    admissions = [
+        {
+            "hadm_id": 301,
+            "subject_id": 300,
+            "admittime": datetime(2150, 1, 1, 8, 0, 0),
+            "dischtime": datetime(2150, 1, 5, 14, 0, 0),
+            "admission_type": "EMERGENCY",
+            "discharge_location": "HOME",
+            "readmitted_30d": True,
+            "readmitted_60d": True,
+        },
+        {
+            "hadm_id": 302,
+            "subject_id": 300,
+            "admittime": datetime(2150, 1, 20, 10, 0, 0),
+            "dischtime": datetime(2150, 1, 25, 12, 0, 0),
+            "admission_type": "URGENT",
+            "discharge_location": "SNF",
+            "readmitted_30d": False,
+            "readmitted_60d": False,
+        },
+    ]
+    return patient, admissions
