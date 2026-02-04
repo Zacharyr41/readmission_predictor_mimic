@@ -100,9 +100,20 @@ def _extract_labels(graph: Graph) -> pd.DataFrame:
 def _fill_missing_values(df: pd.DataFrame, label_cols: list[str]) -> pd.DataFrame:
     """Fill missing values with appropriate defaults.
 
-    Strategy:
-    - Count/boolean columns: fill with 0
-    - Continuous columns: fill with median
+    Missing value handling strategy based on clinical domain knowledge:
+
+    1. Count/binary features (fill with 0):
+       - Count columns (_count, num_, total_): Missing means no events recorded
+       - Binary indicators (has_, gender_, admission_type_, icd_chapter_): Missing
+         means the condition/category was not present
+
+    2. Continuous features (fill with median):
+       - Lab values, vital statistics: Use cohort median to avoid introducing
+         extreme values that could bias the model
+       - If median is NaN (all values missing), default to 0
+
+    This approach preserves the clinical interpretation of missing data while
+    avoiding information leakage from future/test data.
 
     Args:
         df: DataFrame with potential missing values.
@@ -114,22 +125,27 @@ def _fill_missing_values(df: pd.DataFrame, label_cols: list[str]) -> pd.DataFram
     df = df.copy()
 
     for col in df.columns:
+        # Skip identifiers and labels - these should never have missing values
         if col in label_cols or col in ["hadm_id", "subject_id"]:
             continue
 
         if df[col].isna().any():
-            # Identify column type based on name patterns
+            # Identify column type based on naming conventions
+            # Count columns: represent number of events (0 if no events)
             is_count = any(pattern in col.lower() for pattern in [
                 "_count", "num_", "has_", "total_"
             ])
+            # Binary/one-hot columns: represent categorical membership
             is_binary = any(pattern in col.lower() for pattern in [
                 "gender_", "admission_type_", "icd_chapter_"
             ])
 
             if is_count or is_binary:
+                # Missing counts/indicators imply absence (0)
                 df[col] = df[col].fillna(0)
             else:
-                # Use median for continuous features
+                # Continuous features: use median to avoid extreme value bias
+                # Example: missing lab values imputed with cohort median
                 median_val = df[col].median()
                 df[col] = df[col].fillna(median_val if not pd.isna(median_val) else 0)
 

@@ -27,46 +27,82 @@ def _classify_allen_relation(
 ) -> str | None:
     """Pure function: classify Allen relation between two intervals.
 
-    For instants, start == end.
+    Allen's interval algebra defines 13 possible relations between two temporal
+    intervals. This function implements the 6 most clinically relevant relations
+    for modeling event sequences in ICU stays.
+
+    Relation diagrams (time flows left to right):
+        before:   A---|     |---B      A completely precedes B
+        meets:    A---|B--------       A ends exactly when B starts
+        overlaps: A------|             A starts before B, ends during B
+                     |---B----
+        starts:   |A---|               Same start, A ends before B
+                  |----B----|
+        during:      |--A--|           A entirely contained within B
+                  |----B----|
+        finishes:        |---A|        Same end, A starts after B
+                  |----B----|
+
+    For point events (instants), start == end, and the function treats them
+    as zero-duration intervals.
 
     Args:
         a_start: Start time of interval A.
-        a_end: End time of interval A.
+        a_end: End time of interval A (equals a_start for instants).
         b_start: Start time of interval B.
-        b_end: End time of interval B.
+        b_end: End time of interval B (equals b_start for instants).
 
     Returns:
         One of: "before", "during", "overlaps", "meets", "starts", "finishes",
-        or None if no supported relation applies.
+        or None if no supported relation applies (e.g., A equals B, or
+        inverse relations like "after" which are handled by swapping A and B).
+
+    Example:
+        >>> from datetime import datetime
+        >>> t1 = datetime(2024, 1, 1, 10, 0)
+        >>> t2 = datetime(2024, 1, 1, 11, 0)
+        >>> t3 = datetime(2024, 1, 1, 12, 0)
+        >>> _classify_allen_relation(t1, t2, t2, t3)  # A meets B
+        'meets'
     """
     # A ends before B starts -> before
+    # Timeline: A---|     |---B
     if a_end < b_start:
         return "before"
 
     # A ends exactly when B starts (and A is a proper interval) -> meets
+    # Timeline: A---|B--------
+    # Note: Requires A to be a proper interval (not instant) to avoid ambiguity
     if a_end == b_start and a_start < b_start:
         return "meets"
 
     # A starts before B, A ends during B -> overlaps
+    # Timeline: A starts, then B starts, then A ends, then B ends
     if a_start < b_start < a_end < b_end:
         return "overlaps"
 
     # Same start, A ends first -> starts
+    # Both intervals begin at the same moment, but A finishes earlier
     if a_start == b_start and a_end < b_end:
         return "starts"
 
-    # A entirely within B -> during
+    # A entirely within B (proper intervals) -> during
+    # A starts after B starts AND A ends before B ends
     if b_start < a_start and a_end < b_end:
         return "during"
 
-    # A entirely within B (A is instant) -> during
+    # A is an instant occurring within interval B -> during
+    # Special case for point events (e.g., a lab result during an ICU day)
     if a_start == a_end and b_start < a_start < b_end:
         return "during"
 
     # Same end, A starts later -> finishes
+    # Both intervals end at the same moment, but A began later
     if a_end == b_end and a_start > b_start:
         return "finishes"
 
+    # No supported relation (e.g., equals, or inverse relations)
+    # Inverse relations are handled by calling this function with swapped args
     return None
 
 

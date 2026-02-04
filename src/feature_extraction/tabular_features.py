@@ -134,6 +134,14 @@ def extract_lab_summary(graph: Graph) -> pd.DataFrame:
                                 {biomarker}_max, {biomarker}_std, {biomarker}_count,
                                 {biomarker}_first, {biomarker}_last, {biomarker}_abnormal_rate
     """
+    # SPARQL query to retrieve all biomarker events with their values and reference ranges.
+    # The query joins:
+    # - HospitalAdmission to get hadm_id
+    # - ICUStay to link admission to events
+    # - BioMarkerEvent to get lab test results
+    # OPTIONAL clauses handle missing reference ranges (not all labs have them).
+    # Results are ordered chronologically within each admission/biomarker for
+    # first/last value extraction.
     query = """
     SELECT ?hadmId ?biomarkerType ?value ?refLower ?refUpper ?charttime
     WHERE {

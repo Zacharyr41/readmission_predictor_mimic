@@ -23,6 +23,14 @@ def patient_level_split(
     is performed on patient-level labels using an "any-positive" strategy:
     a patient is labeled positive if any of their admissions is positive.
 
+    This is critical for clinical prediction tasks because:
+    1. Patients with multiple admissions share latent characteristics
+    2. Having the same patient in train and test would inflate performance
+    3. Real deployment only has access to patient history, not future admissions
+
+    The split ratio is applied at the patient level, not admission level,
+    so the final admission counts may differ slightly from the specified ratios.
+
     Args:
         df: DataFrame with features, target, and subject_id columns
         target_col: Name of the target column (e.g., "readmitted_30d")
@@ -33,8 +41,23 @@ def patient_level_split(
 
     Returns:
         Tuple of (train_df, val_df, test_df) DataFrames
+
+    Raises:
+        ValueError: If stratification fails due to insufficient samples per class
+
+    Example:
+        >>> train_df, val_df, test_df = patient_level_split(
+        ...     feature_df,
+        ...     target_col="readmitted_30d",
+        ...     subject_col="subject_id"
+        ... )
+        >>> # All admissions for each patient are in exactly one split
+        >>> assert set(train_df['subject_id']).isdisjoint(test_df['subject_id'])
     """
-    # Compute patient-level labels using any-positive strategy
+    # Patient-level stratification using "any-positive" strategy:
+    # A patient is labeled positive if ANY of their admissions had the outcome.
+    # This ensures balanced class distribution across splits while keeping
+    # all of a patient's admissions together.
     patient_labels = df.groupby(subject_col)[target_col].max().reset_index()
     patient_labels.columns = [subject_col, "patient_label"]
 
