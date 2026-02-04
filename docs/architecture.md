@@ -2,6 +2,10 @@
 
 This document describes the architecture of the Temporal Knowledge Graph-Based Hospital Readmission Prediction system.
 
+## Research Foundation
+
+This implementation is based on the conceptual modeling approach for temporal knowledge graphs presented by Vannieuwenhuyze, Mimouni, and Du Mouza in ["A Conceptual Model for Discovering Implicit Temporal Knowledge in Clinical Data"](https://doi.org/10.1007/978-3-032-08620-4_6) (ER 2025). The original implementation is available at [github.com/avannieuwenhuyze/clinical-tkg-cmls2025](https://github.com/avannieuwenhuyze/clinical-tkg-cmls2025).
+
 ## System Overview
 
 The system is organized as a 5-layer pipeline that transforms raw MIMIC-IV data into trained machine learning models for predicting 30-day hospital readmission.

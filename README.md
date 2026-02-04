@@ -348,18 +348,38 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
+This project is based on the temporal knowledge graph approach presented in:
+
+> Vannieuwenhuyze, A., Mimouni, N., & Du Mouza, C. (2025). **A Conceptual Model for Discovering Implicit Temporal Knowledge in Clinical Data**. In *Advances in Conceptual Modeling* (ER 2025), LNCS vol. 16190. Springer. [DOI: 10.1007/978-3-032-08620-4_6](https://doi.org/10.1007/978-3-032-08620-4_6)
+
+Original implementation: [github.com/avannieuwenhuyze/clinical-tkg-cmls2025](https://github.com/avannieuwenhuyze/clinical-tkg-cmls2025)
+
+Additional acknowledgments:
 - [MIMIC-IV](https://physionet.org/content/mimiciv/) - Johnson et al., PhysioNet
 - [OWL-Time](https://www.w3.org/TR/owl-time/) - W3C Time Ontology
 - [Allen's Interval Algebra](https://en.wikipedia.org/wiki/Allen%27s_interval_algebra) - James F. Allen
 
+See [docs/acknowledgements.md](docs/acknowledgements.md) for full citations and attribution.
+
 ## References
 
-If you use this work, please cite:
+If you use this work, please cite both the original research and this implementation:
 
 ```bibtex
+@inproceedings{vannieuwenhuyze2025temporal,
+  author    = {Vannieuwenhuyze, Aurélien and Mimouni, Nada and Du Mouza, Cédric},
+  title     = {A Conceptual Model for Discovering Implicit Temporal Knowledge in Clinical Data},
+  booktitle = {Advances in Conceptual Modeling},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {16190},
+  publisher = {Springer},
+  year      = {2025},
+  doi       = {10.1007/978-3-032-08620-4_6}
+}
+
 @software{readmission_predictor_mimic,
-  title = {Temporal Knowledge Graph-Based Hospital Readmission Prediction},
-  year = {2024},
-  url = {https://github.com/your-org/readmission_predictor_mimic}
+  title  = {Temporal Knowledge Graph-Based Hospital Readmission Prediction},
+  year   = {2024},
+  url    = {https://github.com/Zacharyr41/readmission_predictor_mimic}
 }
 ```

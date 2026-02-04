@@ -2,6 +2,8 @@
 
 This document describes the RDF ontology used by the Temporal Knowledge Graph for hospital readmission prediction.
 
+The ontology design follows the OWL-Time-compliant approach presented by Vannieuwenhuyze, Mimouni, and Du Mouza in ["A Conceptual Model for Discovering Implicit Temporal Knowledge in Clinical Data"](https://doi.org/10.1007/978-3-032-08620-4_6) (ER 2025). See the original implementation at [github.com/avannieuwenhuyze/clinical-tkg-cmls2025](https://github.com/avannieuwenhuyze/clinical-tkg-cmls2025).
+
 ## Namespaces
 
 The knowledge graph uses the following namespaces:
