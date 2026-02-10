@@ -1,0 +1,227 @@
+{
+  "_metadata": {
+    "source": "Manual curation of MIMIC-IV d_items vital signs to SNOMED-CT",
+    "generated": "2026-02-10",
+    "total_items": 44
+  },
+  "220045": {
+    "snomed_code": "364075005",
+    "snomed_term": "Heart rate",
+    "loinc": "8867-4"
+  },
+  "220046": {
+    "snomed_code": "364075005",
+    "snomed_term": "Heart rate alarm - high",
+    "loinc": "8867-4"
+  },
+  "220047": {
+    "snomed_code": "364075005",
+    "snomed_term": "Heart rate alarm - low",
+    "loinc": "8867-4"
+  },
+  "220050": {
+    "snomed_code": "271649006",
+    "snomed_term": "Systolic blood pressure",
+    "loinc": "8480-6"
+  },
+  "220051": {
+    "snomed_code": "271650006",
+    "snomed_term": "Diastolic blood pressure",
+    "loinc": "8462-4"
+  },
+  "220052": {
+    "snomed_code": "6797001",
+    "snomed_term": "Mean arterial pressure",
+    "loinc": "8478-0"
+  },
+  "220074": {
+    "snomed_code": "71420008",
+    "snomed_term": "Central venous pressure",
+    "loinc": "60985-9"
+  },
+  "220088": {
+    "snomed_code": "82799009",
+    "snomed_term": "Cardiac output",
+    "loinc": ""
+  },
+  "220179": {
+    "snomed_code": "271649006",
+    "snomed_term": "Non-invasive systolic blood pressure",
+    "loinc": "8480-6"
+  },
+  "220180": {
+    "snomed_code": "271650006",
+    "snomed_term": "Non-invasive diastolic blood pressure",
+    "loinc": "8462-4"
+  },
+  "220181": {
+    "snomed_code": "6797001",
+    "snomed_term": "Non-invasive mean blood pressure",
+    "loinc": "8478-0"
+  },
+  "220210": {
+    "snomed_code": "86290005",
+    "snomed_term": "Respiratory rate",
+    "loinc": "9279-1"
+  },
+  "220227": {
+    "snomed_code": "442476006",
+    "snomed_term": "Arterial oxygen saturation",
+    "loinc": "2708-6"
+  },
+  "220277": {
+    "snomed_code": "431314004",
+    "snomed_term": "Peripheral oxygen saturation",
+    "loinc": "59408-5"
+  },
+  "220339": {
+    "snomed_code": "250854009",
+    "snomed_term": "FiO2",
+    "loinc": ""
+  },
+  "220739": {
+    "snomed_code": "248263006",
+    "snomed_term": "GCS - Eye opening",
+    "loinc": "9267-6"
+  },
+  "220765": {
+    "snomed_code": "250844005",
+    "snomed_term": "Intracranial pressure",
+    "loinc": "60956-0"
+  },
+  "223761": {
+    "snomed_code": "276885007",
+    "snomed_term": "Core body temperature",
+    "loinc": "8310-5"
+  },
+  "223762": {
+    "snomed_code": "276885007",
+    "snomed_term": "Core body temperature",
+    "loinc": "8310-5"
+  },
+  "223791": {
+    "snomed_code": "225908003",
+    "snomed_term": "Pain score",
+    "loinc": ""
+  },
+  "223835": {
+    "snomed_code": "276885007",
+    "snomed_term": "Skin temperature",
+    "loinc": ""
+  },
+  "223900": {
+    "snomed_code": "248263006",
+    "snomed_term": "GCS - Verbal response",
+    "loinc": "9270-0"
+  },
+  "223901": {
+    "snomed_code": "248263006",
+    "snomed_term": "GCS - Motor response",
+    "loinc": "9268-4"
+  },
+  "224027": {
+    "snomed_code": "276885007",
+    "snomed_term": "Blood temperature",
+    "loinc": ""
+  },
+  "224421": {
+    "snomed_code": "250816004",
+    "snomed_term": "Tidal volume (set)",
+    "loinc": ""
+  },
+  "224422": {
+    "snomed_code": "86290005",
+    "snomed_term": "Respiratory rate (total)",
+    "loinc": "9279-1"
+  },
+  "224639": {
+    "snomed_code": "27113001",
+    "snomed_term": "Body weight",
+    "loinc": "29463-7"
+  },
+  "224685": {
+    "snomed_code": "250816004",
+    "snomed_term": "Tidal volume",
+    "loinc": ""
+  },
+  "224686": {
+    "snomed_code": "250816004",
+    "snomed_term": "Tidal volume (observed)",
+    "loinc": ""
+  },
+  "224689": {
+    "snomed_code": "86290005",
+    "snomed_term": "Respiratory rate (spontaneous)",
+    "loinc": "9279-1"
+  },
+  "224700": {
+    "snomed_code": "250854009",
+    "snomed_term": "FiO2",
+    "loinc": ""
+  },
+  "226329": {
+    "snomed_code": "276885007",
+    "snomed_term": "Body temperature",
+    "loinc": "8310-5"
+  },
+  "226512": {
+    "snomed_code": "276885007",
+    "snomed_term": "Core body temperature",
+    "loinc": "8310-5"
+  },
+  "226531": {
+    "snomed_code": "27113001",
+    "snomed_term": "Body weight",
+    "loinc": "29463-7"
+  },
+  "226559": {
+    "snomed_code": "404231006",
+    "snomed_term": "Urine output",
+    "loinc": ""
+  },
+  "226560": {
+    "snomed_code": "404231006",
+    "snomed_term": "Urine output (Foley)",
+    "loinc": ""
+  },
+  "226561": {
+    "snomed_code": "404231006",
+    "snomed_term": "Urine output (condom catheter)",
+    "loinc": ""
+  },
+  "226584": {
+    "snomed_code": "404231006",
+    "snomed_term": "Urine output (void)",
+    "loinc": ""
+  },
+  "226730": {
+    "snomed_code": "50373000",
+    "snomed_term": "Body height",
+    "loinc": "8302-2"
+  },
+  "226846": {
+    "snomed_code": "27113001",
+    "snomed_term": "Daily weight",
+    "loinc": "29463-7"
+  },
+  "226873": {
+    "snomed_code": "250854009",
+    "snomed_term": "Inspired oxygen concentration",
+    "loinc": "3150-0"
+  },
+  "227243": {
+    "snomed_code": "86290005",
+    "snomed_term": "Respiratory rate (set)",
+    "loinc": "9279-1"
+  },
+  "228096": {
+    "snomed_code": "457441000124102",
+    "snomed_term": "Richmond Agitation-Sedation Scale score",
+    "loinc": "54635-8"
+  },
+  "228300": {
+    "snomed_code": "225908003",
+    "snomed_term": "Pain level",
+    "loinc": ""
+  }
+}

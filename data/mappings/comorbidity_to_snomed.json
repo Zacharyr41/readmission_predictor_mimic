@@ -1,0 +1,175 @@
+{
+  "_metadata": {
+    "source": "Manual curation: Charlson/Elixhauser comorbidity categories to SNOMED-CT",
+    "generated": "2026-02-10",
+    "total_comorbidities": 42
+  },
+  "aids": {
+    "snomed_code": "62479008",
+    "snomed_term": "Acquired immune deficiency syndrome"
+  },
+  "alcohol_abuse": {
+    "snomed_code": "7200002",
+    "snomed_term": "Alcoholism"
+  },
+  "atrial_fibrillation": {
+    "snomed_code": "49436004",
+    "snomed_term": "Atrial fibrillation"
+  },
+  "blood_loss_anemia": {
+    "snomed_code": "267469009",
+    "snomed_term": "Acute blood loss anemia"
+  },
+  "cancer": {
+    "snomed_code": "363346000",
+    "snomed_term": "Malignant neoplastic disease"
+  },
+  "cardiac_arrhythmia": {
+    "snomed_code": "698247007",
+    "snomed_term": "Cardiac arrhythmia"
+  },
+  "cerebrovascular_disease": {
+    "snomed_code": "62914000",
+    "snomed_term": "Cerebrovascular disease"
+  },
+  "chf": {
+    "snomed_code": "42343007",
+    "snomed_term": "Congestive heart failure"
+  },
+  "chronic_pulmonary_disease": {
+    "snomed_code": "13645005",
+    "snomed_term": "Chronic obstructive lung disease"
+  },
+  "ckd": {
+    "snomed_code": "709044004",
+    "snomed_term": "Chronic kidney disease"
+  },
+  "coagulopathy": {
+    "snomed_code": "234466008",
+    "snomed_term": "Coagulation disorder"
+  },
+  "congestive_heart_failure": {
+    "snomed_code": "42343007",
+    "snomed_term": "Congestive heart failure"
+  },
+  "connective_tissue_disease": {
+    "snomed_code": "105969002",
+    "snomed_term": "Connective tissue disease"
+  },
+  "copd": {
+    "snomed_code": "13645005",
+    "snomed_term": "Chronic obstructive lung disease"
+  },
+  "deficiency_anemia": {
+    "snomed_code": "271737000",
+    "snomed_term": "Anemia"
+  },
+  "dementia": {
+    "snomed_code": "52448006",
+    "snomed_term": "Dementia"
+  },
+  "depression": {
+    "snomed_code": "35489007",
+    "snomed_term": "Depressive disorder"
+  },
+  "diabetes": {
+    "snomed_code": "73211009",
+    "snomed_term": "Diabetes mellitus"
+  },
+  "diabetes_with_complications": {
+    "snomed_code": "73211009",
+    "snomed_term": "Diabetes mellitus with complication"
+  },
+  "diabetes_without_complications": {
+    "snomed_code": "73211009",
+    "snomed_term": "Diabetes mellitus"
+  },
+  "drug_abuse": {
+    "snomed_code": "66214007",
+    "snomed_term": "Substance abuse"
+  },
+  "epilepsy": {
+    "snomed_code": "84757009",
+    "snomed_term": "Epilepsy"
+  },
+  "fluid_electrolyte_disorder": {
+    "snomed_code": "237840007",
+    "snomed_term": "Disorder of fluid and electrolyte balance"
+  },
+  "hypertension": {
+    "snomed_code": "38341003",
+    "snomed_term": "Essential hypertension"
+  },
+  "hypertension_complicated": {
+    "snomed_code": "38341003",
+    "snomed_term": "Hypertensive disorder"
+  },
+  "hypertension_uncomplicated": {
+    "snomed_code": "38341003",
+    "snomed_term": "Essential hypertension"
+  },
+  "hypothyroidism": {
+    "snomed_code": "40930008",
+    "snomed_term": "Hypothyroidism"
+  },
+  "liver_disease": {
+    "snomed_code": "235856003",
+    "snomed_term": "Chronic liver disease"
+  },
+  "metastatic_cancer": {
+    "snomed_code": "128462008",
+    "snomed_term": "Metastatic malignant neoplasm"
+  },
+  "mild_liver_disease": {
+    "snomed_code": "235856003",
+    "snomed_term": "Chronic liver disease"
+  },
+  "moderate_severe_liver_disease": {
+    "snomed_code": "19943007",
+    "snomed_term": "Cirrhosis of liver"
+  },
+  "myocardial_infarction": {
+    "snomed_code": "22298006",
+    "snomed_term": "Myocardial infarction"
+  },
+  "obesity": {
+    "snomed_code": "414916001",
+    "snomed_term": "Obesity"
+  },
+  "paraplegia": {
+    "snomed_code": "60389000",
+    "snomed_term": "Paraplegia"
+  },
+  "peptic_ulcer_disease": {
+    "snomed_code": "13200003",
+    "snomed_term": "Peptic ulcer"
+  },
+  "peripheral_vascular_disease": {
+    "snomed_code": "400047006",
+    "snomed_term": "Peripheral vascular disease"
+  },
+  "psychosis": {
+    "snomed_code": "69322001",
+    "snomed_term": "Psychotic disorder"
+  },
+  "pulmonary_circulation_disease": {
+    "snomed_code": "233940005",
+    "snomed_term": "Pulmonary circulation disorder"
+  },
+  "renal_disease": {
+    "snomed_code": "709044004",
+    "snomed_term": "Chronic kidney disease"
+  },
+  "stroke": {
+    "snomed_code": "230690007",
+    "snomed_term": "Cerebrovascular accident"
+  },
+  "valvular_disease": {
+    "snomed_code": "368009",
+    "snomed_term": "Heart valve disorder"
+  },
+  "weight_loss": {
+    "snomed_code": "89362005",
+    "snomed_term": "Weight loss"
+  }
+}

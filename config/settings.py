@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     data_source: Literal["local", "bigquery"] = Field(default="bigquery")
     bigquery_project: str | None = Field(default=None)
 
+    # SNOMED-CT mappings
+    snomed_mappings_dir: Path | None = Field(default=Path("data/mappings"))
+
     # Cohort configuration
     cohort_icd_codes: list[str] = Field(default=["I63", "I61", "I60"])
     readmission_window_days: int = Field(default=30)

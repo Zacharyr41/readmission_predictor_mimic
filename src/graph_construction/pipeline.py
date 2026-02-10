@@ -26,6 +26,7 @@ from src.graph_construction.event_writers import (
     write_diagnosis_event,
 )
 from src.graph_construction.temporal.allen_relations import compute_allen_relations_for_patient
+from src.graph_construction.terminology import SnomedMapper
 from src.ingestion.derived_tables import (
     create_age_table,
     create_readmission_labels,
@@ -48,6 +49,7 @@ def build_graph(
     prescriptions_limit: int = 0,
     diagnoses_limit: int = 0,
     skip_allen_relations: bool = False,
+    snomed_mappings_dir: Path | None = None,
 ) -> Graph:
     """Build RDF graph from MIMIC-IV DuckDB database.
 
@@ -98,6 +100,15 @@ def build_graph(
     # Initialize graph with ontologies
     graph = initialize_graph(ontology_dir)
 
+    # Initialize SNOMED mapper (optional)
+    snomed_mapper = None
+    if snomed_mappings_dir is not None and snomed_mappings_dir.exists():
+        snomed_mapper = SnomedMapper(snomed_mappings_dir)
+        stats_info = snomed_mapper.coverage_stats()
+        logger.info(f"SNOMED mapper loaded: {stats_info}")
+    elif snomed_mappings_dir is not None:
+        logger.warning(f"SNOMED mappings directory not found: {snomed_mappings_dir}")
+
     # Statistics
     stats = {
         "patients": 0,
@@ -127,6 +138,7 @@ def build_graph(
             prescriptions_limit=prescriptions_limit,
             diagnoses_limit=diagnoses_limit,
             skip_allen_relations=skip_allen_relations,
+            snomed_mapper=snomed_mapper,
         )
 
         # Update statistics
@@ -187,6 +199,7 @@ def _process_patient(
     prescriptions_limit: int,
     diagnoses_limit: int,
     skip_allen_relations: bool = False,
+    snomed_mapper=None,
 ) -> dict[str, int]:
     """Process a single patient and their associated data.
 
@@ -263,31 +276,31 @@ def _process_patient(
             # Write lab events (biomarkers)
             lab_events = _query_lab_events(conn, stay_data, biomarkers_limit)
             for lab_data in lab_events:
-                write_biomarker_event(graph, lab_data, icu_stay_uri, icu_day_metadata)
+                write_biomarker_event(graph, lab_data, icu_stay_uri, icu_day_metadata, snomed_mapper=snomed_mapper)
                 stats["biomarkers"] += 1
 
             # Write vital events (clinical signs)
             vital_events = _query_vital_events(conn, stay_data, vitals_limit)
             for vital_data in vital_events:
-                write_clinical_sign_event(graph, vital_data, icu_stay_uri, icu_day_metadata)
+                write_clinical_sign_event(graph, vital_data, icu_stay_uri, icu_day_metadata, snomed_mapper=snomed_mapper)
                 stats["vitals"] += 1
 
             # Write microbiology events
             micro_events = _query_microbiology_events(conn, stay_data, microbiology_limit)
             for micro_data in micro_events:
-                write_microbiology_event(graph, micro_data, icu_stay_uri, icu_day_metadata)
+                write_microbiology_event(graph, micro_data, icu_stay_uri, icu_day_metadata, snomed_mapper=snomed_mapper)
                 stats["microbiology"] += 1
 
             # Write prescriptions
             prescriptions = _query_prescriptions(conn, hadm_id, prescriptions_limit)
             for rx_data in prescriptions:
-                write_prescription_event(graph, rx_data, icu_stay_uri, icu_day_metadata)
+                write_prescription_event(graph, rx_data, icu_stay_uri, icu_day_metadata, snomed_mapper=snomed_mapper)
                 stats["prescriptions"] += 1
 
         # Write diagnoses for this admission
         diagnoses = _query_diagnoses(conn, hadm_id, diagnoses_limit)
         for dx_data in diagnoses:
-            write_diagnosis_event(graph, dx_data, admission_uri)
+            write_diagnosis_event(graph, dx_data, admission_uri, snomed_mapper=snomed_mapper)
             stats["diagnoses"] += 1
 
     # Link sequential admissions

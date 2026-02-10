@@ -11,7 +11,7 @@ import re
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, XSD
 
-from src.graph_construction.ontology import MIMIC_NS, TIME_NS
+from src.graph_construction.ontology import MIMIC_NS, TIME_NS, SNOMED_NS
 
 
 def _write_instant(graph: Graph, instant_uri: URIRef, timestamp: datetime) -> URIRef:
@@ -77,6 +77,15 @@ def _slugify(text: str) -> str:
 def _timestamp_slug(timestamp: datetime) -> str:
     """Convert timestamp to compact string for URI."""
     return timestamp.strftime("%Y%m%d%H%M%S")
+
+
+def _add_snomed_triples(graph: Graph, event_uri: URIRef, snomed_concept) -> None:
+    """Add SNOMED-CT triples to an event node if concept is not None."""
+    if snomed_concept is None:
+        return
+    graph.add((event_uri, MIMIC_NS.hasSnomedCode, Literal(snomed_concept.code, datatype=XSD.string)))
+    graph.add((event_uri, MIMIC_NS.hasSnomedTerm, Literal(snomed_concept.term, datatype=XSD.string)))
+    graph.add((event_uri, MIMIC_NS.hasSnomedConcept, SNOMED_NS[snomed_concept.code]))
 
 
 # ==================== ICU Structure ====================
@@ -196,6 +205,7 @@ def write_biomarker_event(
     lab_data: dict,
     icu_stay_uri: URIRef,
     icu_day_metadata: list[tuple[URIRef, datetime, datetime]],
+    snomed_mapper=None,
 ) -> URIRef:
     """Create BioMarkerEvent as time:Instant.
 
@@ -237,6 +247,10 @@ def write_biomarker_event(
     if lab_data.get("ref_range_upper") is not None:
         graph.add((event_uri, MIMIC_NS.hasRefRangeUpper, Literal(lab_data["ref_range_upper"], datatype=XSD.decimal)))
 
+    # SNOMED-CT mapping
+    if snomed_mapper is not None:
+        _add_snomed_triples(graph, event_uri, snomed_mapper.get_snomed_for_labitem(itemid))
+
     # Link to ICU stay (bidirectional)
     graph.add((event_uri, MIMIC_NS.associatedWithICUStay, icu_stay_uri))
     graph.add((icu_stay_uri, MIMIC_NS.hasICUStayEvent, event_uri))
@@ -255,6 +269,7 @@ def write_clinical_sign_event(
     vital_data: dict,
     icu_stay_uri: URIRef,
     icu_day_metadata: list[tuple[URIRef, datetime, datetime]],
+    snomed_mapper=None,
 ) -> URIRef:
     """Create ClinicalSignEvent as time:Instant.
 
@@ -288,6 +303,10 @@ def write_clinical_sign_event(
     graph.add((event_uri, MIMIC_NS.hasCategory, Literal(vital_data["category"], datatype=XSD.string)))
     graph.add((event_uri, MIMIC_NS.hasValue, Literal(vital_data["valuenum"], datatype=XSD.decimal)))
 
+    # SNOMED-CT mapping
+    if snomed_mapper is not None:
+        _add_snomed_triples(graph, event_uri, snomed_mapper.get_snomed_for_chartitem(itemid))
+
     # Link to ICU stay (bidirectional)
     graph.add((event_uri, MIMIC_NS.associatedWithICUStay, icu_stay_uri))
     graph.add((icu_stay_uri, MIMIC_NS.hasICUStayEvent, event_uri))
@@ -306,6 +325,7 @@ def write_microbiology_event(
     micro_data: dict,
     icu_stay_uri: URIRef,
     icu_day_metadata: list[tuple[URIRef, datetime, datetime]],
+    snomed_mapper=None,
 ) -> URIRef:
     """Create MicrobiologyEvent as time:Instant.
 
@@ -337,6 +357,10 @@ def write_microbiology_event(
     if micro_data.get("org_name"):
         graph.add((event_uri, MIMIC_NS.hasOrganismName, Literal(micro_data["org_name"], datatype=XSD.string)))
 
+    # SNOMED-CT mapping (via organism name)
+    if snomed_mapper is not None and micro_data.get("org_name"):
+        _add_snomed_triples(graph, event_uri, snomed_mapper.get_snomed_for_organism(micro_data["org_name"]))
+
     # Link to ICU stay (bidirectional)
     graph.add((event_uri, MIMIC_NS.associatedWithICUStay, icu_stay_uri))
     graph.add((icu_stay_uri, MIMIC_NS.hasICUStayEvent, event_uri))
@@ -358,6 +382,7 @@ def write_prescription_event(
     rx_data: dict,
     icu_stay_uri: URIRef,
     icu_day_metadata: list[tuple[URIRef, datetime, datetime]],
+    snomed_mapper=None,
 ) -> URIRef:
     """Create PrescriptionEvent as time:ProperInterval.
 
@@ -395,6 +420,11 @@ def write_prescription_event(
 
     # Properties
     graph.add((event_uri, MIMIC_NS.hasDrugName, Literal(drug, datatype=XSD.string)))
+
+    # SNOMED-CT mapping
+    if snomed_mapper is not None:
+        _add_snomed_triples(graph, event_uri, snomed_mapper.get_snomed_for_drug(drug))
+
     if rx_data.get("dose_val_rx") is not None:
         graph.add((event_uri, MIMIC_NS.hasDoseValue, Literal(rx_data["dose_val_rx"], datatype=XSD.decimal)))
     if rx_data.get("dose_unit_rx"):
@@ -418,7 +448,7 @@ def write_prescription_event(
 # ==================== Non-temporal ====================
 
 
-def write_diagnosis_event(graph: Graph, dx_data: dict, admission_uri: URIRef) -> URIRef:
+def write_diagnosis_event(graph: Graph, dx_data: dict, admission_uri: URIRef, snomed_mapper=None) -> URIRef:
     """Create DiagnosisEvent linked to admission.
 
     Args:
@@ -445,6 +475,13 @@ def write_diagnosis_event(graph: Graph, dx_data: dict, admission_uri: URIRef) ->
     if dx_data.get("long_title"):
         graph.add((event_uri, MIMIC_NS.hasLongTitle, Literal(dx_data["long_title"], datatype=XSD.string)))
 
+    # SNOMED-CT mapping
+    if snomed_mapper is not None:
+        _add_snomed_triples(
+            graph, event_uri,
+            snomed_mapper.get_snomed_for_icd(dx_data["icd_code"], dx_data["icd_version"]),
+        )
+
     # Bidirectional link to admission
     graph.add((admission_uri, MIMIC_NS.hasDiagnosis, event_uri))
     graph.add((event_uri, MIMIC_NS.diagnosisOf, admission_uri))
@@ -452,7 +489,7 @@ def write_diagnosis_event(graph: Graph, dx_data: dict, admission_uri: URIRef) ->
     return event_uri
 
 
-def write_comorbidity(graph: Graph, comorbidity_data: dict, patient_uri: URIRef) -> URIRef:
+def write_comorbidity(graph: Graph, comorbidity_data: dict, patient_uri: URIRef, snomed_mapper=None) -> URIRef:
     """Create Comorbidity individual linked to patient.
 
     Args:
@@ -474,6 +511,10 @@ def write_comorbidity(graph: Graph, comorbidity_data: dict, patient_uri: URIRef)
     # Properties
     graph.add((comorbidity_uri, MIMIC_NS.hasComorbidityName, Literal(name, datatype=XSD.string)))
     graph.add((comorbidity_uri, MIMIC_NS.hasComorbidityValue, Literal(comorbidity_data["value"], datatype=XSD.boolean)))
+
+    # SNOMED-CT mapping
+    if snomed_mapper is not None:
+        _add_snomed_triples(graph, comorbidity_uri, snomed_mapper.get_snomed_for_comorbidity(name))
 
     # Link to patient
     graph.add((patient_uri, MIMIC_NS.hasComorbidity, comorbidity_uri))

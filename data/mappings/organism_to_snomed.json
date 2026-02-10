@@ -1,0 +1,1879 @@
+{
+  "_metadata": {
+    "source": "srdc/mimic-iv-to-fhir org-itemids-to-snomed.csv",
+    "generated": "2026-02-10",
+    "total_organisms": 468
+  },
+  "ABIOTROPHIA/GRANULICATELLA SPECIES": {
+    "snomed_code": "698214003",
+    "snomed_term": "Nutritionally variant streptococci"
+  },
+  "ACHROMOBACTER (ALCALIGENES) DENTRIFICANS": {
+    "snomed_code": "413414001",
+    "snomed_term": "Achromobacter denitrificans"
+  },
+  "ACHROMOBACTER SP.": {
+    "snomed_code": "413422008",
+    "snomed_term": "Achromobacter spanius"
+  },
+  "ACHROMOBACTER SPECIES": {
+    "snomed_code": "91620006",
+    "snomed_term": "Achromobacter species"
+  },
+  "ACHROMOBACTER XYLOSOXIDANS": {
+    "snomed_code": "413424009",
+    "snomed_term": "Achromobacter xylosoxidans"
+  },
+  "ACIDFAST BACILLI": {
+    "snomed_code": "243365003",
+    "snomed_term": "Acid-fast bacillus"
+  },
+  "ACINETOBACTER BAUMANNII": {
+    "snomed_code": "91288006",
+    "snomed_term": "Acinetobacter baumannii"
+  },
+  "ACINETOBACTER BAUMANNII COMPLEX": {
+    "snomed_code": "113376007",
+    "snomed_term": "Acinetobacter calcoaceticus-Acinetobacter baumannii complex"
+  },
+  "ACINETOBACTER LWOFFII": {
+    "snomed_code": "83088009",
+    "snomed_term": "Acinetobacter lwoffii"
+  },
+  "ACINETOBACTER SP.": {
+    "snomed_code": "7757008",
+    "snomed_term": "Acinetobacter species"
+  },
+  "ACREMONIUM SPECIES": {
+    "snomed_code": "63996006",
+    "snomed_term": "Acremonium species"
+  },
+  "ACTINOBACILLUS ACTINOMYCETEMCOMITANS": {
+    "snomed_code": "442680008",
+    "snomed_term": "Actinobacillus actinomycetemcomitans"
+  },
+  "ACTINOMYCES ISRAELII": {
+    "snomed_code": "46369004",
+    "snomed_term": "Actinomyces israelii"
+  },
+  "ACTINOMYCES ODONTOLYTICUS": {
+    "snomed_code": "12069003",
+    "snomed_term": "Schaalia odontolytica"
+  },
+  "ACTINOMYCES SP.": {
+    "snomed_code": "787887006",
+    "snomed_term": "Actinomyces species"
+  },
+  "ACTINOTIGNUM SANGUINIS": {
+    "snomed_code": "716527002",
+    "snomed_term": "Actinotignum sanguinis"
+  },
+  "ADENOVIRUS": {
+    "snomed_code": "424470006",
+    "snomed_term": "Adenovirus group"
+  },
+  "AEROCOCCUS SPECIES": {
+    "snomed_code": "9008009",
+    "snomed_term": "Aerococcus species"
+  },
+  "AEROCOCCUS URINAE": {
+    "snomed_code": "243230001",
+    "snomed_term": "Aerococcus urinae"
+  },
+  "AEROCOCCUS VIRIDANS": {
+    "snomed_code": "78803006",
+    "snomed_term": "Aerococcus viridans"
+  },
+  "AEROMONAS HYDROPHILA": {
+    "snomed_code": "85823000",
+    "snomed_term": "Aeromonas hydrophila"
+  },
+  "AEROMONAS HYDROPHILA COMPLEX": {
+    "snomed_code": "816086002",
+    "snomed_term": "Aeromonas hydrophila complex"
+  },
+  "AEROMONAS SPECIES": {
+    "snomed_code": "88529008",
+    "snomed_term": "Aeromonas species"
+  },
+  "AFB GROWN IN CULTURE": {
+    "snomed_code": "243365003",
+    "snomed_term": "Acid-fast bacillus"
+  },
+  "AGGREGATIBACTER (HAEMOPHILUS) APHROPHILUS": {
+    "snomed_code": "442683005",
+    "snomed_term": "Aggregatibacter aphrophilus"
+  },
+  "ALCALIGENES FAECALIS": {
+    "snomed_code": "25223004",
+    "snomed_term": "Alcaligenes faecalis"
+  },
+  "ALCALIGENES SPECIES": {
+    "snomed_code": "68571003",
+    "snomed_term": "Alcaligenes species"
+  },
+  "ALCALIGENES XYLOSOXIDANS": {
+    "snomed_code": "413424009",
+    "snomed_term": "Achromobacter xylosoxidans"
+  },
+  "ALPHA STREPTOCOCCI": {
+    "snomed_code": "60631002",
+    "snomed_term": "Alpha-hemolytic streptococcus"
+  },
+  "ALTERNARIA SP.": {
+    "snomed_code": "75059003",
+    "snomed_term": "Alternaria species"
+  },
+  "ANAEROBIC GRAM NEGATIVE ROD #2": {
+    "snomed_code": "243386003",
+    "snomed_term": "Anaerobic Gram-negative bacillus"
+  },
+  "ANAEROBIC GRAM NEGATIVE ROD(S)": {
+    "snomed_code": "243386003",
+    "snomed_term": "Anaerobic Gram-negative bacillus"
+  },
+  "ANAEROBIC GRAM POSITIVE COCCUS(I)": {
+    "snomed_code": "243416009",
+    "snomed_term": "Anaerobic Gram-positive coccus"
+  },
+  "ANAEROBIC GRAM POSITIVE ROD(S)": {
+    "snomed_code": "243398008",
+    "snomed_term": "Anaerobic Gram-positive rod"
+  },
+  "ASCARIS LUMBRICOIDES": {
+    "snomed_code": "19061001",
+    "snomed_term": "Ascaris lumbricoides"
+  },
+  "ASPERGILLUS FLAVUS": {
+    "snomed_code": "66821001",
+    "snomed_term": "Aspergillus flavus"
+  },
+  "ASPERGILLUS FUMIGATUS": {
+    "snomed_code": "32684000",
+    "snomed_term": "Aspergillus fumigatus"
+  },
+  "ASPERGILLUS FUMIGATUS COMPLEX": {
+    "snomed_code": "719029007",
+    "snomed_term": "Aspergillus fumigatus species complex"
+  },
+  "ASPERGILLUS NIDULANS": {
+    "snomed_code": "60264008",
+    "snomed_term": "Aspergillus nidulans"
+  },
+  "ASPERGILLUS NIGER": {
+    "snomed_code": "89354002",
+    "snomed_term": "Aspergillus niger"
+  },
+  "ASPERGILLUS SP. NOT FUMIGATUS, FLAVUS OR NIGER": {
+    "snomed_code": "719038009",
+    "snomed_term": "Aspergillus species, not Aspergillus fumigatus and not Aspergillus niger and not Aspergillus flavus"
+  },
+  "ASPERGILLUS SPECIES": {
+    "snomed_code": "2429008",
+    "snomed_term": "Aspergillus species"
+  },
+  "ASPERGILLUS TERREUS": {
+    "snomed_code": "26406003",
+    "snomed_term": "Aspergillus terreus"
+  },
+  "ASPERGILLUS VERSICOLOR GROUP": {
+    "snomed_code": "415881005",
+    "snomed_term": "Aspergillus versicolor Group"
+  },
+  "AUREOBASIDIUM PULLULANS": {
+    "snomed_code": "39129008",
+    "snomed_term": "Aureobasidium pullulans"
+  },
+  "BACILLUS CIRCULANS GROUP": {
+    "snomed_code": "413619002",
+    "snomed_term": "Bacillus circulans group"
+  },
+  "BACILLUS SPECIES": {
+    "snomed_code": "44762009",
+    "snomed_term": "Bacillus species"
+  },
+  "BACILLUS SPECIES; NOT ANTHRACIS": {
+    "snomed_code": "413352001",
+    "snomed_term": "Bacillus species not Bacillus anthracis"
+  },
+  "BACTERIA": {
+    "snomed_code": "409822003",
+    "snomed_term": "Bacteria"
+  },
+  "BACTEROIDES DOREI/VULGATUS": {
+    "snomed_code": "450957004",
+    "snomed_term": "Phocaeicola dorei"
+  },
+  "BACTEROIDES FRAGILIS": {
+    "snomed_code": "55247009",
+    "snomed_term": "Bacteroides fragilis"
+  },
+  "BACTEROIDES FRAGILIS GROUP": {
+    "snomed_code": "417375007",
+    "snomed_term": "Bacteroides fragilis group"
+  },
+  "BACTEROIDES SPECIES": {
+    "snomed_code": "57522007",
+    "snomed_term": "Bacteroides species"
+  },
+  "BEAUVERIA BASSIANA": {
+    "snomed_code": "65562008",
+    "snomed_term": "Beauveria bassiana"
+  },
+  "BETA STREP NOT GROUP A, B OR ANGINOSUS (MILLERI)": {
+    "snomed_code": "406609007",
+    "snomed_term": ""
+  },
+  "BETA STREPTOCOCCI, NOT GROUP A": {
+    "snomed_code": "713922006",
+    "snomed_term": "Beta-hemolytic Streptococcus, non-Group A"
+  },
+  "BETA STREPTOCOCCUS": {
+    "snomed_code": "53490009",
+    "snomed_term": "Beta-hemolytic streptococcus"
+  },
+  "BETA STREPTOCOCCUS GROUP A": {
+    "snomed_code": "413643004",
+    "snomed_term": "Beta-hemolytic streptococcus Group A"
+  },
+  "BETA STREPTOCOCCUS GROUP B": {
+    "snomed_code": "43492007",
+    "snomed_term": "Beta-haemolytic Streptococcus, group B"
+  },
+  "BETA STREPTOCOCCUS GROUP C": {
+    "snomed_code": "89181007",
+    "snomed_term": "Streptococcus, group C"
+  },
+  "BETA STREPTOCOCCUS GROUP G": {
+    "snomed_code": "75012005",
+    "snomed_term": "Streptococcus, group G"
+  },
+  "BETA STREPTOCOCCUS NOT GROUP A OR B": {
+    "snomed_code": "406609007",
+    "snomed_term": "Beta-hemolytic streptococcus, non-Group A, non-Group B"
+  },
+  "BLASTOCYSTIS HOMINIS": {
+    "snomed_code": "28923009",
+    "snomed_term": "Blastocystis hominis"
+  },
+  "BORDETELLA BRONCHISEPTICA": {
+    "snomed_code": "10620008",
+    "snomed_term": "Bordetella bronchiseptica"
+  },
+  "BREVIBACTERIUM CASEI": {
+    "snomed_code": "6405003",
+    "snomed_term": "Brevibacterium casei"
+  },
+  "BREVUNDIMONAS DIMINUTA/VESICULARIS": {
+    "snomed_code": "113689009",
+    "snomed_term": "Brevundimonas diminuta"
+  },
+  "BREVUNDIMONAS VESICULARIS": {
+    "snomed_code": "113690000",
+    "snomed_term": "Brevundimonas vesicularis"
+  },
+  "BURKHOLDERIA CEPACIA": {
+    "snomed_code": "113669008",
+    "snomed_term": "Burkholderia cepacia"
+  },
+  "BURKHOLDERIA CEPACIA GROUP": {
+    "snomed_code": "131281002",
+    "snomed_term": "Burkholderia cepacia complex"
+  },
+  "BURKHOLDERIA GLADIOLI": {
+    "snomed_code": "113671008",
+    "snomed_term": "Burkholderia gladioli"
+  },
+  "BURKHOLDERIA SPECIES": {
+    "snomed_code": "414324002",
+    "snomed_term": "Burkholderia species"
+  },
+  "CAMPYLOBACTER COLI": {
+    "snomed_code": "40614002",
+    "snomed_term": "Campylobacter coli"
+  },
+  "CAMPYLOBACTER JEJUNI": {
+    "snomed_code": "66543000",
+    "snomed_term": ""
+  },
+  "CAMPYLOBACTER SPECIES": {
+    "snomed_code": "35408001",
+    "snomed_term": ""
+  },
+  "CAMPYLOBACTER UREOLYTICUS": {
+    "snomed_code": "450602004",
+    "snomed_term": ""
+  },
+  "CANDIDA ALBICANS": {
+    "snomed_code": "53326005",
+    "snomed_term": ""
+  },
+  "CANDIDA ALBICANS, PRESUMPTIVE IDENTIFICATION": {
+    "snomed_code": "53326005",
+    "snomed_term": ""
+  },
+  "CANDIDA AURIS": {
+    "snomed_code": "3491000146109",
+    "snomed_term": ""
+  },
+  "CANDIDA DUBLINIENSIS": {
+    "snomed_code": "115952006",
+    "snomed_term": ""
+  },
+  "CANDIDA FAMATA": {
+    "snomed_code": "243428001",
+    "snomed_term": ""
+  },
+  "CANDIDA GLABRATA": {
+    "snomed_code": "444877006",
+    "snomed_term": ""
+  },
+  "CANDIDA GUILLIERMONDII": {
+    "snomed_code": "29812000",
+    "snomed_term": ""
+  },
+  "CANDIDA KEFYR": {
+    "snomed_code": "446237006",
+    "snomed_term": ""
+  },
+  "CANDIDA KRUSEI": {
+    "snomed_code": "16452009",
+    "snomed_term": ""
+  },
+  "CANDIDA LUSITANIAE": {
+    "snomed_code": "50164000",
+    "snomed_term": ""
+  },
+  "CANDIDA PARAPSILOSIS": {
+    "snomed_code": "61302002",
+    "snomed_term": ""
+  },
+  "CANDIDA RUGOSA": {
+    "snomed_code": "23773004",
+    "snomed_term": ""
+  },
+  "CANDIDA SPECIES": {
+    "snomed_code": "3265006",
+    "snomed_term": ""
+  },
+  "CANDIDA TROPICALIS": {
+    "snomed_code": "47885008",
+    "snomed_term": ""
+  },
+  "CAPNOCYTOPHAGA SPECIES": {
+    "snomed_code": "22294008",
+    "snomed_term": ""
+  },
+  "CARDIOBACTERIUM HOMINIS": {
+    "snomed_code": "7333005",
+    "snomed_term": ""
+  },
+  "CHAETOMIUM SPECIES": {
+    "snomed_code": "10210008",
+    "snomed_term": ""
+  },
+  "CHILOMASTIX MESNILI": {
+    "snomed_code": "41340007",
+    "snomed_term": ""
+  },
+  "CHLAMYDIA TRACHOMATIS": {
+    "snomed_code": "63938009",
+    "snomed_term": ""
+  },
+  "CHRYSEOBACTERIUM INDOLOGENES": {
+    "snomed_code": "113549008",
+    "snomed_term": ""
+  },
+  "CHRYSEOBACTERIUM MENINGOSEPTICUM": {
+    "snomed_code": "425774009",
+    "snomed_term": ""
+  },
+  "CITROBACTER AMALONATICUS": {
+    "snomed_code": "55744003",
+    "snomed_term": ""
+  },
+  "CITROBACTER FREUNDII COMPLEX": {
+    "snomed_code": "782522004",
+    "snomed_term": ""
+  },
+  "CITROBACTER KOSERI": {
+    "snomed_code": "114264004",
+    "snomed_term": ""
+  },
+  "CITROBACTER SEDLAKII": {
+    "snomed_code": "114265003",
+    "snomed_term": ""
+  },
+  "CITROBACTER SPECIES": {
+    "snomed_code": "75972000",
+    "snomed_term": ""
+  },
+  "CITROBACTER YOUNGAE": {
+    "snomed_code": "114443001",
+    "snomed_term": ""
+  },
+  "CLADOSPORIUM SPECIES": {
+    "snomed_code": "32043002",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM DIFFICILE": {
+    "snomed_code": "5933001",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM INNOCUUM": {
+    "snomed_code": "19415008",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM PERFRINGENS": {
+    "snomed_code": "8331005",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM RAMOSUM": {
+    "snomed_code": "42706008",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM SEPTICUM": {
+    "snomed_code": "33101000",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM SPECIES": {
+    "snomed_code": "8191000",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM SPECIES NOT C. PERFRINGENS OR C. SEPTICUM": {
+    "snomed_code": "715871002",
+    "snomed_term": ""
+  },
+  "CLOSTRIDIUM TERTIUM": {
+    "snomed_code": "81909005",
+    "snomed_term": ""
+  },
+  "CONIDIOBOLUS SPECIES": {
+    "snomed_code": "42178002",
+    "snomed_term": ""
+  },
+  "CORYNEBACTERIUM JEIKEIUM (C.D.C. GROUP JK)": {
+    "snomed_code": "63410006",
+    "snomed_term": ""
+  },
+  "CORYNEBACTERIUM SPECIES (DIPHTHEROIDS)": {
+    "snomed_code": "77086004",
+    "snomed_term": ""
+  },
+  "CORYNEBACTERIUM STRIATUM": {
+    "snomed_code": "63815007",
+    "snomed_term": ""
+  },
+  "CORYNEBACTERIUM UREALYTICUM SP. NOV.": {
+    "snomed_code": "113613004",
+    "snomed_term": ""
+  },
+  "CRONOBACTER (ENTEROBACTER) SAKAZAKII": {
+    "snomed_code": "445562004",
+    "snomed_term": ""
+  },
+  "CRYPTOCOCCUS NEOFORMANS": {
+    "snomed_code": "67168003",
+    "snomed_term": ""
+  },
+  "CRYPTOSPORIDIUM PARVUM OOCYSTS SEEN": {
+    "snomed_code": "51504002",
+    "snomed_term": ""
+  },
+  "CUNNINGHAMELLA BERTHOLLETIAE": {
+    "snomed_code": "60182000",
+    "snomed_term": ""
+  },
+  "CUPRIAVIDUS PAUCULUS": {
+    "snomed_code": "429465001",
+    "snomed_term": ""
+  },
+  "CURVULARIA SP.": {
+    "snomed_code": "5214001",
+    "snomed_term": ""
+  },
+  "CUTIBACTERIUM (PROPIONIBACTERIUM) ACNES": {
+    "snomed_code": "39473003",
+    "snomed_term": ""
+  },
+  "CUTIBACTERIUM ACNES": {
+    "snomed_code": "39473003",
+    "snomed_term": ""
+  },
+  "CUTIBACTERIUM SPECIES": {
+    "snomed_code": "763051006",
+    "snomed_term": ""
+  },
+  "CYCLOSPORA SPECIES": {
+    "snomed_code": "103560006",
+    "snomed_term": ""
+  },
+  "CYTOMEGALOVIRUS": {
+    "snomed_code": "407444007",
+    "snomed_term": ""
+  },
+  "DELFTIA ACIDOVORANS": {
+    "snomed_code": "20432002",
+    "snomed_term": ""
+  },
+  "DEMATIACEOUS MOLD": {
+    "snomed_code": "20911002",
+    "snomed_term": ""
+  },
+  "DIENTAMOEBA FRAGILIS": {
+    "snomed_code": "41542000",
+    "snomed_term": ""
+  },
+  "EDWARDSIELLA TARDA": {
+    "snomed_code": "74672006",
+    "snomed_term": ""
+  },
+  "EIKENELLA CORRODENS": {
+    "snomed_code": "52591004",
+    "snomed_term": ""
+  },
+  "ELIZABETHKINGIA (CHRYSEOBACTERIUM) MENIGOSEPTICA": {
+    "snomed_code": "425774009",
+    "snomed_term": ""
+  },
+  "EMMONSIA SPECIES": {
+    "snomed_code": "780915007",
+    "snomed_term": ""
+  },
+  "ENDOLIMAX NANA": {
+    "snomed_code": "53272006",
+    "snomed_term": ""
+  },
+  "ENTAMOEBA COLI": {
+    "snomed_code": "79235009",
+    "snomed_term": ""
+  },
+  "ENTAMOEBA HARTMANNI": {
+    "snomed_code": "70632005",
+    "snomed_term": ""
+  },
+  "ENTAMOEBA HISTOLYTICA/DISPAR": {
+    "snomed_code": "4716008",
+    "snomed_term": ""
+  },
+  "ENTAMOEBA SP.": {
+    "snomed_code": "38324000",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER AEROGENES": {
+    "snomed_code": "62592009",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER AMNIGENUS 2": {
+    "snomed_code": "114453000",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER ASBURIAE": {
+    "snomed_code": "33115003",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER CANCEROGENUS": {
+    "snomed_code": "114451003",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER CLOACAE": {
+    "snomed_code": "14385002",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER CLOACAE COMPLEX": {
+    "snomed_code": "414102007",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER GERGOVIAE": {
+    "snomed_code": "716346000",
+    "snomed_term": ""
+  },
+  "ENTEROBACTER SPECIES": {
+    "snomed_code": "58683007",
+    "snomed_term": ""
+  },
+  "ENTEROBACTERIACEAE": {
+    "snomed_code": "106544002",
+    "snomed_term": ""
+  },
+  "ENTEROBIUS VERMICULARIS": {
+    "snomed_code": "55008000",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS AVIUM": {
+    "snomed_code": "87875008",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS CASSELIFLAVUS": {
+    "snomed_code": "30949009",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS DURANS": {
+    "snomed_code": "46464008",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS FAECALIS": {
+    "snomed_code": "78065002",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS FAECIUM": {
+    "snomed_code": "90272000",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS GALLINARUM": {
+    "snomed_code": "53233007",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS HIRAE": {
+    "snomed_code": "73852008",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS RAFFINOSUS": {
+    "snomed_code": "103437000",
+    "snomed_term": ""
+  },
+  "ENTEROCOCCUS SP.": {
+    "snomed_code": "2785000",
+    "snomed_term": ""
+  },
+  "ENTEROVIRUS": {
+    "snomed_code": "243633006",
+    "snomed_term": ""
+  },
+  "ERYSIPELOTHRIX RHUSIOPATHIAE": {
+    "snomed_code": "48666005",
+    "snomed_term": ""
+  },
+  "ESCHERICHIA COLI": {
+    "snomed_code": "112283007",
+    "snomed_term": ""
+  },
+  "ESCHERICHIA FERGUSONII": {
+    "snomed_code": "72461005",
+    "snomed_term": ""
+  },
+  "ESCHERICHIA SPECIES": {
+    "snomed_code": "64735005",
+    "snomed_term": ""
+  },
+  "EXOPHIALA (WANGIELLA) DERMATITIDIS": {
+    "snomed_code": "20586007",
+    "snomed_term": ""
+  },
+  "EXOPHIALA JEANSELMEI COMPLEX": {
+    "snomed_code": "38224003",
+    "snomed_term": ""
+  },
+  "EXOPHIALA SPECIES": {
+    "snomed_code": "12210004",
+    "snomed_term": ""
+  },
+  "FEW BLASTOCYSTIS HOMINIS": {
+    "snomed_code": "28923009",
+    "snomed_term": ""
+  },
+  "FINEGOLDIA (PEPTOSTREPTOCOCCUS) SPECIES": {
+    "snomed_code": "417248002",
+    "snomed_term": ""
+  },
+  "FONSECAEA PEDROSOI": {
+    "snomed_code": "69356007",
+    "snomed_term": ""
+  },
+  "FUNGUS": {
+    "snomed_code": "414561005",
+    "snomed_term": ""
+  },
+  "FUSARIUM SPECIES": {
+    "snomed_code": "35238009",
+    "snomed_term": ""
+  },
+  "FUSOBACTERIUM NUCLEATUM": {
+    "snomed_code": "32763000",
+    "snomed_term": ""
+  },
+  "FUSOBACTERIUM SPECIES": {
+    "snomed_code": "33562003",
+    "snomed_term": ""
+  },
+  "GAMMA(I.E. NON-HEMOLYTIC) STREPTOCOCCUS": {
+    "snomed_code": "22339002",
+    "snomed_term": ""
+  },
+  "GARDNERELLA VAGINALIS": {
+    "snomed_code": "64071004",
+    "snomed_term": ""
+  },
+  "GEMELLA BERGERI": {
+    "snomed_code": "131310006",
+    "snomed_term": ""
+  },
+  "GEMELLA MORBILLORUM": {
+    "snomed_code": "113765006",
+    "snomed_term": ""
+  },
+  "GEMELLA SPECIES": {
+    "snomed_code": "11590002",
+    "snomed_term": ""
+  },
+  "GEOTRICHIUM SPECIES": {
+    "snomed_code": "34324005",
+    "snomed_term": ""
+  },
+  "GIARDIA LAMBLIA": {
+    "snomed_code": "78181009",
+    "snomed_term": ""
+  },
+  "GIARDIA LAMBLIA SEEN": {
+    "snomed_code": "78181009",
+    "snomed_term": ""
+  },
+  "GLOBICATELLA SANGUINIS": {
+    "snomed_code": "414345009",
+    "snomed_term": ""
+  },
+  "GORDONIA SPECIES": {
+    "snomed_code": "115143001",
+    "snomed_term": ""
+  },
+  "GORDONIA SPUTI": {
+    "snomed_code": "113648006",
+    "snomed_term": ""
+  },
+  "GRAM NEGATIVE DIPLOCOCCI": {
+    "snomed_code": "83410001",
+    "snomed_term": ""
+  },
+  "GRAM NEGATIVE ROD #1": {
+    "snomed_code": "87172008",
+    "snomed_term": ""
+  },
+  "GRAM NEGATIVE ROD #2": {
+    "snomed_code": "87172008",
+    "snomed_term": ""
+  },
+  "GRAM NEGATIVE ROD #3": {
+    "snomed_code": "87172008",
+    "snomed_term": ""
+  },
+  "GRAM NEGATIVE ROD #4": {
+    "snomed_code": "87172008",
+    "snomed_term": ""
+  },
+  "GRAM NEGATIVE ROD(S)": {
+    "snomed_code": "87172008",
+    "snomed_term": ""
+  },
+  "GRAM POSITIVE BACTERIA": {
+    "snomed_code": "8745002",
+    "snomed_term": ""
+  },
+  "GRAM POSITIVE COCCUS(COCCI)": {
+    "snomed_code": "59206002",
+    "snomed_term": ""
+  },
+  "GRAM POSITIVE RODS": {
+    "snomed_code": "83514008",
+    "snomed_term": ""
+  },
+  "GRAM VARIABLE RODS": {
+    "snomed_code": "301780001",
+    "snomed_term": ""
+  },
+  "GRANULICATELLA ADIACENS": {
+    "snomed_code": "113713009",
+    "snomed_term": ""
+  },
+  "GRAPHIUM EUMORPHUM": {
+    "snomed_code": "21755009",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS APHROPHILUS": {
+    "snomed_code": "442683005",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS HAEMOLYTICUS": {
+    "snomed_code": "54950008",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS INFLUENZAE": {
+    "snomed_code": "44470000",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS INFLUENZAE, BETA-LACTAMASE NEGATIVE": {
+    "snomed_code": "722351007",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS INFLUENZAE, BETA-LACTAMASE POSITIVE": {
+    "snomed_code": "722353005",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS PARAINFLUENZAE": {
+    "snomed_code": "51593004",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS SP": {
+    "snomed_code": "71268004",
+    "snomed_term": ""
+  },
+  "HAEMOPHILUS SPECIES NOT INFLUENZAE": {
+    "snomed_code": "713920003",
+    "snomed_term": ""
+  },
+  "HAFNIA ALVEI": {
+    "snomed_code": "76694001",
+    "snomed_term": ""
+  },
+  "HERPES SIMPLEX VIRUS TYPE 1": {
+    "snomed_code": "15302007",
+    "snomed_term": ""
+  },
+  "HERPES SIMPLEX VIRUS TYPE 2": {
+    "snomed_code": "13687007",
+    "snomed_term": ""
+  },
+  "HOOKWORM": {
+    "snomed_code": "359762003",
+    "snomed_term": ""
+  },
+  "HYMENOLEPIS NANA": {
+    "snomed_code": "74311004",
+    "snomed_term": ""
+  },
+  "INFLUENZA A VIRUS": {
+    "snomed_code": "407479009",
+    "snomed_term": ""
+  },
+  "INFLUENZA B VIRUS": {
+    "snomed_code": "407480007",
+    "snomed_term": ""
+  },
+  "IODAMOEBA BUTSCHLII": {
+    "snomed_code": "53605000",
+    "snomed_term": ""
+  },
+  "IXODES SPECIES": {
+    "snomed_code": "27524005",
+    "snomed_term": ""
+  },
+  "KLEBSIELLA OXYTOCA": {
+    "snomed_code": "40886007",
+    "snomed_term": ""
+  },
+  "KLEBSIELLA PNEUMONIAE": {
+    "snomed_code": "56415008",
+    "snomed_term": ""
+  },
+  "KLEBSIELLA SPECIES": {
+    "snomed_code": "75032006",
+    "snomed_term": ""
+  },
+  "KOCURIA KRISTINAE": {
+    "snomed_code": "113772007",
+    "snomed_term": ""
+  },
+  "KOCURIA ROSEA": {
+    "snomed_code": "113773002",
+    "snomed_term": ""
+  },
+  "LACTOBACILLUS GASSERI": {
+    "snomed_code": "71158000",
+    "snomed_term": ""
+  },
+  "LACTOBACILLUS RHAMNOSUS": {
+    "snomed_code": "113798001",
+    "snomed_term": ""
+  },
+  "LACTOBACILLUS SALIVARIUS SS. SALIVARIUS": {
+    "snomed_code": "62761005",
+    "snomed_term": ""
+  },
+  "LACTOBACILLUS SPECIES": {
+    "snomed_code": "43690008",
+    "snomed_term": ""
+  },
+  "LACTOCOCCUS SPECIES": {
+    "snomed_code": "9879003",
+    "snomed_term": ""
+  },
+  "LECLERCIA ADECARBOXYLATA": {
+    "snomed_code": "57459006",
+    "snomed_term": ""
+  },
+  "LEGIONELLA PNEUMOPHILA, GROUP 1": {
+    "snomed_code": "103463005",
+    "snomed_term": ""
+  },
+  "LEPTOTRICHIA HOFSTADII": {
+    "snomed_code": "432196009",
+    "snomed_term": ""
+  },
+  "LEPTOTRICHIA SPECIES": {
+    "snomed_code": "52505003",
+    "snomed_term": ""
+  },
+  "LEUCONOSTOC SPECIES": {
+    "snomed_code": "43639007",
+    "snomed_term": ""
+  },
+  "LISTERIA MONOCYTOGENES": {
+    "snomed_code": "36094007",
+    "snomed_term": ""
+  },
+  "LOMENTOSPORA PROLIFICANS (FORMERLY SCEDOSPORIUM PROLIFICANS)": {
+    "snomed_code": "69564000",
+    "snomed_term": ""
+  },
+  "MALASSEZIA FURFUR": {
+    "snomed_code": "29619007",
+    "snomed_term": ""
+  },
+  "MANY BLASTOCYSTIS HOMINIS": {
+    "snomed_code": "28923009",
+    "snomed_term": ""
+  },
+  "MICROCOCCUS LUTEUS": {
+    "snomed_code": "48299003",
+    "snomed_term": ""
+  },
+  "MICROCOCCUS/STOMATOCOCCUS SPECIES": {
+    "snomed_code": "52864008",
+    "snomed_term": ""
+  },
+  "MICROMONOSPORA SPECIES": {
+    "snomed_code": "416958001",
+    "snomed_term": ""
+  },
+  "MICROSPORIDIUM SPECIES SEEN": {
+    "snomed_code": "243662007",
+    "snomed_term": ""
+  },
+  "MODERATE BLASTOCYSTIS HOMINIS": {
+    "snomed_code": "28923009",
+    "snomed_term": ""
+  },
+  "MOLD": {
+    "snomed_code": "84489001",
+    "snomed_term": ""
+  },
+  "MORAXELLA CATARRHALIS": {
+    "snomed_code": "24226003",
+    "snomed_term": ""
+  },
+  "MORAXELLA SPECIES": {
+    "snomed_code": "36361003",
+    "snomed_term": ""
+  },
+  "MORGANELLA MORGANII": {
+    "snomed_code": "243301005",
+    "snomed_term": ""
+  },
+  "MUCOR SP.": {
+    "snomed_code": "49782006",
+    "snomed_term": ""
+  },
+  "MYCELIA STERILIA": {
+    "snomed_code": "243555008",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM ABSCESSUS": {
+    "snomed_code": "113838007",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM AVIUM": {
+    "snomed_code": "83723009",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM AVIUM COMPLEX": {
+    "snomed_code": "58503001",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM BOVIS": {
+    "snomed_code": "27142009",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM CHELONAE": {
+    "snomed_code": "243377008",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM CHIMAERA INTRACELLULARE GROUP": {
+    "snomed_code": "83841006",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM FORTUITUM": {
+    "snomed_code": "243378003",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM GORDONAE": {
+    "snomed_code": "24871004",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM KANSASII": {
+    "snomed_code": "1507005",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM LENTIFLAVUM": {
+    "snomed_code": "113853004",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM MARINUM": {
+    "snomed_code": "58869008",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM SCROFULACEUM": {
+    "snomed_code": "20141004",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM SPECIES": {
+    "snomed_code": "243368001",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM SZULGAI": {
+    "snomed_code": "65613000",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM TRIPLEX": {
+    "snomed_code": "113860005",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM TUBERCULOSIS": {
+    "snomed_code": "113861009",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM TUBERCULOSIS COMPLEX": {
+    "snomed_code": "113858008",
+    "snomed_term": ""
+  },
+  "MYCOBACTERIUM XENOPI": {
+    "snomed_code": "58663006",
+    "snomed_term": ""
+  },
+  "MYCOBATERIUM HAEMOPHILUM": {
+    "snomed_code": "21996001",
+    "snomed_term": ""
+  },
+  "MYCOPLASMA HOMINIS": {
+    "snomed_code": "1290001",
+    "snomed_term": ""
+  },
+  "MYCOPLASMA SPECIES": {
+    "snomed_code": "78981005",
+    "snomed_term": ""
+  },
+  "MYROIDES SPECIES": {
+    "snomed_code": "115127008",
+    "snomed_term": ""
+  },
+  "NEISSERIA GONORRHOEAE": {
+    "snomed_code": "68704007",
+    "snomed_term": ""
+  },
+  "NEISSERIA MENINGITIDIS": {
+    "snomed_code": "17872004",
+    "snomed_term": ""
+  },
+  "NEISSERIA MUCOSA": {
+    "snomed_code": "81795000",
+    "snomed_term": ""
+  },
+  "NEISSERIA SPECIES": {
+    "snomed_code": "59083001",
+    "snomed_term": ""
+  },
+  "NEISSERIA SPECIES, NOT GONORRHOEAE": {
+    "snomed_code": "715872009",
+    "snomed_term": ""
+  },
+  "NEISSERIA SUBFLAVA": {
+    "snomed_code": "77700001",
+    "snomed_term": ""
+  },
+  "NEOASCOCHYTA DESMAZIERI": {
+    "snomed_code": "4441000146102",
+    "snomed_term": ""
+  },
+  "NEOSCYTALIDIUM DIMIDIATUM": {
+    "snomed_code": "715363007",
+    "snomed_term": ""
+  },
+  "NOCARDIA ASTEROIDES COMPLEX": {
+    "snomed_code": "414864009",
+    "snomed_term": ""
+  },
+  "NOCARDIA NOVA": {
+    "snomed_code": "37621001",
+    "snomed_term": ""
+  },
+  "NOCARDIA OTITIDISCAVIARUM (CAVIAE)": {
+    "snomed_code": "63087008",
+    "snomed_term": ""
+  },
+  "NOCARDIA SPECIES": {
+    "snomed_code": "59674005",
+    "snomed_term": ""
+  },
+  "NOCARDIA TRANSVALENSIS COMPLEX": {
+    "snomed_code": "131341007",
+    "snomed_term": ""
+  },
+  "NON-FERMENTER, NOT PSEUDOMONAS AERUGINOSA": {
+    "snomed_code": "710336008",
+    "snomed_term": ""
+  },
+  "NUTRITIONALLY VARIANT STREPTOCOCCUS": {
+    "snomed_code": "414886005",
+    "snomed_term": ""
+  },
+  "OCHROBACTRUM ANTHROPI": {
+    "snomed_code": "116490002",
+    "snomed_term": ""
+  },
+  "ORGANISM": {
+    "snomed_code": "410607006",
+    "snomed_term": ""
+  },
+  "PAECILOMYCES SPECIES": {
+    "snomed_code": "26001000",
+    "snomed_term": ""
+  },
+  "PANTOEA SPECIES": {
+    "snomed_code": "115013001",
+    "snomed_term": ""
+  },
+  "PARAINFLUENZA VIRUS TYPE 1": {
+    "snomed_code": "407489008",
+    "snomed_term": ""
+  },
+  "PARAINFLUENZA VIRUS TYPE 2": {
+    "snomed_code": "407491000",
+    "snomed_term": ""
+  },
+  "PARAINFLUENZA VIRUS TYPE 3": {
+    "snomed_code": "407493002",
+    "snomed_term": ""
+  },
+  "PASTEURELLA CANIS": {
+    "snomed_code": "7784009",
+    "snomed_term": ""
+  },
+  "PASTEURELLA MULTOCIDA": {
+    "snomed_code": "10879005",
+    "snomed_term": ""
+  },
+  "PASTEURELLA SPECIES": {
+    "snomed_code": "87579009",
+    "snomed_term": ""
+  },
+  "PEDIOCOCCUS SPECIES": {
+    "snomed_code": "243236007",
+    "snomed_term": ""
+  },
+  "PENICILLIUM MARNEFFEI": {
+    "snomed_code": "71825007",
+    "snomed_term": ""
+  },
+  "PENICILLIUM SPECIES": {
+    "snomed_code": "42993004",
+    "snomed_term": ""
+  },
+  "PEPTONIPHILUS (PEPTOSTREPTOCOCCUS) SPECIES": {
+    "snomed_code": "430742009",
+    "snomed_term": ""
+  },
+  "PEPTOSTREPTOCOCCUS SP.": {
+    "snomed_code": "243417000",
+    "snomed_term": ""
+  },
+  "PHIALEMONIUM INFLATUM": {
+    "snomed_code": "721918008",
+    "snomed_term": ""
+  },
+  "PHOMA SPECIES": {
+    "snomed_code": "61019006",
+    "snomed_term": ""
+  },
+  "PINWORM EGG(S) SEEN": {
+    "snomed_code": "609080003",
+    "snomed_term": ""
+  },
+  "PITHOMYCES SP.": {
+    "snomed_code": "12760009",
+    "snomed_term": ""
+  },
+  "PLESIOMONAS SHIGELLOIDES": {
+    "snomed_code": "38643006",
+    "snomed_term": ""
+  },
+  "PORPHYROMONAS SPECIES": {
+    "snomed_code": "114154000",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR ADENOVIRUS": {
+    "snomed_code": "424470006",
+    "snomed_term": "Adenovirus group"
+  },
+  "POSITIVE FOR CRYPTOCOCCAL ANTIGEN": {
+    "snomed_code": "103094002",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR CYTOMEGALOVIRUS": {
+    "snomed_code": "407444007",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR GROUP B BETA STREPTOCOCCI": {
+    "snomed_code": "43492007",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR HERPES SIMPLEX (HSV)": {
+    "snomed_code": "88594005",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR HERPES SIMPLEX TYPE 1 (HSV1)": {
+    "snomed_code": "15302007",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR HERPES SIMPLEX TYPE 2 (HSV2)": {
+    "snomed_code": "13687007",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR INFLUENZA A VIRAL ANTIGEN": {
+    "snomed_code": "121006005",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR INFLUENZA B VIRAL ANTIGEN": {
+    "snomed_code": "121008006",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR M. TUBERCULOSIS BY MTD": {
+    "snomed_code": "113861009",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR METHICILLIN RESISTANT STAPH AUREUS": {
+    "snomed_code": "115329001",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR MICROSPORIDIA SPECIES": {
+    "snomed_code": "418382009",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR PARAINFLUENZA TYPE 1": {
+    "snomed_code": "407489008",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR PARAINFLUENZA TYPE 2": {
+    "snomed_code": "407491000",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR PARAINFLUENZA TYPE 3": {
+    "snomed_code": "407493002",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR PARAINFLUENZA VIRUS": {
+    "snomed_code": "407498006",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR PNEUMOCYSTIS JIROVECII (CARINII)": {
+    "snomed_code": "79909001",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR RESPIRATORY SYNCYTIAL VIRUS (RSV)": {
+    "snomed_code": "6415009",
+    "snomed_term": ""
+  },
+  "POSITIVE FOR VARICELLA ZOSTER": {
+    "snomed_code": "19551004",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE CLOSTRIDIUM PERFRINGENS": {
+    "snomed_code": "8331005",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE CLOSTRIDIUM SEPTICUM": {
+    "snomed_code": "33101000",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE GARDNERELLA VAGINALIS": {
+    "snomed_code": "64071004",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE PEPTOSTREPTOCOCCUS SPECIES": {
+    "snomed_code": "243417000",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE POSITIVE FOR LEGIONELLA SEROGROUP 1 ANTIGEN": {
+    "snomed_code": "120991000",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE PROPIONIBACTERIUM ACNES": {
+    "snomed_code": "39473003",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE STREPTOCOCCUS BOVIS": {
+    "snomed_code": "72646003",
+    "snomed_term": ""
+  },
+  "PRESUMPTIVE VEILLONELLA SPECIES": {
+    "snomed_code": "29875005",
+    "snomed_term": ""
+  },
+  "PREVOTELLA (BACTEROIDES) SPECIES": {
+    "snomed_code": "114129000",
+    "snomed_term": ""
+  },
+  "PREVOTELLA SPECIES": {
+    "snomed_code": "114129000",
+    "snomed_term": ""
+  },
+  "PROBABLE ENTEROCOCCUS": {
+    "snomed_code": "2785000",
+    "snomed_term": ""
+  },
+  "PROBABLE MICROCOCCUS SPECIES": {
+    "snomed_code": "52864008",
+    "snomed_term": ""
+  },
+  "PROPIONIBACTERIUM ACNES": {
+    "snomed_code": "39473003",
+    "snomed_term": ""
+  },
+  "PROPIONIBACTERIUM SPECIES": {
+    "snomed_code": "34844008",
+    "snomed_term": ""
+  },
+  "PROTEUS HAUSERI": {
+    "snomed_code": "417592004",
+    "snomed_term": ""
+  },
+  "PROTEUS MIRABILIS": {
+    "snomed_code": "73457008",
+    "snomed_term": ""
+  },
+  "PROTEUS PENNERI": {
+    "snomed_code": "45298005",
+    "snomed_term": ""
+  },
+  "PROTEUS SPECIES": {
+    "snomed_code": "50517009",
+    "snomed_term": ""
+  },
+  "PROTEUS VULGARIS": {
+    "snomed_code": "45834001",
+    "snomed_term": ""
+  },
+  "PROTEUS VULGARIS GROUP": {
+    "snomed_code": "243304002",
+    "snomed_term": ""
+  },
+  "PROVIDENCIA RETTGERI": {
+    "snomed_code": "14196002",
+    "snomed_term": ""
+  },
+  "PROVIDENCIA SPECIES": {
+    "snomed_code": "112284001",
+    "snomed_term": ""
+  },
+  "PROVIDENCIA STUARTII": {
+    "snomed_code": "1445008",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS AERUGINOSA": {
+    "snomed_code": "52499004",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS FLUORESCENS": {
+    "snomed_code": "39289003",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS LUTEOLA": {
+    "snomed_code": "33919008",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS MENDOCINA": {
+    "snomed_code": "59419001",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS ORYZIHABITANS": {
+    "snomed_code": "113931000",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS PUTIDA": {
+    "snomed_code": "68608003",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS SPECIES": {
+    "snomed_code": "57032008",
+    "snomed_term": ""
+  },
+  "PSEUDOMONAS STUTZERI": {
+    "snomed_code": "58024003",
+    "snomed_term": ""
+  },
+  "RAOULTELLA ORNITHINOLYTICA": {
+    "snomed_code": "416832000",
+    "snomed_term": ""
+  },
+  "RAOULTELLA PLANTICOLA": {
+    "snomed_code": "416264004",
+    "snomed_term": ""
+  },
+  "RARE BLASTOCYSTIS HOMINIS": {
+    "snomed_code": "28923009",
+    "snomed_term": ""
+  },
+  "RESEMBLING MICROCOCCUS/STOMATOCOCCUS SPECIES": {
+    "snomed_code": "52864008",
+    "snomed_term": ""
+  },
+  "RESPIRATORY SYNCYTIAL VIRUS (RSV)": {
+    "snomed_code": "6415009",
+    "snomed_term": ""
+  },
+  "RHINOCLADIELLA SP.": {
+    "snomed_code": "21690009",
+    "snomed_term": ""
+  },
+  "RHINOVIRUS": {
+    "snomed_code": "1838001",
+    "snomed_term": ""
+  },
+  "RHIZOBIUM RADIOBACTER": {
+    "snomed_code": "438107000",
+    "snomed_term": ""
+  },
+  "RHIZOPUS SPECIES": {
+    "snomed_code": "17683005",
+    "snomed_term": ""
+  },
+  "RHODOTORULA GLUTINIS": {
+    "snomed_code": "69250004",
+    "snomed_term": ""
+  },
+  "RHODOTORULA SPECIES": {
+    "snomed_code": "51976007",
+    "snomed_term": ""
+  },
+  "ROSEOMONAS SPECIES": {
+    "snomed_code": "115159001",
+    "snomed_term": ""
+  },
+  "ROTHIA DENTOCARIOSA": {
+    "snomed_code": "35379007",
+    "snomed_term": ""
+  },
+  "ROTHIA SPECIES": {
+    "snomed_code": "90163001",
+    "snomed_term": ""
+  },
+  "S. AUREUS POSITIVE; MRSA NEGATIVE": {
+    "snomed_code": "3092008",
+    "snomed_term": ""
+  },
+  "S. AUREUS POSITIVE; MRSA POSITIVE": {
+    "snomed_code": "115329001",
+    "snomed_term": ""
+  },
+  "SACCHAROMYCES CEREVISIAE": {
+    "snomed_code": "58296003",
+    "snomed_term": ""
+  },
+  "SALMONELLA AGONA": {
+    "snomed_code": "80627004",
+    "snomed_term": ""
+  },
+  "SALMONELLA BARRANQUILLA": {
+    "snomed_code": "87933008",
+    "snomed_term": ""
+  },
+  "SALMONELLA BRAENDERUP": {
+    "snomed_code": "35225001",
+    "snomed_term": ""
+  },
+  "SALMONELLA DUBLIN": {
+    "snomed_code": "62136003",
+    "snomed_term": ""
+  },
+  "SALMONELLA ENTERITIDIS": {
+    "snomed_code": "73525009",
+    "snomed_term": ""
+  },
+  "SALMONELLA HEIDELBERG": {
+    "snomed_code": "71865006",
+    "snomed_term": ""
+  },
+  "SALMONELLA INFANTIS": {
+    "snomed_code": "82071007",
+    "snomed_term": ""
+  },
+  "SALMONELLA JAVIANA": {
+    "snomed_code": "88022005",
+    "snomed_term": ""
+  },
+  "SALMONELLA NEWPORT": {
+    "snomed_code": "56077000",
+    "snomed_term": ""
+  },
+  "SALMONELLA ORANIENBURG": {
+    "snomed_code": "46667007",
+    "snomed_term": ""
+  },
+  "SALMONELLA OSLO": {
+    "snomed_code": "35454005",
+    "snomed_term": ""
+  },
+  "SALMONELLA PARATYPHI A": {
+    "snomed_code": "79128009",
+    "snomed_term": ""
+  },
+  "SALMONELLA SAINTPAUL": {
+    "snomed_code": "2820001",
+    "snomed_term": ""
+  },
+  "SALMONELLA SANDIEGO": {
+    "snomed_code": "112287008",
+    "snomed_term": ""
+  },
+  "SALMONELLA SPECIES": {
+    "snomed_code": "27268008",
+    "snomed_term": ""
+  },
+  "SALMONELLA TYPHI": {
+    "snomed_code": "5595000",
+    "snomed_term": ""
+  },
+  "SALMONELLA TYPHIMURIUM": {
+    "snomed_code": "50136005",
+    "snomed_term": ""
+  },
+  "SAPROCHAETE (FORMERLY GEOTRICHUM) CAPITATA": {
+    "snomed_code": "67999003",
+    "snomed_term": ""
+  },
+  "SCEDOSPORIUM (APIOSPERMUM) BOYDII COMPLEX": {
+    "snomed_code": "724026001",
+    "snomed_term": ""
+  },
+  "SCOPULARIOPSIS BREVICAULIS": {
+    "snomed_code": "3245004",
+    "snomed_term": ""
+  },
+  "SCOPULARIOPSIS SP.": {
+    "snomed_code": "39949000",
+    "snomed_term": ""
+  },
+  "SERRATIA FONTICOLA": {
+    "snomed_code": "112329006",
+    "snomed_term": ""
+  },
+  "SERRATIA LIQUEFACIENS": {
+    "snomed_code": "23787004",
+    "snomed_term": ""
+  },
+  "SERRATIA MARCESCENS": {
+    "snomed_code": "33522002",
+    "snomed_term": ""
+  },
+  "SERRATIA SPECIES": {
+    "snomed_code": "42025004",
+    "snomed_term": ""
+  },
+  "SHEWANELLA SPECIES": {
+    "snomed_code": "115158009",
+    "snomed_term": ""
+  },
+  "SHIGELLA BOYDII": {
+    "snomed_code": "55462008",
+    "snomed_term": ""
+  },
+  "SHIGELLA FLEXNERI": {
+    "snomed_code": "85729005",
+    "snomed_term": ""
+  },
+  "SHIGELLA SONNEI": {
+    "snomed_code": "4298009",
+    "snomed_term": ""
+  },
+  "SPHINGOMONAS PAUCIMOBILIS": {
+    "snomed_code": "243350004",
+    "snomed_term": ""
+  },
+  "SPHINGOMONAS SPECIES": {
+    "snomed_code": "115130001",
+    "snomed_term": ""
+  },
+  "SPOROBOLOMYCES SALMONICOLOR": {
+    "snomed_code": "243446007",
+    "snomed_term": ""
+  },
+  "STAPH AUREUS COAG +": {
+    "snomed_code": "127535004",
+    "snomed_term": "Staphylococcus, coagulase positive"
+  },
+  "STAPHYLOCOCCUS AURICULARIS": {
+    "snomed_code": "45654003",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS CAPITIS": {
+    "snomed_code": "40347003",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS CAPRAE": {
+    "snomed_code": "76969000",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS CAPRAE/CAPITIS": {
+    "snomed_code": "40347003",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS EPIDERMIDIS": {
+    "snomed_code": "60875001",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS HAEMOLYTICUS": {
+    "snomed_code": "83452006",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS HOMINIS": {
+    "snomed_code": "44827007",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS LUGDUNENSIS": {
+    "snomed_code": "103494005",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS PSEUDINTERMEDIUS": {
+    "snomed_code": "427316000",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS SACCHAROLYTICUS": {
+    "snomed_code": "41103009",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS SAPROPHYTICUS": {
+    "snomed_code": "19743000",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS SAPROPHYTICUS, PRESUMPTIVE IDENTIFICATION": {
+    "snomed_code": "19743000",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS SCIURI": {
+    "snomed_code": "70806002",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS SIMULANS": {
+    "snomed_code": "52122005",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS SPECIES": {
+    "snomed_code": "65119002",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS WARNERI": {
+    "snomed_code": "63550006",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS, COAGULASE NEGATIVE": {
+    "snomed_code": "116197008",
+    "snomed_term": ""
+  },
+  "STAPHYLOCOCCUS, COAGULASE NEGATIVE, PRESUMPTIVELY NOT S. SAPROPHYTICUS": {
+    "snomed_code": "786829004",
+    "snomed_term": ""
+  },
+  "STEMPHYLIUM SP.": {
+    "snomed_code": "90824006",
+    "snomed_term": ""
+  },
+  "STENOTROPHOMONAS MALTOPHILIA": {
+    "snomed_code": "113697002",
+    "snomed_term": ""
+  },
+  "STREPTOCCUS SALIVARIUS GROUP": {
+    "snomed_code": "127537007",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS ANGINOSUS": {
+    "snomed_code": "44304009",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS ANGINOSUS (MILLERI) GROUP": {
+    "snomed_code": "415597009",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS BOVIS": {
+    "snomed_code": "415599007",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS BOVIS GROUP": {
+    "snomed_code": "415599007",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS CONSTELLATUS SSP. CONSTELLATUS": {
+    "snomed_code": "415601009",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS GALLOLYTICUS SSP. GALLOLYTICUS (STREPTOCOCCUS BOVIS)": {
+    "snomed_code": "421544007",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS GALLOLYTICUS SSP. PASTEURIANUS (STREPTOCOCCUS BOVIS)": {
+    "snomed_code": "421253004",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS GORDONII": {
+    "snomed_code": "113986004",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS INFANTARIUS SSP. COLI (STR. LUTETIENSIS)": {
+    "snomed_code": "415605000",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS INFANTARIUS SSP. COLI (STREPTOCOCCUS BOVIS)": {
+    "snomed_code": "415605000",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS INTERMEDIUS": {
+    "snomed_code": "62170002",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS MILLERI GROUP": {
+    "snomed_code": "415597009",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS MITIS": {
+    "snomed_code": "57997003",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS MITIS GROUP": {
+    "snomed_code": "127539005",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS MITIS/ORALIS": {
+    "snomed_code": "19870004",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS MUTANS": {
+    "snomed_code": "214001",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS ORALIS": {
+    "snomed_code": "19870004",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS PNEUMONIAE": {
+    "snomed_code": "9861002",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS PORCINUS": {
+    "snomed_code": "59512008",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS SALIVARIUS": {
+    "snomed_code": "39888004",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS SALIVARIUS SSP. SALIVARIUS": {
+    "snomed_code": "84684000",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS SANGUINIS": {
+    "snomed_code": "113993000",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS SPECIES": {
+    "snomed_code": "58800005",
+    "snomed_term": ""
+  },
+  "STREPTOCOCCUS VESTIBULARIS": {
+    "snomed_code": "113998009",
+    "snomed_term": ""
+  },
+  "STREPTOMYCES SPECIES": {
+    "snomed_code": "47304000",
+    "snomed_term": ""
+  },
+  "STRONGYLOIDES": {
+    "snomed_code": "10823008",
+    "snomed_term": ""
+  },
+  "STRONGYLOIDES STERCORALIS": {
+    "snomed_code": "42625000",
+    "snomed_term": ""
+  },
+  "TAENIA SAGINATA": {
+    "snomed_code": "61085008",
+    "snomed_term": ""
+  },
+  "TICK": {
+    "snomed_code": "106831000",
+    "snomed_term": ""
+  },
+  "TICK CONSISTENT WITH IXODES SPECIES": {
+    "snomed_code": "106831000",
+    "snomed_term": ""
+  },
+  "TRICHODERMA SP.": {
+    "snomed_code": "83597000",
+    "snomed_term": ""
+  },
+  "TRICHOMONAS VAGINALIS SEEN": {
+    "snomed_code": "22417000",
+    "snomed_term": ""
+  },
+  "TRICHOPHYTON RUBRUM": {
+    "snomed_code": "372008",
+    "snomed_term": ""
+  },
+  "TRICHOPHYTON SPECIES": {
+    "snomed_code": "88578003",
+    "snomed_term": ""
+  },
+  "TRICHOSPORON SPECIES": {
+    "snomed_code": "62289009",
+    "snomed_term": ""
+  },
+  "TSUKAMURELLA SPECIES": {
+    "snomed_code": "TSUKAMURELLA",
+    "snomed_term": ""
+  },
+  "VARICELLA-ZOSTER VIRUS": {
+    "snomed_code": "19551004",
+    "snomed_term": ""
+  },
+  "VEILLONELLA SPECIES": {
+    "snomed_code": "29875005",
+    "snomed_term": ""
+  },
+  "VERTICILLIUM SP.": {
+    "snomed_code": "50734003",
+    "snomed_term": ""
+  },
+  "VIRIDANS STREPTOCOCCI": {
+    "snomed_code": "31703004",
+    "snomed_term": ""
+  },
+  "VIRUS": {
+    "snomed_code": "49872002",
+    "snomed_term": ""
+  },
+  "WORM": {
+    "snomed_code": "704663000",
+    "snomed_term": ""
+  },
+  "YEAST": {
+    "snomed_code": "62093005",
+    "snomed_term": ""
+  },
+  "YEAST, PRESUMPTIVELY NOT C. ALBICANS": {
+    "snomed_code": "714313009",
+    "snomed_term": ""
+  },
+  "YERSINIA ENTEROCOLITICA": {
+    "snomed_code": "65255000",
+    "snomed_term": ""
+  },
+  "YERSINIA SP.": {
+    "snomed_code": "4668009",
+    "snomed_term": ""
+  }
+}

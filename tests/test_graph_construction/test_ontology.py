@@ -134,3 +134,12 @@ class TestGraphInitializer:
         assert (
             triple_count > 50
         ), f"Combined graph should have >50 triples, got {triple_count}"
+
+    def test_snomed_namespace_bound(self) -> None:
+        """initialize_graph() binds the SNOMED-CT namespace as 'sct'."""
+        from src.graph_construction.ontology import initialize_graph
+
+        g = initialize_graph(ONTOLOGY_DIR)
+        namespaces = dict(g.namespaces())
+        assert "sct" in namespaces, "SNOMED namespace 'sct' should be bound"
+        assert str(namespaces["sct"]) == "http://snomed.info/id/"

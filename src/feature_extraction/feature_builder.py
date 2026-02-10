@@ -17,6 +17,8 @@ from src.feature_extraction.tabular_features import (
     extract_vital_summary,
     extract_medication_features,
     extract_diagnosis_features,
+    extract_snomed_diagnosis_features,
+    extract_snomed_medication_features,
 )
 from src.feature_extraction.graph_features import (
     extract_temporal_features,
@@ -175,6 +177,8 @@ def build_feature_matrix(
     vital_summary = extract_vital_summary(graph)
     medication_features = extract_medication_features(graph)
     diagnosis_features = extract_diagnosis_features(graph)
+    snomed_diagnosis_features = extract_snomed_diagnosis_features(graph)
+    snomed_medication_features = extract_snomed_medication_features(graph)
     temporal_features = extract_temporal_features(graph)
     graph_structure_features = extract_graph_structure_features(graph)
 
@@ -197,6 +201,8 @@ def build_feature_matrix(
         vital_summary,
         medication_features,
         diagnosis_features,
+        snomed_diagnosis_features,
+        snomed_medication_features,
         temporal_features,
         graph_structure_features,
     ]

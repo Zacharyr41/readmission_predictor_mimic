@@ -12,6 +12,7 @@ from rdflib import Graph, Namespace, RDF, RDFS, OWL, XSD
 # Namespace constants matching the base and extended ontologies
 MIMIC_NS = Namespace("http://www.cnam.fr/MIMIC4-ICU-BSI/V1#")
 TIME_NS = Namespace("http://www.w3.org/2006/time#")
+SNOMED_NS = Namespace("http://snomed.info/id/")
 
 
 def initialize_graph(ontology_dir: Path) -> Graph:
@@ -36,6 +37,7 @@ def initialize_graph(ontology_dir: Path) -> Graph:
     g.bind("xsd", XSD)
     g.bind("time", TIME_NS)
     g.bind("mimic", MIMIC_NS)
+    g.bind("sct", SNOMED_NS)
 
     # Load base ontology
     base_path = ontology_dir / "base_ontology.rdf"

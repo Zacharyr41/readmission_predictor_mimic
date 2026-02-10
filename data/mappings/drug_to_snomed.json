@@ -1,0 +1,1098 @@
+{
+  "_metadata": {
+    "source": "NLM RxNorm REST API + UMLS crosswalk (RXNORM -> SNOMEDCT_US)",
+    "generated": "2026-02-10",
+    "total_drugs": 182,
+    "snomed_mapped": 181
+  },
+  "acetaminophen": {
+    "rxcui": "161",
+    "drug_name": "Acetaminophen",
+    "snomed_code": "387517004",
+    "snomed_term": "Acetaminophen"
+  },
+  "acetazolamide": {
+    "rxcui": "167",
+    "drug_name": "Acetazolamide",
+    "snomed_code": "372709008",
+    "snomed_term": "Acetazolamide"
+  },
+  "albuterol 0.083% neb soln": {
+    "rxcui": "630208",
+    "drug_name": "Albuterol 0.083% Neb Soln",
+    "snomed_code": "376561007",
+    "snomed_term": "Albuterol (as albuterol sulfate) 830 microgram/mL solution for inhalation"
+  },
+  "alteplase": {
+    "rxcui": "8410",
+    "drug_name": "Alteplase",
+    "snomed_code": "387152000",
+    "snomed_term": "Alteplase"
+  },
+  "aminophylline": {
+    "rxcui": "689",
+    "drug_name": "Aminophylline",
+    "snomed_code": "373508009",
+    "snomed_term": "Aminophylline"
+  },
+  "amiodarone": {
+    "rxcui": "703",
+    "drug_name": "Amiodarone",
+    "snomed_code": "372821002",
+    "snomed_term": "Amiodarone"
+  },
+  "amlodipine": {
+    "rxcui": "17767",
+    "drug_name": "Amlodipine",
+    "snomed_code": "386864001",
+    "snomed_term": "Amlodipine"
+  },
+  "amoxicillin": {
+    "rxcui": "723",
+    "drug_name": "Amoxicillin",
+    "snomed_code": "372687004",
+    "snomed_term": "Amoxicillin"
+  },
+  "ampicillin": {
+    "rxcui": "733",
+    "drug_name": "Ampicillin",
+    "snomed_code": "387170002",
+    "snomed_term": "Ampicillin"
+  },
+  "ampicillin-sulbactam": {
+    "rxcui": "1009148",
+    "drug_name": "Ampicillin-Sulbactam",
+    "snomed_code": "398786001",
+    "snomed_term": "Ampicillin- and sulbactam-containing product"
+  },
+  "argatroban": {
+    "rxcui": "15202",
+    "drug_name": "Argatroban",
+    "snomed_code": "398738008",
+    "snomed_term": "Argatroban-containing product"
+  },
+  "aspirin": {
+    "rxcui": "1191",
+    "drug_name": "Aspirin",
+    "snomed_code": "387458008",
+    "snomed_term": "Aspirin"
+  },
+  "atorvastatin": {
+    "rxcui": "83367",
+    "drug_name": "Atorvastatin",
+    "snomed_code": "108600003",
+    "snomed_term": "Atorvastatin-containing product"
+  },
+  "atropine sulfate": {
+    "rxcui": "153971",
+    "drug_name": "Atropine Sulfate",
+    "snomed_code": "74237004",
+    "snomed_term": "Atropine sulfate"
+  },
+  "azithromycin": {
+    "rxcui": "18631",
+    "drug_name": "Azithromycin",
+    "snomed_code": "387531004",
+    "snomed_term": "Azithromycin"
+  },
+  "aztreonam": {
+    "rxcui": "1272",
+    "drug_name": "Aztreonam",
+    "snomed_code": "387386004",
+    "snomed_term": "Aztreonam"
+  },
+  "betamethasone": {
+    "rxcui": "1514",
+    "drug_name": "Betamethasone",
+    "snomed_code": "29896003",
+    "snomed_term": "Betamethasone-containing product"
+  },
+  "bisacodyl": {
+    "rxcui": "1596",
+    "drug_name": "Bisacodyl",
+    "snomed_code": "387075009",
+    "snomed_term": "Bisacodyl"
+  },
+  "bivalirudin": {
+    "rxcui": "60819",
+    "drug_name": "Bivalirudin",
+    "snomed_code": "400610005",
+    "snomed_term": "Bivalirudin-containing product"
+  },
+  "brivaracetam": {
+    "rxcui": "1739745",
+    "drug_name": "Brivaracetam",
+    "snomed_code": "421052000",
+    "snomed_term": "Brivaracetam-containing product"
+  },
+  "bumetanide": {
+    "rxcui": "1808",
+    "drug_name": "Bumetanide",
+    "snomed_code": "387498005",
+    "snomed_term": "Bumetanide"
+  },
+  "calcium gluconate": {
+    "rxcui": "1908",
+    "drug_name": "Calcium Gluconate",
+    "snomed_code": "53691001",
+    "snomed_term": "Calcium gluconate-containing product"
+  },
+  "carvedilol": {
+    "rxcui": "20352",
+    "drug_name": "Carvedilol",
+    "snomed_code": "108551001",
+    "snomed_term": "Carvedilol-containing product"
+  },
+  "caspofungin": {
+    "rxcui": "140108",
+    "drug_name": "Caspofungin",
+    "snomed_code": "407732005",
+    "snomed_term": "Caspofungin-containing product"
+  },
+  "cefazolin": {
+    "rxcui": "2180",
+    "drug_name": "Cefazolin",
+    "snomed_code": "387470007",
+    "snomed_term": "Cefazolin"
+  },
+  "cefepime": {
+    "rxcui": "20481",
+    "drug_name": "Cefepime",
+    "snomed_code": "370371004",
+    "snomed_term": "Cefepime-containing product"
+  },
+  "cefotaxime": {
+    "rxcui": "2186",
+    "drug_name": "Cefotaxime",
+    "snomed_code": "372704003",
+    "snomed_term": "Cefotaxime"
+  },
+  "ceftazidime": {
+    "rxcui": "2191",
+    "drug_name": "Ceftazidime",
+    "snomed_code": "387200005",
+    "snomed_term": "Ceftazidime"
+  },
+  "ceftriaxone": {
+    "rxcui": "2193",
+    "drug_name": "Ceftriaxone",
+    "snomed_code": "372670001",
+    "snomed_term": "Ceftriaxone"
+  },
+  "cephalexin": {
+    "rxcui": "2231",
+    "drug_name": "Cephalexin",
+    "snomed_code": "54887004",
+    "snomed_term": "Cephalexin-containing product"
+  },
+  "chlorhexidine gluconate": {
+    "rxcui": "20791",
+    "drug_name": "Chlorhexidine Gluconate",
+    "snomed_code": "108895000",
+    "snomed_term": "Chlorhexidine gluconate"
+  },
+  "ciprofloxacin": {
+    "rxcui": "2551",
+    "drug_name": "Ciprofloxacin",
+    "snomed_code": "372840008",
+    "snomed_term": "Ciprofloxacin"
+  },
+  "cisatracurium": {
+    "rxcui": "319864",
+    "drug_name": "Cisatracurium",
+    "snomed_code": "108452005",
+    "snomed_term": "Cisatracurium-containing product"
+  },
+  "clindamycin": {
+    "rxcui": "2582",
+    "drug_name": "Clindamycin",
+    "snomed_code": "372786004",
+    "snomed_term": "Clindamycin"
+  },
+  "clopidogrel": {
+    "rxcui": "32968",
+    "drug_name": "Clopidogrel",
+    "snomed_code": "108979001",
+    "snomed_term": "Clopidogrel-containing product"
+  },
+  "colistin": {
+    "rxcui": "2709",
+    "drug_name": "Colistin",
+    "snomed_code": "387412007",
+    "snomed_term": "Colistin"
+  },
+  "dantrolene": {
+    "rxcui": "3105",
+    "drug_name": "Dantrolene",
+    "snomed_code": "372819007",
+    "snomed_term": "Dantrolene"
+  },
+  "daptomycin": {
+    "rxcui": "22299",
+    "drug_name": "Daptomycin",
+    "snomed_code": "406438001",
+    "snomed_term": "Daptomycin-containing product"
+  },
+  "dexamethasone": {
+    "rxcui": "3264",
+    "drug_name": "Dexamethasone",
+    "snomed_code": "7561000",
+    "snomed_term": "Dexamethasone-containing product"
+  },
+  "dexmedetomidine": {
+    "rxcui": "48937",
+    "drug_name": "Dexmedetomidine",
+    "snomed_code": "437750002",
+    "snomed_term": "Dexmedetomidine"
+  },
+  "diazepam": {
+    "rxcui": "3322",
+    "drug_name": "Diazepam",
+    "snomed_code": "387264003",
+    "snomed_term": "Diazepam"
+  },
+  "digoxin": {
+    "rxcui": "3407",
+    "drug_name": "Digoxin",
+    "snomed_code": "387461009",
+    "snomed_term": "Digoxin"
+  },
+  "diltiazem": {
+    "rxcui": "3443",
+    "drug_name": "Diltiazem",
+    "snomed_code": "372793000",
+    "snomed_term": "Diltiazem"
+  },
+  "diphenhydramine": {
+    "rxcui": "3498",
+    "drug_name": "Diphenhydramine",
+    "snomed_code": "372682005",
+    "snomed_term": "Diphenhydramine"
+  },
+  "dobutamine": {
+    "rxcui": "3616",
+    "drug_name": "Dobutamine",
+    "snomed_code": "387145002",
+    "snomed_term": "Dobutamine"
+  },
+  "docusate sodium": {
+    "rxcui": "71722",
+    "drug_name": "Docusate Sodium",
+    "snomed_code": "387088007",
+    "snomed_term": "Docusate sodium"
+  },
+  "dopamine": {
+    "rxcui": "3628",
+    "drug_name": "Dopamine",
+    "snomed_code": "59187003",
+    "snomed_term": "Dopamine-containing product"
+  },
+  "enalapril": {
+    "rxcui": "3827",
+    "drug_name": "Enalapril",
+    "snomed_code": "372658000",
+    "snomed_term": "Enalapril"
+  },
+  "enoxaparin": {
+    "rxcui": "67108",
+    "drug_name": "Enoxaparin",
+    "snomed_code": "372562003",
+    "snomed_term": "Enoxaparin"
+  },
+  "epinephrine": {
+    "rxcui": "3992",
+    "drug_name": "Epinephrine",
+    "snomed_code": "387362001",
+    "snomed_term": "Epinephrine"
+  },
+  "epoprostenol": {
+    "rxcui": "8814",
+    "drug_name": "Epoprostenol",
+    "snomed_code": "372513003",
+    "snomed_term": "Epoprostenol"
+  },
+  "ertapenem": {
+    "rxcui": "325642",
+    "drug_name": "Ertapenem",
+    "snomed_code": "385574002",
+    "snomed_term": "Ertapenem-containing product"
+  },
+  "erythromycin": {
+    "rxcui": "4053",
+    "drug_name": "Erythromycin",
+    "snomed_code": "372694001",
+    "snomed_term": "Erythromycin"
+  },
+  "esmolol": {
+    "rxcui": "49737",
+    "drug_name": "Esmolol",
+    "snomed_code": "77856005",
+    "snomed_term": "Esmolol-containing product"
+  },
+  "etomidate": {
+    "rxcui": "4177",
+    "drug_name": "Etomidate",
+    "snomed_code": "387218008",
+    "snomed_term": "Etomidate"
+  },
+  "famotidine": {
+    "rxcui": "4278",
+    "drug_name": "Famotidine",
+    "snomed_code": "387211002",
+    "snomed_term": "Famotidine"
+  },
+  "fentanyl citrate": {
+    "rxcui": "142436",
+    "drug_name": "Fentanyl Citrate",
+    "snomed_code": "29190006",
+    "snomed_term": "Fentanyl citrate"
+  },
+  "flecainide": {
+    "rxcui": "4441",
+    "drug_name": "Flecainide",
+    "snomed_code": "372751001",
+    "snomed_term": "Flecainide"
+  },
+  "fluconazole": {
+    "rxcui": "4450",
+    "drug_name": "Fluconazole",
+    "snomed_code": "387174006",
+    "snomed_term": "Fluconazole"
+  },
+  "flumazenil": {
+    "rxcui": "4457",
+    "drug_name": "Flumazenil",
+    "snomed_code": "387575000",
+    "snomed_term": "Flumazenil"
+  },
+  "fluticasone": {
+    "rxcui": "41126",
+    "drug_name": "Fluticasone",
+    "snomed_code": "108632003",
+    "snomed_term": "Fluticasone-containing product"
+  },
+  "fondaparinux": {
+    "rxcui": "321208",
+    "drug_name": "Fondaparinux",
+    "snomed_code": "708189008",
+    "snomed_term": "Fondaparinux"
+  },
+  "foscarnet": {
+    "rxcui": "33562",
+    "drug_name": "Foscarnet",
+    "snomed_code": "372902006",
+    "snomed_term": "Foscarnet"
+  },
+  "furosemide": {
+    "rxcui": "4603",
+    "drug_name": "Furosemide",
+    "snomed_code": "387475002",
+    "snomed_term": "Furosemide"
+  },
+  "gabapentin": {
+    "rxcui": "25480",
+    "drug_name": "Gabapentin",
+    "snomed_code": "108402001",
+    "snomed_term": "Gabapentin-containing product"
+  },
+  "ganciclovir": {
+    "rxcui": "4678",
+    "drug_name": "Ganciclovir",
+    "snomed_code": "372848001",
+    "snomed_term": "Ganciclovir"
+  },
+  "gentamicin": {
+    "rxcui": "1596450",
+    "drug_name": "Gentamicin",
+    "snomed_code": "387321007",
+    "snomed_term": "Gentamicin"
+  },
+  "glucagon": {
+    "rxcui": "4832",
+    "drug_name": "Glucagon",
+    "snomed_code": "66603002",
+    "snomed_term": "Glucagon"
+  },
+  "haloperidol": {
+    "rxcui": "5093",
+    "drug_name": "Haloperidol",
+    "snomed_code": "386837002",
+    "snomed_term": "Haloperidol"
+  },
+  "heparin": {
+    "rxcui": "235473",
+    "drug_name": "Heparin",
+    "snomed_code": "412401006",
+    "snomed_term": "Porcine heparin-containing product"
+  },
+  "hydralazine": {
+    "rxcui": "5470",
+    "drug_name": "Hydralazine",
+    "snomed_code": "387125005",
+    "snomed_term": "Hydralazine"
+  },
+  "hydrochlorothiazide": {
+    "rxcui": "5487",
+    "drug_name": "Hydrochlorothiazide",
+    "snomed_code": "387525002",
+    "snomed_term": "Hydrochlorothiazide"
+  },
+  "hydrocortisone": {
+    "rxcui": "5492",
+    "drug_name": "Hydrocortisone",
+    "snomed_code": "396458002",
+    "snomed_term": "Hydrocortisone"
+  },
+  "hydromorphone": {
+    "rxcui": "3423",
+    "drug_name": "Hydromorphone",
+    "snomed_code": "44508008",
+    "snomed_term": "Hydromorphone"
+  },
+  "hydroxychloroquine": {
+    "rxcui": "5521",
+    "drug_name": "Hydroxychloroquine",
+    "snomed_code": "373540008",
+    "snomed_term": "Hydroxychloroquine"
+  },
+  "ibuprofen": {
+    "rxcui": "5640",
+    "drug_name": "Ibuprofen",
+    "snomed_code": "387207008",
+    "snomed_term": "Ibuprofen"
+  },
+  "imipenem-cilastatin": {
+    "rxcui": "34482",
+    "drug_name": "Imipenem-Cilastatin",
+    "snomed_code": "323964004",
+    "snomed_term": "Cilastatin- and imipenem-containing product"
+  },
+  "inamrinone": {
+    "rxcui": "738",
+    "drug_name": "Inamrinone",
+    "snomed_code": "412412006",
+    "snomed_term": "Inamrinone-containing product"
+  },
+  "insulin": {
+    "rxcui": "253182",
+    "drug_name": "Insulin",
+    "snomed_code": "420609005",
+    "snomed_term": "Human regular insulin"
+  },
+  "ipratropium bromide": {
+    "rxcui": "203212",
+    "drug_name": "Ipratropium Bromide",
+    "snomed_code": "386881005",
+    "snomed_term": "Ipratropium bromide"
+  },
+  "isavuconazonium": {
+    "rxcui": "1608322",
+    "drug_name": "Isavuconazonium",
+    "snomed_code": "724004002",
+    "snomed_term": "Isavuconazonium"
+  },
+  "isoproterenol": {
+    "rxcui": "6054",
+    "drug_name": "Isoproterenol",
+    "snomed_code": "372781009",
+    "snomed_term": "Isoproterenol"
+  },
+  "ketamine": {
+    "rxcui": "6130",
+    "drug_name": "Ketamine",
+    "snomed_code": "31706007",
+    "snomed_term": "Ketamine hydrochloride"
+  },
+  "ketorolac": {
+    "rxcui": "35827",
+    "drug_name": "Ketorolac",
+    "snomed_code": "108512006",
+    "snomed_term": "Ketorolac-containing product"
+  },
+  "labetalol": {
+    "rxcui": "6185",
+    "drug_name": "Labetalol",
+    "snomed_code": "372750000",
+    "snomed_term": "Labetalol"
+  },
+  "lacosamide": {
+    "rxcui": "623400",
+    "drug_name": "Lacosamide",
+    "snomed_code": "441647003",
+    "snomed_term": "Lacosamide"
+  },
+  "lactulose": {
+    "rxcui": "6218",
+    "drug_name": "Lactulose",
+    "snomed_code": "273945008",
+    "snomed_term": "Lactulose"
+  },
+  "levetiracetam": {
+    "rxcui": "114477",
+    "drug_name": "Levetiracetam",
+    "snomed_code": "116076009",
+    "snomed_term": "Levetiracetam-containing product"
+  },
+  "levofloxacin": {
+    "rxcui": "82122",
+    "drug_name": "Levofloxacin",
+    "snomed_code": "96087006",
+    "snomed_term": "Levofloxacin-containing product"
+  },
+  "levothyroxine": {
+    "rxcui": "10582",
+    "drug_name": "Levothyroxine",
+    "snomed_code": "710809001",
+    "snomed_term": "Levothyroxine"
+  },
+  "lidocaine": {
+    "rxcui": "6387",
+    "drug_name": "Lidocaine",
+    "snomed_code": "387480006",
+    "snomed_term": "Lidocaine"
+  },
+  "linezolid": {
+    "rxcui": "190376",
+    "drug_name": "Linezolid",
+    "snomed_code": "125695009",
+    "snomed_term": "Linezolid-containing product"
+  },
+  "lisinopril": {
+    "rxcui": "29046",
+    "drug_name": "Lisinopril",
+    "snomed_code": "386873009",
+    "snomed_term": "Lisinopril"
+  },
+  "lorazepam": {
+    "rxcui": "6470",
+    "drug_name": "Lorazepam",
+    "snomed_code": "387106007",
+    "snomed_term": "Lorazepam"
+  },
+  "losartan": {
+    "rxcui": "52175",
+    "drug_name": "Losartan",
+    "snomed_code": "96309000",
+    "snomed_term": "Losartan-containing product"
+  },
+  "magnesium sulfate": {
+    "rxcui": "6585",
+    "drug_name": "Magnesium Sulfate",
+    "snomed_code": "37400007",
+    "snomed_term": "Magnesium sulfate-containing product"
+  },
+  "mannitol": {
+    "rxcui": "6628",
+    "drug_name": "Mannitol",
+    "snomed_code": "387168006",
+    "snomed_term": "Mannitol"
+  },
+  "meropenem": {
+    "rxcui": "29561",
+    "drug_name": "Meropenem",
+    "snomed_code": "96062004",
+    "snomed_term": "Meropenem-containing product"
+  },
+  "metformin": {
+    "rxcui": "6809",
+    "drug_name": "Metformin",
+    "snomed_code": "372567009",
+    "snomed_term": "Metformin"
+  },
+  "methadone": {
+    "rxcui": "6813",
+    "drug_name": "Methadone",
+    "snomed_code": "387286002",
+    "snomed_term": "Methadone"
+  },
+  "methylene blue": {
+    "rxcui": "6878",
+    "drug_name": "Methylene Blue",
+    "snomed_code": "6725000",
+    "snomed_term": "Methylene blue"
+  },
+  "methylprednisolone": {
+    "rxcui": "6902",
+    "drug_name": "Methylprednisolone",
+    "snomed_code": "27242001",
+    "snomed_term": "Methylprednisolone-containing product"
+  },
+  "metoclopramide": {
+    "rxcui": "6915",
+    "drug_name": "Metoclopramide",
+    "snomed_code": "372776000",
+    "snomed_term": "Metoclopramide"
+  },
+  "metoprolol tartrate": {
+    "rxcui": "203191",
+    "drug_name": "Metoprolol Tartrate",
+    "snomed_code": "72770009",
+    "snomed_term": "Metoprolol tartrate"
+  },
+  "metronidazole": {
+    "rxcui": "6922",
+    "drug_name": "Metronidazole",
+    "snomed_code": "372602008",
+    "snomed_term": "Metronidazole"
+  },
+  "micafungin": {
+    "rxcui": "325887",
+    "drug_name": "Micafungin",
+    "snomed_code": "416233001",
+    "snomed_term": "Micafungin-containing product"
+  },
+  "midazolam": {
+    "rxcui": "6960",
+    "drug_name": "Midazolam",
+    "snomed_code": "373476007",
+    "snomed_term": "Midazolam"
+  },
+  "milrinone": {
+    "rxcui": "52769",
+    "drug_name": "Milrinone",
+    "snomed_code": "108480007",
+    "snomed_term": "Milrinone-containing product"
+  },
+  "morphine sulfate": {
+    "rxcui": "30236",
+    "drug_name": "Morphine Sulfate",
+    "snomed_code": "60886004",
+    "snomed_term": "Morphine sulfate"
+  },
+  "mycophenolate": {
+    "rxcui": "265323",
+    "drug_name": "Mycophenolate",
+    "snomed_code": "409330005",
+    "snomed_term": "Mycophenolic acid"
+  },
+  "nafcillin": {
+    "rxcui": "7233",
+    "drug_name": "Nafcillin",
+    "snomed_code": "372898000",
+    "snomed_term": "Nafcillin"
+  },
+  "naloxone": {
+    "rxcui": "7242",
+    "drug_name": "Naloxone",
+    "snomed_code": "372890007",
+    "snomed_term": "Naloxone"
+  },
+  "neostigmine": {
+    "rxcui": "7315",
+    "drug_name": "Neostigmine",
+    "snomed_code": "373346001",
+    "snomed_term": "Neostigmine"
+  },
+  "nicardipine": {
+    "rxcui": "7396",
+    "drug_name": "Nicardipine",
+    "snomed_code": "372502001",
+    "snomed_term": "Nicardipine"
+  },
+  "nimodipine": {
+    "rxcui": "7426",
+    "drug_name": "Nimodipine",
+    "snomed_code": "387502003",
+    "snomed_term": "Nimodipine"
+  },
+  "nitrofurantoin": {
+    "rxcui": "7454",
+    "drug_name": "Nitrofurantoin",
+    "snomed_code": "373543005",
+    "snomed_term": "Nitrofurantoin"
+  },
+  "nitroglycerin": {
+    "rxcui": "4917",
+    "drug_name": "Nitroglycerin",
+    "snomed_code": "387404004",
+    "snomed_term": "Nitroglycerin"
+  },
+  "nitroprusside": {
+    "rxcui": "7476",
+    "drug_name": "Nitroprusside",
+    "snomed_code": "372860000",
+    "snomed_term": "Nitroprusside"
+  },
+  "norepinephrine": {
+    "rxcui": "7512",
+    "drug_name": "Norepinephrine",
+    "snomed_code": "45555007",
+    "snomed_term": "Norepinephrine"
+  },
+  "nystatin": {
+    "rxcui": "7597",
+    "drug_name": "Nystatin",
+    "snomed_code": "387048002",
+    "snomed_term": "Nystatin"
+  },
+  "octreotide": {
+    "rxcui": "7617",
+    "drug_name": "Octreotide",
+    "snomed_code": "109053000",
+    "snomed_term": "Octreotide"
+  },
+  "ofloxacin": {
+    "rxcui": "7623",
+    "drug_name": "Ofloxacin",
+    "snomed_code": "387551000",
+    "snomed_term": "Ofloxacin"
+  },
+  "olanzapine": {
+    "rxcui": "61381",
+    "drug_name": "Olanzapine",
+    "snomed_code": "108441004",
+    "snomed_term": "Olanzapine-containing product"
+  },
+  "omeprazole": {
+    "rxcui": "7646",
+    "drug_name": "Omeprazole",
+    "snomed_code": "387137007",
+    "snomed_term": "Omeprazole"
+  },
+  "ondansetron": {
+    "rxcui": "26225",
+    "drug_name": "Ondansetron",
+    "snomed_code": "372487007",
+    "snomed_term": "Ondansetron"
+  },
+  "oseltamivir": {
+    "rxcui": "260101",
+    "drug_name": "Oseltamivir",
+    "snomed_code": "386142008",
+    "snomed_term": "Oseltamivir-containing product"
+  },
+  "oxacillin": {
+    "rxcui": "7773",
+    "drug_name": "Oxacillin",
+    "snomed_code": "372868007",
+    "snomed_term": "Oxacillin"
+  },
+  "oxcarbazepine": {
+    "rxcui": "32624",
+    "drug_name": "Oxcarbazepine",
+    "snomed_code": "116511002",
+    "snomed_term": "Oxcarbazepine-containing product"
+  },
+  "oxycodone": {
+    "rxcui": "7804",
+    "drug_name": "Oxycodone",
+    "snomed_code": "55452001",
+    "snomed_term": "Oxycodone"
+  },
+  "pantoprazole": {
+    "rxcui": "40790",
+    "drug_name": "Pantoprazole",
+    "snomed_code": "317317009",
+    "snomed_term": "Pantoprazole-containing product"
+  },
+  "penicillin g": {
+    "rxcui": "7980",
+    "drug_name": "Penicillin G",
+    "snomed_code": "78507004",
+    "snomed_term": "Penicillin G-containing product"
+  },
+  "pentamidine": {
+    "rxcui": "7994",
+    "drug_name": "Pentamidine",
+    "snomed_code": "372699006",
+    "snomed_term": "Pentamidine"
+  },
+  "phenobarbital": {
+    "rxcui": "8134",
+    "drug_name": "Phenobarbital",
+    "snomed_code": "373505007",
+    "snomed_term": "Phenobarbital"
+  },
+  "phenoxybenzamine": {
+    "rxcui": "8149",
+    "drug_name": "Phenoxybenzamine",
+    "snomed_code": "372838003",
+    "snomed_term": "Phenoxybenzamine"
+  },
+  "phentolamine": {
+    "rxcui": "8153",
+    "drug_name": "Phentolamine",
+    "snomed_code": "372863003",
+    "snomed_term": "Phentolamine"
+  },
+  "phenylephrine": {
+    "rxcui": "8163",
+    "drug_name": "Phenylephrine",
+    "snomed_code": "372771005",
+    "snomed_term": "Phenylephrine"
+  },
+  "phenytoin": {
+    "rxcui": "8183",
+    "drug_name": "Phenytoin",
+    "snomed_code": "387220006",
+    "snomed_term": "Phenytoin"
+  },
+  "phytonadione": {
+    "rxcui": "8308",
+    "drug_name": "Phytonadione",
+    "snomed_code": "66656000",
+    "snomed_term": "Phytonadione"
+  },
+  "piperacillin-tazobactam": {
+    "rxcui": "74169",
+    "drug_name": "Piperacillin-Tazobactam",
+    "snomed_code": "346628003",
+    "snomed_term": "Piperacillin- and tazobactam-containing product"
+  },
+  "polymyxin b": {
+    "rxcui": "8536",
+    "drug_name": "Polymyxin B",
+    "snomed_code": "372824005",
+    "snomed_term": "Polymyxin B"
+  },
+  "potassium chloride": {
+    "rxcui": "8591",
+    "drug_name": "Potassium Chloride",
+    "snomed_code": "420155008",
+    "snomed_term": "Potassium chloride-containing product"
+  },
+  "potassium phosphate": {
+    "rxcui": "34322",
+    "drug_name": "Potassium Phosphate",
+    "snomed_code": "421392008",
+    "snomed_term": "Potassium phosphate-containing product"
+  },
+  "prednisone": {
+    "rxcui": "8640",
+    "drug_name": "Prednisone",
+    "snomed_code": "10312003",
+    "snomed_term": "Prednisone-containing product"
+  },
+  "pregabalin": {
+    "rxcui": "187832",
+    "drug_name": "Pregabalin",
+    "snomed_code": "415159003",
+    "snomed_term": "Pregabalin-containing product"
+  },
+  "propofol": {
+    "rxcui": "8782",
+    "drug_name": "Propofol",
+    "snomed_code": "387423006",
+    "snomed_term": "Propofol"
+  },
+  "propranolol": {
+    "rxcui": "8787",
+    "drug_name": "Propranolol",
+    "snomed_code": "372772003",
+    "snomed_term": "Propranolol"
+  },
+  "protamine": {
+    "rxcui": "8826",
+    "drug_name": "Protamine",
+    "snomed_code": "372630008",
+    "snomed_term": "Protamine"
+  },
+  "pyridostigmine": {
+    "rxcui": "9000",
+    "drug_name": "Pyridostigmine",
+    "snomed_code": "373344003",
+    "snomed_term": "Pyridostigmine"
+  },
+  "quetiapine": {
+    "rxcui": "51272",
+    "drug_name": "Quetiapine",
+    "snomed_code": "108443001",
+    "snomed_term": "Quetiapine-containing product"
+  },
+  "ranitidine": {
+    "rxcui": "9143",
+    "drug_name": "Ranitidine",
+    "snomed_code": "372755005",
+    "snomed_term": "Ranitidine"
+  },
+  "remifentanil": {
+    "rxcui": "73032",
+    "drug_name": "Remifentanil",
+    "snomed_code": "108379008",
+    "snomed_term": "Remifentanil-containing product"
+  },
+  "rifampin": {
+    "rxcui": "9384",
+    "drug_name": "Rifampin",
+    "snomed_code": "387159009",
+    "snomed_term": "Rifampin"
+  },
+  "rivaroxaban": {
+    "rxcui": "1114195",
+    "drug_name": "Rivaroxaban",
+    "snomed_code": "442031002",
+    "snomed_term": "Rivaroxaban"
+  },
+  "rocuronium": {
+    "rxcui": "68139",
+    "drug_name": "Rocuronium",
+    "snomed_code": "108449002",
+    "snomed_term": "Rocuronium-containing product"
+  },
+  "sennosides": {
+    "rxcui": "36387",
+    "drug_name": "Sennosides",
+    "snomed_code": "30125007",
+    "snomed_term": "Senna-containing product"
+  },
+  "sevoflurane": {
+    "rxcui": "36453",
+    "drug_name": "Sevoflurane",
+    "snomed_code": "108395008",
+    "snomed_term": "Sevoflurane-containing product"
+  },
+  "simvastatin": {
+    "rxcui": "36567",
+    "drug_name": "Simvastatin",
+    "snomed_code": "96304005",
+    "snomed_term": "Simvastatin-containing product"
+  },
+  "sodium bicarbonate": {
+    "rxcui": "36676",
+    "drug_name": "Sodium Bicarbonate",
+    "snomed_code": "57376006",
+    "snomed_term": "Sodium bicarbonate-containing product"
+  },
+  "sodium chloride 0.9%": {
+    "rxcui": "615106",
+    "drug_name": "Sodium Chloride 0.9%"
+  },
+  "sodium phosphate": {
+    "rxcui": "36709",
+    "drug_name": "Sodium Phosphate",
+    "snomed_code": "71584004",
+    "snomed_term": "Monobasic sodium phosphate-containing product"
+  },
+  "sodium polystyrene sulfonate": {
+    "rxcui": "56512",
+    "drug_name": "Sodium Polystyrene Sulfonate",
+    "snomed_code": "387149008",
+    "snomed_term": "Sodium polystyrene sulfonate"
+  },
+  "spironolactone": {
+    "rxcui": "9997",
+    "drug_name": "Spironolactone",
+    "snomed_code": "387078006",
+    "snomed_term": "Spironolactone"
+  },
+  "succinylcholine": {
+    "rxcui": "10154",
+    "drug_name": "Succinylcholine",
+    "snomed_code": "372724004",
+    "snomed_term": "Succinylcholine"
+  },
+  "sugammadex": {
+    "rxcui": "1726988",
+    "drug_name": "Sugammadex",
+    "snomed_code": "442340006",
+    "snomed_term": "Sugammadex"
+  },
+  "tacrolimus": {
+    "rxcui": "42316",
+    "drug_name": "Tacrolimus",
+    "snomed_code": "109129008",
+    "snomed_term": "Tacrolimus-containing product"
+  },
+  "theophylline": {
+    "rxcui": "10438",
+    "drug_name": "Theophylline",
+    "snomed_code": "372810006",
+    "snomed_term": "Theophylline"
+  },
+  "thrombin": {
+    "rxcui": "10528",
+    "drug_name": "Thrombin",
+    "snomed_code": "36176003",
+    "snomed_term": "Thrombin"
+  },
+  "ticagrelor": {
+    "rxcui": "1116632",
+    "drug_name": "Ticagrelor",
+    "snomed_code": "698805004",
+    "snomed_term": "Ticagrelor"
+  },
+  "tigecycline": {
+    "rxcui": "384455",
+    "drug_name": "Tigecycline",
+    "snomed_code": "418631002",
+    "snomed_term": "Tigecycline-containing product"
+  },
+  "tirofiban": {
+    "rxcui": "73137",
+    "drug_name": "Tirofiban",
+    "snomed_code": "108981004",
+    "snomed_term": "Tirofiban-containing product"
+  },
+  "tobramycin": {
+    "rxcui": "10627",
+    "drug_name": "Tobramycin",
+    "snomed_code": "373548001",
+    "snomed_term": "Tobramycin"
+  },
+  "torsemide": {
+    "rxcui": "38413",
+    "drug_name": "Torsemide",
+    "snomed_code": "318034005",
+    "snomed_term": "Torsemide-containing product"
+  },
+  "tramadol": {
+    "rxcui": "10689",
+    "drug_name": "Tramadol",
+    "snomed_code": "386858008",
+    "snomed_term": "Tramadol"
+  },
+  "trimethoprim-sulfamethoxazole": {
+    "rxcui": "10831",
+    "drug_name": "Trimethoprim-Sulfamethoxazole",
+    "snomed_code": "398731002",
+    "snomed_term": "Sulfamethoxazole- and trimethoprim-containing product"
+  },
+  "valproic acid": {
+    "rxcui": "11118",
+    "drug_name": "Valproic Acid",
+    "snomed_code": "13965000",
+    "snomed_term": "Valproic acid-containing product"
+  },
+  "vancomycin": {
+    "rxcui": "11124",
+    "drug_name": "Vancomycin",
+    "snomed_code": "372735009",
+    "snomed_term": "Vancomycin"
+  },
+  "vasopressin": {
+    "rxcui": "11149",
+    "drug_name": "Vasopressin",
+    "snomed_code": "77671006",
+    "snomed_term": "Antidiuretic hormone"
+  },
+  "vecuronium": {
+    "rxcui": "71535",
+    "drug_name": "Vecuronium",
+    "snomed_code": "372883002",
+    "snomed_term": "Vecuronium"
+  },
+  "verapamil": {
+    "rxcui": "11170",
+    "drug_name": "Verapamil",
+    "snomed_code": "372754009",
+    "snomed_term": "Verapamil"
+  },
+  "voriconazole": {
+    "rxcui": "121243",
+    "drug_name": "Voriconazole",
+    "snomed_code": "386116008",
+    "snomed_term": "Voriconazole-containing product"
+  },
+  "warfarin": {
+    "rxcui": "11289",
+    "drug_name": "Warfarin",
+    "snomed_code": "372756006",
+    "snomed_term": "Warfarin"
+  },
+  "zonisamide": {
+    "rxcui": "39998",
+    "drug_name": "Zonisamide",
+    "snomed_code": "398762003",
+    "snomed_term": "Zonisamide-containing product"
+  }
+}

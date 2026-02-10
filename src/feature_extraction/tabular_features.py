@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 from rdflib import Graph
 
-from src.graph_construction.ontology import MIMIC_NS, TIME_NS
+from src.graph_construction.ontology import MIMIC_NS, TIME_NS, SNOMED_NS
 
 
 def extract_demographics(graph: Graph) -> pd.DataFrame:
@@ -442,3 +442,113 @@ def extract_diagnosis_features(graph: Graph) -> pd.DataFrame:
         df = pd.concat([df.drop("primary_icd_chapter", axis=1), chapter_dummies], axis=1)
 
     return df
+
+
+def extract_snomed_diagnosis_features(graph: Graph) -> pd.DataFrame:
+    """Extract SNOMED-based diagnosis features for each admission.
+
+    Groups diagnoses by SNOMED concept code instead of ICD chapter letter,
+    producing ``snomed_group_*`` one-hot features and a ``num_snomed_mapped``
+    count.  Returns an empty DataFrame (with ``hadm_id`` column) when no
+    SNOMED triples exist, ensuring backward compatibility.
+
+    Args:
+        graph: RDF graph potentially containing SNOMED-enriched diagnosis events.
+
+    Returns:
+        DataFrame with columns: hadm_id, num_snomed_mapped, snomed_group_*
+    """
+    query = """
+    SELECT ?hadmId ?snomedCode ?snomedTerm
+    WHERE {
+        ?admission rdf:type mimic:HospitalAdmission ;
+                   mimic:hasAdmissionId ?hadmId ;
+                   mimic:hasDiagnosis ?diagnosis .
+        ?diagnosis mimic:hasSnomedCode ?snomedCode ;
+                   mimic:hasSnomedTerm ?snomedTerm .
+    }
+    """
+
+    results = list(graph.query(query))
+
+    if not results:
+        return pd.DataFrame(columns=["hadm_id"])
+
+    # Group by admission
+    dx_data: dict[int, dict[str, int]] = {}
+    for row in results:
+        hadm_id = int(row[0])
+        snomed_code = str(row[1])
+
+        if hadm_id not in dx_data:
+            dx_data[hadm_id] = {}
+        dx_data[hadm_id][snomed_code] = dx_data[hadm_id].get(snomed_code, 0) + 1
+
+    # Build feature rows
+    data = []
+    for hadm_id, codes in dx_data.items():
+        row = {"hadm_id": hadm_id, "num_snomed_mapped": sum(codes.values())}
+        for code, count in codes.items():
+            row[f"snomed_group_{code}"] = count
+        data.append(row)
+
+    df = pd.DataFrame(data)
+
+    # Binarize snomed_group columns (presence/absence)
+    snomed_cols = [c for c in df.columns if c.startswith("snomed_group_")]
+    for col in snomed_cols:
+        df[col] = (df[col] > 0).astype(int)
+
+    return df
+
+
+def extract_snomed_medication_features(graph: Graph) -> pd.DataFrame:
+    """Extract SNOMED-based medication features for each admission.
+
+    Groups prescriptions by SNOMED pharmaceutical class, producing
+    ``snomed_med_*`` one-hot features.  Returns an empty DataFrame (with
+    ``hadm_id`` column) when no SNOMED triples exist.
+
+    Args:
+        graph: RDF graph potentially containing SNOMED-enriched prescription events.
+
+    Returns:
+        DataFrame with columns: hadm_id, num_snomed_med_classes, snomed_med_*
+    """
+    query = """
+    SELECT ?hadmId ?snomedCode ?snomedTerm
+    WHERE {
+        ?admission rdf:type mimic:HospitalAdmission ;
+                   mimic:hasAdmissionId ?hadmId ;
+                   mimic:containsICUStay ?icuStay .
+        ?event rdf:type mimic:PrescriptionEvent ;
+               mimic:associatedWithICUStay ?icuStay ;
+               mimic:hasSnomedCode ?snomedCode ;
+               mimic:hasSnomedTerm ?snomedTerm .
+    }
+    """
+
+    results = list(graph.query(query))
+
+    if not results:
+        return pd.DataFrame(columns=["hadm_id"])
+
+    # Group by admission
+    med_data: dict[int, set[str]] = {}
+    for row in results:
+        hadm_id = int(row[0])
+        snomed_code = str(row[1])
+
+        if hadm_id not in med_data:
+            med_data[hadm_id] = set()
+        med_data[hadm_id].add(snomed_code)
+
+    # Build feature rows
+    data = []
+    for hadm_id, codes in med_data.items():
+        row = {"hadm_id": hadm_id, "num_snomed_med_classes": len(codes)}
+        for code in codes:
+            row[f"snomed_med_{code}"] = 1
+        data.append(row)
+
+    return pd.DataFrame(data).fillna(0)

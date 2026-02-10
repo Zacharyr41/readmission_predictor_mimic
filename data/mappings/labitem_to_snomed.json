@@ -1,0 +1,6640 @@
+{
+  "_metadata": {
+    "source": "srdc/mimic-iv-to-fhir labitems-to-loinc.csv + UMLS CUI-based SNOMED lookup",
+    "generated": "2026-02-10",
+    "total_items": 1403,
+    "snomed_mapped": 510
+  },
+  "50801": {
+    "loinc": "19991-9",
+    "label": "Alveolar-arterial Gradient",
+    "snomed_code": "C3203470",
+    "snomed_term": "Alveolar-arterial oxygen gradient"
+  },
+  "50802": {
+    "loinc": "11555-0",
+    "label": "Base Excess",
+    "snomed_code": "C0201985",
+    "snomed_term": "Base excess measurement"
+  },
+  "50803": {
+    "loinc": "1959-6",
+    "label": "Calculated Bicarbonate, Whole Blood",
+    "snomed_code": "C0236463",
+    "snomed_term": "Whole Blood (Blood Gas) Calculated Bicarbonate Ion Test"
+  },
+  "50804": {
+    "loinc": "34728-6",
+    "label": "Calculated Total CO2"
+  },
+  "50805": {
+    "loinc": "20563-3",
+    "label": "Carboxyhemoglobin",
+    "snomed_code": "C0201932",
+    "snomed_term": "Carboxyhemoglobin measurement"
+  },
+  "50806": {
+    "loinc": "2069-3",
+    "label": "Chloride, Whole Blood",
+    "snomed_code": "C0551414",
+    "snomed_term": "Methylene chloride:MCnc:Pt:Bld:Qn"
+  },
+  "50808": {
+    "loinc": "1994-3",
+    "label": "Free Calcium",
+    "snomed_code": "C0596235",
+    "snomed_term": "calcium ion"
+  },
+  "50809": {
+    "loinc": "2339-0",
+    "label": "Glucose",
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "50810": {
+    "loinc": "48703-3",
+    "label": "Hematocrit, Calculated",
+    "snomed_code": "C0800916",
+    "snomed_term": "Erythrocyte/Specimen Volume:VFr:Pt:Urine:Qn:Calculated"
+  },
+  "50811": {
+    "loinc": "718-7",
+    "label": "Hemoglobin",
+    "snomed_code": "C0518015",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "50813": {
+    "loinc": "32693-4",
+    "label": "Lactate",
+    "snomed_code": "C0202115",
+    "snomed_term": "Lactic acid measurement"
+  },
+  "50814": {
+    "loinc": "2614-6",
+    "label": "Methemoglobin",
+    "snomed_code": "C0546660",
+    "snomed_term": "Methemoglobin measurement"
+  },
+  "50815": {
+    "loinc": "3151-8",
+    "label": "O2 Flow",
+    "snomed_code": "C0365296",
+    "snomed_term": "Oxygen inhaled:VRat:Pt:Inhl gas:Qn"
+  },
+  "50816": {
+    "loinc": "3150-0",
+    "label": "Oxygen",
+    "snomed_code": "104846005",
+    "snomed_term": "Oxygen measurement"
+  },
+  "50817": {
+    "loinc": "20564-1",
+    "label": "Oxygen Saturation",
+    "snomed_code": "C0523807",
+    "snomed_term": "Oxygen saturation measurement"
+  },
+  "50818": {
+    "loinc": "11557-6",
+    "label": "pCO2",
+    "snomed_code": "C0546666",
+    "snomed_term": "pH, PCO2 Astrup-Anderson nomogram measurement"
+  },
+  "50819": {
+    "loinc": "20077-4",
+    "label": "PEEP",
+    "snomed_code": "C5176522",
+    "snomed_term": "PEEP | Respiratory system | Respiratory measures and Ventilator management"
+  },
+  "50820": {
+    "loinc": "11558-4",
+    "label": "pH",
+    "snomed_code": "250573004",
+    "snomed_term": "Hydrogen ion concentration measurement"
+  },
+  "50821": {
+    "loinc": "11556-8",
+    "label": "pO2",
+    "snomed_code": "C1283004",
+    "snomed_term": "PO2 measurement"
+  },
+  "50822": {
+    "loinc": "6298-4",
+    "label": "Potassium, Whole Blood",
+    "snomed_code": "C2702996",
+    "snomed_term": "Measurement of potassium in whole blood"
+  },
+  "50823": {
+    "loinc": "3150-0",
+    "label": "Required O2",
+    "snomed_code": "C5401320",
+    "snomed_term": "Clinical Status Ordinal Scale Outcome 6"
+  },
+  "50824": {
+    "loinc": "2947-0",
+    "label": "Sodium, Whole Blood",
+    "snomed_code": "C2702997",
+    "snomed_term": "Measurement of sodium in whole blood"
+  },
+  "50825": {
+    "loinc": "8310-5",
+    "label": "Temperature",
+    "snomed_code": "C0886414",
+    "snomed_term": "Body temperature measurement"
+  },
+  "50826": {
+    "loinc": "20112-9",
+    "label": "Tidal Volume",
+    "snomed_code": "C5183376",
+    "snomed_term": "Tidal volume | Ventilator | Respiratory measures and Ventilator management"
+  },
+  "50827": {
+    "loinc": "76526-3",
+    "label": "Ventilation Rate",
+    "snomed_code": "C4071515",
+    "snomed_term": "Breaths^on ventilator:NRat:Pt:Respiratory system:Qn:Carbon dioxide measurement"
+  },
+  "50828": {
+    "loinc": "20124-4",
+    "label": "Ventilator",
+    "snomed_code": "C4480224",
+    "snomed_term": "ventilation measurements"
+  },
+  "50830": {
+    "loinc": "2023-0",
+    "label": "pCO2, Body Fluid",
+    "snomed_code": "C1255547",
+    "snomed_term": "Body Fluid PCO2 Test"
+  },
+  "50831": {
+    "loinc": "2748-2",
+    "label": "pH",
+    "snomed_code": "250573004",
+    "snomed_term": "Hydrogen ion concentration measurement"
+  },
+  "50832": {
+    "loinc": "2706-0",
+    "label": "pO2, Body Fluid",
+    "snomed_code": "C1255548",
+    "snomed_term": "Body Fluid PO2 Test"
+  },
+  "50833": {
+    "loinc": "2821-7",
+    "label": "Potassium",
+    "snomed_code": "C0202194",
+    "snomed_term": "Potassium measurement"
+  },
+  "50834": {
+    "loinc": "2950-4",
+    "label": "Sodium, Body Fluid",
+    "snomed_code": "C0365094",
+    "snomed_term": "Sodium:SCnc:Pt:Body fld:Qn"
+  },
+  "50835": {
+    "loinc": "1749-1",
+    "label": "Albumin, Ascites",
+    "snomed_code": "C5670286",
+    "snomed_term": "Serum-Ascites Albumin Gradient Measurement"
+  },
+  "50836": {
+    "loinc": "1797-0",
+    "label": "Amylase, Ascites",
+    "snomed_code": "413057001",
+    "snomed_term": "Ascitic fluid amylase measurement"
+  },
+  "50837": {
+    "loinc": "54360-3",
+    "label": "Bicarbonate, Ascites",
+    "snomed_code": "C2707103",
+    "snomed_term": "Bicarbonate:SCnc:Pt:Periton fld:Qn"
+  },
+  "50838": {
+    "loinc": "14422-0",
+    "label": "Bilirubin, Total, Ascites"
+  },
+  "50839": {
+    "loinc": "33366-6",
+    "label": "Chloride, Ascites",
+    "snomed_code": "C1315835",
+    "snomed_term": "Chloride:SCnc:Pt:Periton fld:Qn"
+  },
+  "50840": {
+    "loinc": "14441-0",
+    "label": "Cholesterol, Ascites",
+    "snomed_code": "C0797618",
+    "snomed_term": "Cholesterol:MCnc:Pt:Periton fld:Qn"
+  },
+  "50841": {
+    "loinc": "12191-3",
+    "label": "Creatinine, Ascites",
+    "snomed_code": "C0550284",
+    "snomed_term": "Creatinine:MCnc:Pt:Periton fld:Qn"
+  },
+  "50842": {
+    "loinc": "2347-3",
+    "label": "Glucose, Ascites",
+    "snomed_code": "413059003",
+    "snomed_term": "Ascitic fluid glucose measurement"
+  },
+  "50843": {
+    "loinc": "2531-2",
+    "label": "Lactate Dehydrogenase, Ascites",
+    "snomed_code": "C6019676",
+    "snomed_term": "Lactate dehydrogenase:{Measurement}:-:Periton fld:-"
+  },
+  "50844": {
+    "loinc": "32722-1",
+    "label": "Lipase, Ascites",
+    "snomed_code": "C1315193",
+    "snomed_term": "Triacylglycerol lipase:CCnc:Pt:Periton fld:Qn"
+  },
+  "50846": {
+    "loinc": "2691-4",
+    "label": "Osmolality, Ascites",
+    "snomed_code": "C0364834",
+    "snomed_term": "Observation:Osmol:Pt:Periton fld:Qn"
+  },
+  "50847": {
+    "loinc": "49789-1",
+    "label": "Potassium, Ascites",
+    "snomed_code": "C1977612",
+    "snomed_term": "Potassium:SCnc:Pt:Periton fld:Qn"
+  },
+  "50848": {
+    "loinc": "49790-9",
+    "label": "Sodium, Ascites",
+    "snomed_code": "C1977102",
+    "snomed_term": "Sodium:SCnc:Pt:Periton fld:Qn"
+  },
+  "50849": {
+    "loinc": "2883-7",
+    "label": "Total Protein, Ascites"
+  },
+  "50850": {
+    "loinc": "14447-7",
+    "label": "Triglycerides, Ascites",
+    "snomed_code": "C0797624",
+    "snomed_term": "Triglyceride:MCnc:Pt:Periton fld:Qn"
+  },
+  "50851": {
+    "loinc": "12265-5",
+    "label": "Urea Nitrogen, Ascites",
+    "snomed_code": "C0550555",
+    "snomed_term": "Urea nitrogen:MCnc:Pt:Periton fld:Qn"
+  },
+  "50852": {
+    "loinc": "4548-4",
+    "label": "% Hemoglobin A1c",
+    "snomed_code": "43396009",
+    "snomed_term": "Hemoglobin A1c measurement"
+  },
+  "50853": {
+    "loinc": "1989-3",
+    "label": "25-OH Vitamin D",
+    "snomed_code": "C1255280",
+    "snomed_term": "25-Oh D Vitamin Test"
+  },
+  "50854": {
+    "loinc": "41995-2",
+    "label": "Absolute A1c"
+  },
+  "50855": {
+    "loinc": "718-7",
+    "label": "Absolute Hemoglobin"
+  },
+  "50856": {
+    "loinc": "3298-7",
+    "label": "Acetaminophen",
+    "snomed_code": "C0373527",
+    "snomed_term": "Acetaminophen measurement"
+  },
+  "50857": {
+    "loinc": "5567-3",
+    "label": "Acetone",
+    "snomed_code": "105050005",
+    "snomed_term": "Acetone measurement"
+  },
+  "50858": {
+    "loinc": "1715-2",
+    "label": "Acid Phosphatase",
+    "snomed_code": "C0201834",
+    "snomed_term": "Acid phosphatase measurement"
+  },
+  "50859": {
+    "loinc": "12173-1",
+    "label": "Acid Phosphatase, Non-Prostatic",
+    "snomed_code": "C3639403",
+    "snomed_term": "Non-Prostatic Acid Phosphatase Measurement"
+  },
+  "50860": {
+    "loinc": "1834-1",
+    "label": "AFP, Maternal Screen",
+    "snomed_code": "C2210854",
+    "snomed_term": "alpha-fetoprotein tetra profile"
+  },
+  "50861": {
+    "loinc": "1742-6",
+    "label": "Alanine Aminotransferase (ALT)",
+    "snomed_code": "250637003",
+    "snomed_term": "Alanine aminotransferase - blood measurement"
+  },
+  "50862": {
+    "loinc": "1751-7",
+    "label": "Albumin",
+    "snomed_code": "C0201838",
+    "snomed_term": "Albumin measurement"
+  },
+  "50863": {
+    "loinc": "6768-6",
+    "label": "Alkaline Phosphatase",
+    "snomed_code": "C0201850",
+    "snomed_term": "Alkaline phosphatase measurement"
+  },
+  "50864": {
+    "loinc": "1834-1",
+    "label": "Alpha-Fetoprotein",
+    "snomed_code": "C0201539",
+    "snomed_term": "Alpha-1-Fetoprotein measurement"
+  },
+  "50865": {
+    "loinc": "35669-1",
+    "label": "Amikacin",
+    "snomed_code": "1550000",
+    "snomed_term": "Amikacin measurement"
+  },
+  "50866": {
+    "loinc": "16362-6",
+    "label": "Ammonia",
+    "snomed_code": "C0201879",
+    "snomed_term": "Ammonia measurement"
+  },
+  "50867": {
+    "loinc": "1798-8",
+    "label": "Amylase",
+    "snomed_code": "C0201883",
+    "snomed_term": "Amylase measurement"
+  },
+  "50868": {
+    "loinc": "1863-0",
+    "label": "Anion Gap",
+    "snomed_code": "C0201889",
+    "snomed_term": "Anion gap measurement"
+  },
+  "50869": {
+    "loinc": "63420-4",
+    "label": "Anti-DGP (IgA/IgG)"
+  },
+  "50870": {
+    "loinc": "58709-7",
+    "label": "Anti-Gliadin Antibody, IgA"
+  },
+  "50871": {
+    "loinc": "17284-1",
+    "label": "Anti-Mitochondrial Antibody",
+    "snomed_code": "C5235498",
+    "snomed_term": "Mitochondrial M2 IgG Antibody Measurement"
+  },
+  "50872": {
+    "loinc": "17351-8",
+    "label": "Anti-Neutrophil Cytoplasmic Antibody",
+    "snomed_code": "C4049937",
+    "snomed_term": "Anti-Neutrophil Cytoplasmic Antibody Measurement"
+  },
+  "50873": {
+    "loinc": "8061-4",
+    "label": "Anti-Nuclear Antibody",
+    "snomed_code": "C0587178",
+    "snomed_term": "Anti-nuclear antibody measurement"
+  },
+  "50874": {
+    "loinc": "5048-4",
+    "label": "Anti-Nuclear Antibody, Titer"
+  },
+  "50875": {
+    "loinc": "14241-4",
+    "label": "Anti-Parietal Cell Antibody",
+    "snomed_code": "121134001",
+    "snomed_term": "Parietal cell antibody"
+  },
+  "50876": {
+    "loinc": "14252-1",
+    "label": "Anti-Smooth Muscle Antibody",
+    "snomed_code": "C0201511",
+    "snomed_term": "Smooth muscle antibody measurement"
+  },
+  "50877": {
+    "loinc": "8098-6",
+    "label": "Anti-Thyroglobulin Antibodies",
+    "snomed_code": "17164004",
+    "snomed_term": "Thyroglobulin antibody measurement"
+  },
+  "50878": {
+    "loinc": "1920-8",
+    "label": "Asparate Aminotransferase (AST)"
+  },
+  "50879": {
+    "loinc": "3376-1",
+    "label": "Barbiturate Screen",
+    "snomed_code": "C0365606",
+    "snomed_term": "Barbiturate screen absent:Prid:Pt:Urine:Nom"
+  },
+  "50880": {
+    "loinc": "42662-7",
+    "label": "Benzodiazepine Screen",
+    "snomed_code": "C3654323",
+    "snomed_term": "Benzodiazepines panel:-:Pt:Saliva:-:Screen"
+  },
+  "50881": {
+    "loinc": "1952-1",
+    "label": "Beta-2 Microglobulin",
+    "snomed_code": "C0201910",
+    "snomed_term": "Beta-2-microglobulin measurement"
+  },
+  "50882": {
+    "loinc": "1963-8",
+    "label": "Bicarbonate",
+    "snomed_code": "C0202059",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "50883": {
+    "loinc": "1968-7",
+    "label": "Bilirubin, Direct",
+    "snomed_code": "39748002",
+    "snomed_term": "Bilirubin, direct measurement"
+  },
+  "50884": {
+    "loinc": "1971-1",
+    "label": "Bilirubin, Indirect",
+    "snomed_code": "C1881193",
+    "snomed_term": "Indirect Bilirubin Measurement"
+  },
+  "50885": {
+    "loinc": "1975-2",
+    "label": "Bilirubin, Total",
+    "snomed_code": "359986008",
+    "snomed_term": "Bilirubin, total measurement"
+  },
+  "50889": {
+    "loinc": "1988-5",
+    "label": "C-Reactive Protein",
+    "snomed_code": "C0201657",
+    "snomed_term": "C-reactive protein measurement"
+  },
+  "50890": {
+    "loinc": "4485-9",
+    "label": "C3",
+    "snomed_code": "C2699419",
+    "snomed_term": "Complement C3 Measurement"
+  },
+  "50891": {
+    "loinc": "4498-2",
+    "label": "C4",
+    "snomed_code": "C6020154",
+    "snomed_term": "Complement C4:{Measurement}:-:Ser/Plas:-"
+  },
+  "50892": {
+    "loinc": "10334-1",
+    "label": "CA-125",
+    "snomed_code": "C0201549",
+    "snomed_term": "CA 125 measurement"
+  },
+  "50893": {
+    "loinc": "17861-6",
+    "label": "Calcium, Total",
+    "snomed_code": "C3525566",
+    "snomed_term": "Measurement of total calcium"
+  },
+  "50894": {
+    "loinc": "96559-0",
+    "label": "Calculated Free Testosterone",
+    "snomed_code": "C5832361",
+    "snomed_term": "Testosterone.free:MCnc:Pt:Ser/Plas:Qn:Calculated"
+  },
+  "50895": {
+    "loinc": "3027-0",
+    "label": "Calculated TBG"
+  },
+  "50896": {
+    "loinc": "32215-6",
+    "label": "Calculated Thyroxine (T4) Index",
+    "snomed_code": "C1147899",
+    "snomed_term": "Thyroxine free index:MCnc:Pt:Ser/Plas:Qn:Calculated"
+  },
+  "50898": {
+    "loinc": "17842-6",
+    "label": "Cancer Antigen 27.29",
+    "snomed_code": "C0291672",
+    "snomed_term": "CA 27-29 antigen"
+  },
+  "50899": {
+    "loinc": "3432-2",
+    "label": "Carbamazepine",
+    "snomed_code": "870006",
+    "snomed_term": "Carbamazepine measurement"
+  },
+  "50900": {
+    "loinc": "2039-6",
+    "label": "Carcinoembyronic Antigen (CEA)"
+  },
+  "50901": {
+    "loinc": "16137-2",
+    "label": "Centromere",
+    "snomed_code": "43872009",
+    "snomed_term": "Antibody to centromere measurement"
+  },
+  "50902": {
+    "loinc": "2075-0",
+    "label": "Chloride",
+    "snomed_code": "C0201952",
+    "snomed_term": "Chloride measurement"
+  },
+  "50903": {
+    "loinc": "9830-1",
+    "label": "Cholesterol Ratio (Total/HDL)",
+    "snomed_code": "104583003",
+    "snomed_term": "HDL/total cholesterol ratio measurement"
+  },
+  "50904": {
+    "loinc": "2085-9",
+    "label": "Cholesterol, HDL",
+    "snomed_code": "166832000",
+    "snomed_term": "Serum HDL cholesterol measurement"
+  },
+  "50905": {
+    "loinc": "13457-7",
+    "label": "Cholesterol, LDL, Calculated",
+    "snomed_code": "C0550264",
+    "snomed_term": "Cholesterol.in LDL:MCnc:Pt:Ser/Plas:Qn:Calculated"
+  },
+  "50906": {
+    "loinc": "18262-6",
+    "label": "Cholesterol, LDL, Measured",
+    "snomed_code": "166833005",
+    "snomed_term": "Serum LDL cholesterol measurement"
+  },
+  "50907": {
+    "loinc": "2093-3",
+    "label": "Cholesterol, Total",
+    "snomed_code": "412808005",
+    "snomed_term": "Serum total cholesterol measurement"
+  },
+  "50908": {
+    "loinc": "49136-5",
+    "label": "CK-MB Index",
+    "snomed_code": "C1954900",
+    "snomed_term": "Creatine kinase.MB/Creatine kinase.total:Ratio:Pt:Ser/Plas:Qn"
+  },
+  "50909": {
+    "loinc": "2143-6",
+    "label": "Cortisol",
+    "snomed_code": "C0201968",
+    "snomed_term": "Cortisol Measurement"
+  },
+  "50910": {
+    "loinc": "2157-6",
+    "label": "Creatine Kinase (CK)",
+    "snomed_code": "C2229882",
+    "snomed_term": "serum total creatine kinase (CK) measurement"
+  },
+  "50911": {
+    "loinc": "13969-1",
+    "label": "Creatine Kinase, MB Isoenzyme",
+    "snomed_code": "250736004",
+    "snomed_term": "Creatine kinase MB isoenzyme/total creatine kinase ratio measurement"
+  },
+  "50912": {
+    "loinc": "2160-0",
+    "label": "Creatinine",
+    "snomed_code": "C0201975",
+    "snomed_term": "Creatinine measurement"
+  },
+  "50913": {
+    "loinc": "5117-7",
+    "label": "Cryoglobulin",
+    "snomed_code": "C0202093",
+    "snomed_term": "Cryoglobulin measurement"
+  },
+  "50914": {
+    "loinc": "3520-4",
+    "label": "Cyclosporin",
+    "snomed_code": "313656007",
+    "snomed_term": "Blood cyclosporin measurement"
+  },
+  "50915": {
+    "loinc": "48065-7",
+    "label": "D-Dimer",
+    "snomed_code": "C2826333",
+    "snomed_term": "D-Dimer Measurement"
+  },
+  "50916": {
+    "loinc": "2191-5",
+    "label": "DHEA-Sulfate",
+    "snomed_code": "C0201983",
+    "snomed_term": "Dehydroepiandrosterone sulfate measurement (procedure)"
+  },
+  "50917": {
+    "loinc": "10535-3",
+    "label": "Digoxin",
+    "snomed_code": "25514001",
+    "snomed_term": "Digoxin measurement"
+  },
+  "50918": {
+    "loinc": "31348-6",
+    "label": "Double Stranded DNA",
+    "snomed_code": "C2698136",
+    "snomed_term": "Anti-Double Stranded DNA Measurement"
+  },
+  "50920": {
+    "loinc": "77147-7",
+    "label": "Estimated GFR (MDRD equation)"
+  },
+  "50921": {
+    "loinc": "2243-4",
+    "label": "Estradiol",
+    "snomed_code": "C0337434",
+    "snomed_term": "Estradiol measurement"
+  },
+  "50922": {
+    "loinc": "5640-8",
+    "label": "Ethanol",
+    "snomed_code": "430837008",
+    "snomed_term": "Ethanol measurement"
+  },
+  "50924": {
+    "loinc": "2276-4",
+    "label": "Ferritin",
+    "snomed_code": "489004",
+    "snomed_term": "Ferritin measurement"
+  },
+  "50925": {
+    "loinc": "2284-8",
+    "label": "Folate",
+    "snomed_code": "C6019011",
+    "snomed_term": "Folate:{Measurement}:-:Ser/Plas:-"
+  },
+  "50926": {
+    "loinc": "15067-2",
+    "label": "Follicle Stimulating Hormone",
+    "snomed_code": "C0202022",
+    "snomed_term": "Follicle stimulating hormone measurement"
+  },
+  "50927": {
+    "loinc": "2324-2",
+    "label": "Gamma Glutamyltransferase",
+    "snomed_code": "104681009",
+    "snomed_term": "gamma-Glutamyltransferase/aspartate amino transferase ratio measurement"
+  },
+  "50928": {
+    "loinc": "2333-3",
+    "label": "Gastrin",
+    "snomed_code": "87535006",
+    "snomed_term": "Gastrin measurement"
+  },
+  "50929": {
+    "loinc": "35668-3",
+    "label": "Gentamicin",
+    "snomed_code": "23463002",
+    "snomed_term": "Gentamicin measurement"
+  },
+  "50930": {
+    "loinc": "2336-6",
+    "label": "Globulin",
+    "snomed_code": "C0877347",
+    "snomed_term": "Globulin measurement"
+  },
+  "50931": {
+    "loinc": "2345-7",
+    "label": "Glucose",
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "50935": {
+    "loinc": "4542-7",
+    "label": "Haptoglobin",
+    "snomed_code": "C6020439",
+    "snomed_term": "Haptoglobin:{Measurement}:-:Ser/Plas:-"
+  },
+  "50936": {
+    "loinc": "19080-1",
+    "label": "HCG, Maternal Screen"
+  },
+  "50937": {
+    "loinc": "13951-9",
+    "label": "Hepatitis A Virus Antibody",
+    "snomed_code": "C0201473",
+    "snomed_term": "Hepatitis A virus antibody measurement"
+  },
+  "50938": {
+    "loinc": "22314-9",
+    "label": "Hepatitis A Virus IgM Antibody",
+    "snomed_code": "C2984947",
+    "snomed_term": "Hepatitis A Virus Antibody IgM Measurement"
+  },
+  "50939": {
+    "loinc": "31204-1",
+    "label": "Hepatitis B Core Antibody, IgM",
+    "snomed_code": "50506008",
+    "snomed_term": "Hepatitis B core antibody measurement, IgM type"
+  },
+  "50940": {
+    "loinc": "22322-2",
+    "label": "Hepatitis B Surface Antibody",
+    "snomed_code": "C0201478",
+    "snomed_term": "Hepatitis B surface antibody measurement"
+  },
+  "50941": {
+    "loinc": "5196-1",
+    "label": "Hepatitis B Surface Antigen",
+    "snomed_code": "C0201477",
+    "snomed_term": "Hepatitis B surface antigen measurement"
+  },
+  "50942": {
+    "loinc": "13952-7",
+    "label": "Hepatitis B Virus Core Antibody",
+    "snomed_code": "C3272940",
+    "snomed_term": "Hepatitis B Virus Core Antibody Measurement"
+  },
+  "50943": {
+    "loinc": "13955-0",
+    "label": "Hepatitis C Virus Antibody",
+    "snomed_code": "122348006",
+    "snomed_term": "Measurement of Hepatitis C virus C33c antibody"
+  },
+  "50944": {
+    "loinc": "5220-9",
+    "label": "HIV Antibody",
+    "snomed_code": "C3714540",
+    "snomed_term": "HIV Antibody Measurement"
+  },
+  "50945": {
+    "loinc": "13965-9",
+    "label": "Homocysteine",
+    "snomed_code": "104733005",
+    "snomed_term": "Homocysteine measurement"
+  },
+  "50946": {
+    "loinc": "19080-1",
+    "label": "Human Chorionic Gonadotropin",
+    "snomed_code": "C0428402",
+    "snomed_term": "Human chorionic gonadotropin measurement"
+  },
+  "50948": {
+    "loinc": "25700-6",
+    "label": "Immunofixation",
+    "snomed_code": "C0551232",
+    "snomed_term": "Interpretation:Imp:Pt:Urine:Nom:Immunofixation"
+  },
+  "50949": {
+    "loinc": "2458-8",
+    "label": "Immunoglobulin A",
+    "snomed_code": "C0202081",
+    "snomed_term": "Immunoglobulin measurement"
+  },
+  "50950": {
+    "loinc": "2465-3",
+    "label": "Immunoglobulin G",
+    "snomed_code": "C0202087",
+    "snomed_term": "Immunoglobulin G measurement"
+  },
+  "50951": {
+    "loinc": "2472-9",
+    "label": "Immunoglobulin M",
+    "snomed_code": "C0202084",
+    "snomed_term": "Immunoglobulin M measurement"
+  },
+  "50952": {
+    "loinc": "2498-4",
+    "label": "Iron",
+    "snomed_code": "C0337439",
+    "snomed_term": "Iron measurement"
+  },
+  "50953": {
+    "loinc": "2500-7",
+    "label": "Iron Binding Capacity, Total",
+    "snomed_code": "C1283048",
+    "snomed_term": "Total iron binding capacity measurement"
+  },
+  "50954": {
+    "loinc": "2532-0",
+    "label": "Lactate Dehydrogenase (LD)",
+    "snomed_code": "C3525755",
+    "snomed_term": "Separation and measurement of lactate dehydrogenase (LD/LDH) isoenzymes"
+  },
+  "50956": {
+    "loinc": "3040-3",
+    "label": "Lipase",
+    "snomed_code": "C0373670",
+    "snomed_term": "Lipase measurement"
+  },
+  "50957": {
+    "loinc": "14334-7",
+    "label": "Lithium",
+    "snomed_code": "54392006",
+    "snomed_term": "Lithium measurement"
+  },
+  "50958": {
+    "loinc": "10501-5",
+    "label": "Luteinizing Hormone",
+    "snomed_code": "C0202123",
+    "snomed_term": "Luteinizing hormone measurement"
+  },
+  "50959": {
+    "loinc": "72680-2",
+    "label": "Macro Prolactin"
+  },
+  "50960": {
+    "loinc": "19123-9",
+    "label": "Magnesium",
+    "snomed_code": "C0373675",
+    "snomed_term": "Magnesium measurement"
+  },
+  "50961": {
+    "loinc": "14836-1",
+    "label": "Methotrexate",
+    "snomed_code": "22189001",
+    "snomed_term": "Methotrexate measurement"
+  },
+  "50962": {
+    "loinc": "3834-9",
+    "label": "N-Acetylprocainamide (NAPA)",
+    "snomed_code": "C2208883",
+    "snomed_term": "serum N-acetylprocainamide (NAPA) level"
+  },
+  "50963": {
+    "loinc": "33762-6",
+    "label": "NTproBNP",
+    "snomed_code": "C0669479",
+    "snomed_term": "pro-brain natriuretic peptide (1-76)"
+  },
+  "50964": {
+    "loinc": "2692-2",
+    "label": "Osmolality, Measured",
+    "snomed_code": "29056004",
+    "snomed_term": "Osmolality measurement"
+  },
+  "50965": {
+    "loinc": "2731-8",
+    "label": "Parathyroid Hormone",
+    "snomed_code": "C0202159",
+    "snomed_term": "Parathyroid hormone measurement"
+  },
+  "50966": {
+    "loinc": "3948-7",
+    "label": "Phenobarbital",
+    "snomed_code": "105294009",
+    "snomed_term": "Phenobarbital measurement"
+  },
+  "50967": {
+    "loinc": "3968-5",
+    "label": "Phenytoin",
+    "snomed_code": "33748008",
+    "snomed_term": "Phenytoin measurement"
+  },
+  "50968": {
+    "loinc": "3969-3",
+    "label": "Phenytoin, Free",
+    "snomed_code": "105298007",
+    "snomed_term": "Phenytoin, free measurement"
+  },
+  "50969": {
+    "loinc": "10548-6",
+    "label": "Phenytoin, Percent Free"
+  },
+  "50970": {
+    "loinc": "2777-1",
+    "label": "Phosphate",
+    "snomed_code": "C0523826",
+    "snomed_term": "Phosphate measurement"
+  },
+  "50971": {
+    "loinc": "2823-3",
+    "label": "Potassium",
+    "snomed_code": "C0202194",
+    "snomed_term": "Potassium measurement"
+  },
+  "50972": {
+    "loinc": "3982-6",
+    "label": "Procainamide",
+    "snomed_code": "59014001",
+    "snomed_term": "Procainamide measurement"
+  },
+  "50973": {
+    "loinc": "2842-3",
+    "label": "Prolactin",
+    "snomed_code": "113083009",
+    "snomed_term": "Prolactin measurement"
+  },
+  "50974": {
+    "loinc": "2857-1",
+    "label": "Prostate Specific Antigen",
+    "snomed_code": "C0201544",
+    "snomed_term": "Prostate specific antigen measurement"
+  },
+  "50975": {
+    "loinc": "12851-2",
+    "label": "Protein Electrophoresis",
+    "snomed_code": "C2210364",
+    "snomed_term": "peritoneal fluid protein electrophoresis: albumin measurement"
+  },
+  "50976": {
+    "loinc": "2885-2",
+    "label": "Protein, Total",
+    "snomed_code": "C0555903",
+    "snomed_term": "Total protein measurement"
+  },
+  "50977": {
+    "loinc": "6694-4",
+    "label": "Quinidine",
+    "snomed_code": "82650003",
+    "snomed_term": "Quinidine measurement"
+  },
+  "50978": {
+    "loinc": "29247-4",
+    "label": "Rapamycin",
+    "snomed_code": "C0072980",
+    "snomed_term": "sirolimus"
+  },
+  "50980": {
+    "loinc": "11572-5",
+    "label": "Rheumatoid Factor",
+    "snomed_code": "C0201660",
+    "snomed_term": "Rheumatoid Factor Measurement"
+  },
+  "50981": {
+    "loinc": "4024-6",
+    "label": "Salicylate",
+    "snomed_code": "36206007",
+    "snomed_term": "Salicylate measurement"
+  },
+  "50982": {
+    "loinc": "13967-5",
+    "label": "Sex Hormone Binding Globulin",
+    "snomed_code": "C0202218",
+    "snomed_term": "Sex hormone binding globulin measurement"
+  },
+  "50983": {
+    "loinc": "2951-2",
+    "label": "Sodium",
+    "snomed_code": "C0337443",
+    "snomed_term": "Sodium measurement"
+  },
+  "50986": {
+    "loinc": "11253-2",
+    "label": "tacroFK"
+  },
+  "50988": {
+    "loinc": "2986-8",
+    "label": "Testosterone",
+    "snomed_code": "104957004",
+    "snomed_term": "Testosterone measurement"
+  },
+  "50989": {
+    "loinc": "2991-8",
+    "label": "Testosterone, Free",
+    "snomed_code": "20436004",
+    "snomed_term": "Testosterone measurement, unbound"
+  },
+  "50990": {
+    "loinc": "4049-3",
+    "label": "Theophylline",
+    "snomed_code": "C0039773",
+    "snomed_term": "Assay of theophylline"
+  },
+  "50991": {
+    "loinc": "3013-0",
+    "label": "Thyroglobulin",
+    "snomed_code": "C0337445",
+    "snomed_term": "Thyroglobulin measurement"
+  },
+  "50992": {
+    "loinc": "8099-4",
+    "label": "Thyroid Peroxidase Antibodies",
+    "snomed_code": "118002003",
+    "snomed_term": "Thyroperoxidase antibody assay"
+  },
+  "50993": {
+    "loinc": "3016-3",
+    "label": "Thyroid Stimulating Hormone",
+    "snomed_code": "C0202230",
+    "snomed_term": "Thyroid stimulating hormone measurement"
+  },
+  "50994": {
+    "loinc": "3026-2",
+    "label": "Thyroxine (T4)",
+    "snomed_code": "C5413479",
+    "snomed_term": "Measurement of thyroxine (T4) uptake"
+  },
+  "50995": {
+    "loinc": "3024-7",
+    "label": "Thyroxine (T4), Free",
+    "snomed_code": "C6020936",
+    "snomed_term": "Thyroxine.free:{Measurement}:-:Ser/Plas:-"
+  },
+  "50996": {
+    "loinc": "31017-7",
+    "label": "Tissue Transglutaminase Ab, IgA",
+    "snomed_code": "C6020024",
+    "snomed_term": "Tissue transglutaminase Ab.IgA:{Measurement}:-:Ser:-"
+  },
+  "50997": {
+    "loinc": "35670-9",
+    "label": "Tobramycin",
+    "snomed_code": "389000",
+    "snomed_term": "Tobramycin measurement"
+  },
+  "50998": {
+    "loinc": "3034-6",
+    "label": "Transferrin",
+    "snomed_code": "C0202105",
+    "snomed_term": "Transferrin measurement"
+  },
+  "50999": {
+    "loinc": "80146-4",
+    "label": "Tricyclic Antidepressant Screen",
+    "snomed_code": "C0802216",
+    "snomed_term": "Tricyclic antidepressants screen method:Prid:Pt:Urine:Nom:*"
+  },
+  "51000": {
+    "loinc": "2571-8",
+    "label": "Triglycerides",
+    "snomed_code": "C0202236",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "51001": {
+    "loinc": "3053-6",
+    "label": "Triiodothyronine (T3)",
+    "snomed_code": "C5413480",
+    "snomed_term": "Measurement of triiodothyronine (T3) uptake"
+  },
+  "51002": {
+    "loinc": "10839-9",
+    "label": "Troponin I",
+    "snomed_code": "C0920210",
+    "snomed_term": "Troponin I measurement"
+  },
+  "51003": {
+    "loinc": "6598-7",
+    "label": "Troponin T",
+    "snomed_code": "C1141947",
+    "snomed_term": "Troponin T measurement"
+  },
+  "51004": {
+    "loinc": "2250-9",
+    "label": "UE3, Maternal Screen"
+  },
+  "51005": {
+    "loinc": "3050-2",
+    "label": "Uptake Ratio",
+    "snomed_code": "C0365172",
+    "snomed_term": "Thyroxine/Triiodothyronine uptake index:MRto:Pt:Ser/Plas:Qn"
+  },
+  "51006": {
+    "loinc": "3094-0",
+    "label": "Urea Nitrogen",
+    "snomed_code": "24509005",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "51007": {
+    "loinc": "3084-1",
+    "label": "Uric Acid",
+    "snomed_code": "86228006",
+    "snomed_term": "Uric acid measurement (procedure)"
+  },
+  "51008": {
+    "loinc": "4086-5",
+    "label": "Valproic Acid",
+    "snomed_code": "71466003",
+    "snomed_term": "Valproic acid measurement"
+  },
+  "51009": {
+    "loinc": "20578-1",
+    "label": "Vancomycin",
+    "snomed_code": "68939003",
+    "snomed_term": "Vancomycin measurement"
+  },
+  "51010": {
+    "loinc": "2132-9",
+    "label": "Vitamin B12",
+    "snomed_code": "C0202252",
+    "snomed_term": "VITAMIN B12 MEASUREMENT"
+  },
+  "51019": {
+    "loinc": "1752-5",
+    "label": "Albumin, Joint Fluid",
+    "snomed_code": "C0797615",
+    "snomed_term": "Albumin/Globulin:MRto:Pt:Synv fld:Qn"
+  },
+  "51020": {
+    "loinc": "14388-3",
+    "label": "Amylase, Joint Fluid",
+    "snomed_code": "C2321418",
+    "snomed_term": "joint fluid amylase measurement"
+  },
+  "51021": {
+    "loinc": "14401-4",
+    "label": "Creatinine, Joint Fluid",
+    "snomed_code": "C0797579",
+    "snomed_term": "Creatinine:MCnc:Pt:Synv fld:Qn"
+  },
+  "51022": {
+    "loinc": "2348-1",
+    "label": "Glucose, Joint Fluid",
+    "snomed_code": "C0364488",
+    "snomed_term": "Glucose:MCnc:Pt:Synv fld:Qn"
+  },
+  "51023": {
+    "loinc": "2533-8",
+    "label": "LD, Joint Fluid"
+  },
+  "51024": {
+    "loinc": "2886-0",
+    "label": "Total Protein, Joint Fluid",
+    "snomed_code": "C0798295",
+    "snomed_term": "Albumin/Protein.total:MFr:Pt:Synv fld:Qn:Electrophoresis"
+  },
+  "51025": {
+    "loinc": "1747-5",
+    "label": "Albumin, Body Fluid",
+    "snomed_code": "C2209078",
+    "snomed_term": "body fluid albumin measurement"
+  },
+  "51026": {
+    "loinc": "1795-4",
+    "label": "Amylase, Body Fluid",
+    "snomed_code": "269929002",
+    "snomed_term": "Fluid sample amylase measurement"
+  },
+  "51027": {
+    "loinc": "16459-0",
+    "label": "Bicarbonate, Other Fluid"
+  },
+  "51028": {
+    "loinc": "1974-5",
+    "label": "Bilirubin, Total, Body Fluid",
+    "snomed_code": "C6019823",
+    "snomed_term": "Bilirubin:{Measurement}:-:Body fld:-"
+  },
+  "51029": {
+    "loinc": "15155-5",
+    "label": "Calcium, Body Fluid",
+    "snomed_code": "C0798326",
+    "snomed_term": "Calcium:MCnc:Pt:Body fld:Qn"
+  },
+  "51030": {
+    "loinc": "2072-7",
+    "label": "Chloride, Body Fluid",
+    "snomed_code": "104590008",
+    "snomed_term": "Chloride measurement, body fluid"
+  },
+  "51031": {
+    "loinc": "12183-0",
+    "label": "Cholesterol, Body Fluid",
+    "snomed_code": "C0550266",
+    "snomed_term": "Cholest Fld-mCnc"
+  },
+  "51032": {
+    "loinc": "12190-5",
+    "label": "Creatinine, Body Fluid",
+    "snomed_code": "269924007",
+    "snomed_term": "Fluid sample creatinine measurement"
+  },
+  "51033": {
+    "loinc": "20404-0",
+    "label": "FetalFN"
+  },
+  "51034": {
+    "loinc": "2344-0",
+    "label": "Glucose, Body Fluid",
+    "snomed_code": "269926009",
+    "snomed_term": "Fluid sample glucose measurement"
+  },
+  "51035": {
+    "loinc": "2529-6",
+    "label": "LD, Body Fluid",
+    "snomed_code": "313956009",
+    "snomed_term": "Lactate dehydrogenase measurement, body fluid"
+  },
+  "51036": {
+    "loinc": "15212-4",
+    "label": "Lipase, Body Fluid",
+    "snomed_code": "C0798383",
+    "snomed_term": "Triacylglycerol lipase:CCnc:Pt:Body fld:Qn"
+  },
+  "51037": {
+    "loinc": "29365-4",
+    "label": "Magnesium, Body Fluid",
+    "snomed_code": "C0944827",
+    "snomed_term": "Magnesium:MCnc:Pt:Body fld:Qn"
+  },
+  "51039": {
+    "loinc": "15200-9",
+    "label": "Osmolality, Body Fluid",
+    "snomed_code": "C0798371",
+    "snomed_term": "Observation:Osmol:Pt:Body fld:Qn"
+  },
+  "51040": {
+    "loinc": "12242-4",
+    "label": "Phosphate, Body Fluid",
+    "snomed_code": "C0550455",
+    "snomed_term": "Phosphate Fld-mCnc"
+  },
+  "51041": {
+    "loinc": "2821-7",
+    "label": "Potassium, Body Fluid",
+    "snomed_code": "C0364964",
+    "snomed_term": "Potassium:SCnc:Pt:Body fld:Qn"
+  },
+  "51042": {
+    "loinc": "2950-4",
+    "label": "Sodium, Body Fluid",
+    "snomed_code": "C0365094",
+    "snomed_term": "Sodium:SCnc:Pt:Body fld:Qn"
+  },
+  "51043": {
+    "loinc": "2881-1",
+    "label": "Total Protein, Body Fluid",
+    "snomed_code": "C2209630",
+    "snomed_term": "body fluid total protein measurement"
+  },
+  "51044": {
+    "loinc": "12228-3",
+    "label": "Triglycer"
+  },
+  "51045": {
+    "loinc": "3093-2",
+    "label": "Urea Nitrogen, Body Fluid",
+    "snomed_code": "C0365239",
+    "snomed_term": "Urea nitrogen:MCnc:Pt:Body fld:Qn"
+  },
+  "51046": {
+    "loinc": "1748-3",
+    "label": "Albumin, Pleural",
+    "snomed_code": "441477004",
+    "snomed_term": "Measurement of albumin in pleural fluid specimen"
+  },
+  "51047": {
+    "loinc": "1796-2",
+    "label": "Amylase, Pleural",
+    "snomed_code": "45516006",
+    "snomed_term": "Amylase measurement, pleural fluid"
+  },
+  "51048": {
+    "loinc": "54361-1",
+    "label": "Bicarbonate, Pleural",
+    "snomed_code": "C2707104",
+    "snomed_term": "Bicarbonate:SCnc:Pt:Plr fld:Qn"
+  },
+  "51049": {
+    "loinc": "14421-2",
+    "label": "Bilirubin, Total, Pleural",
+    "snomed_code": "C5878422",
+    "snomed_term": "total bilirubin in pleural fluid"
+  },
+  "51050": {
+    "loinc": "53627-6",
+    "label": "Chloride, Pleural",
+    "snomed_code": "C2598765",
+    "snomed_term": "Chloride:SCnc:Pt:Plr fld:Qn"
+  },
+  "51051": {
+    "loinc": "9618-0",
+    "label": "Cholesterol, Pleural",
+    "snomed_code": "C0484790",
+    "snomed_term": "Cholest Plr-mCnc"
+  },
+  "51052": {
+    "loinc": "14399-0",
+    "label": "Creatinine, Pleural",
+    "snomed_code": "C0797578",
+    "snomed_term": "Creatinine:MCnc:Pt:Plr fld:Qn"
+  },
+  "51053": {
+    "loinc": "2346-5",
+    "label": "Glucose, Pleural",
+    "snomed_code": "444128001",
+    "snomed_term": "Quantitative measurement of glucose in pleural fluid specimen"
+  },
+  "51054": {
+    "loinc": "2530-4",
+    "label": "Lactate Dehydrogenase, Pleural",
+    "snomed_code": "413050004",
+    "snomed_term": "Pleural fluid lactate dehydrogenase measurement"
+  },
+  "51055": {
+    "loinc": "47418-9",
+    "label": "Lipase, Pleural",
+    "snomed_code": "C1831463",
+    "snomed_term": "Triacylglycerol lipase:CCnc:Pt:Plr fld:Qn"
+  },
+  "51057": {
+    "loinc": "32336-0",
+    "label": "Potassium, Pleural"
+  },
+  "51058": {
+    "loinc": "32340-2",
+    "label": "Sodium, Pleural"
+  },
+  "51059": {
+    "loinc": "2882-9",
+    "label": "Total Protein, Pleural"
+  },
+  "51060": {
+    "loinc": "9619-8",
+    "label": "Triglycerides, Pleural",
+    "snomed_code": "C0484792",
+    "snomed_term": "Triglyceride:MCnc:Pt:Plr fld:Qn"
+  },
+  "51061": {
+    "loinc": "22735-5",
+    "label": "Bicarbonate, Stool"
+  },
+  "51062": {
+    "loinc": "15158-9",
+    "label": "Chloride, Stool",
+    "snomed_code": "C6020184",
+    "snomed_term": "Chloride:{Measurement}:-:Stool:-"
+  },
+  "51063": {
+    "loinc": "2693-0",
+    "label": "Osmolality, Stool",
+    "snomed_code": "C3654406",
+    "snomed_term": "Osmol gap:Osmol:Pt:Stool:Qn"
+  },
+  "51064": {
+    "loinc": "15202-5",
+    "label": "Potassium, Stool",
+    "snomed_code": "C6020929",
+    "snomed_term": "Potassium:{Measurement}:-:Stool:-"
+  },
+  "51065": {
+    "loinc": "15207-4",
+    "label": "Sodium, Stool",
+    "snomed_code": "C6020927",
+    "snomed_term": "Sodium:{Measurement}:-:Stool:-"
+  },
+  "51066": {
+    "loinc": "6874-2",
+    "label": "24 hr Calcium",
+    "snomed_code": "313492004",
+    "snomed_term": "24 hour urine calcium output measurement"
+  },
+  "51067": {
+    "loinc": "2162-6",
+    "label": "24 hr Creatinine",
+    "snomed_code": "C5878577",
+    "snomed_term": "urine phenol/creatinine ratio, 24 hr"
+  },
+  "51068": {
+    "loinc": "2889-4",
+    "label": "24 hr Protein",
+    "snomed_code": "C5559585",
+    "snomed_term": "protein catabolic rate based on 24-hr urine test"
+  },
+  "51069": {
+    "loinc": "14957-5",
+    "label": "Albumin, Urine",
+    "snomed_code": "271000000",
+    "snomed_term": "Urine albumin measurement"
+  },
+  "51070": {
+    "loinc": "14958-3",
+    "label": "Albumin/Creatinine, Urine",
+    "snomed_code": "C6021110",
+    "snomed_term": "Albumin/Creatinine:{Measurement}:-:Urine:-"
+  },
+  "51071": {
+    "loinc": "19343-3",
+    "label": "Amphetamine Screen, Urine",
+    "snomed_code": "C2188578",
+    "snomed_term": "urine amphetamine screen, quantitative"
+  },
+  "51072": {
+    "loinc": "1799-6",
+    "label": "Amylase, Urine",
+    "snomed_code": "28378007",
+    "snomed_term": "Amylase measurement, urine"
+  },
+  "51073": {
+    "loinc": "34235-2",
+    "label": "Amylase/Creatinine Ratio, Urine",
+    "snomed_code": "C0796897",
+    "snomed_term": "Amylase/Creatinine:MRto:Pt:Urine:Qn"
+  },
+  "51074": {
+    "loinc": "19270-8",
+    "label": "Barbiturate Screen, Urine",
+    "snomed_code": "C0365606",
+    "snomed_term": "Barbiturate screen absent:Prid:Pt:Urine:Nom"
+  },
+  "51075": {
+    "loinc": "14316-4",
+    "label": "Benzodiazepine Screen, Urine",
+    "snomed_code": "C1764756",
+    "snomed_term": "Benzodiazepines tested for:Prid:Pt:Urine:Nar:Screen"
+  },
+  "51076": {
+    "loinc": "1964-6",
+    "label": "Bicarbonate, Urine",
+    "snomed_code": "412938000",
+    "snomed_term": "Urine bicarbonate measurement"
+  },
+  "51077": {
+    "loinc": "17862-4",
+    "label": "Calcium, Urine",
+    "snomed_code": "C0428303",
+    "snomed_term": "Calcium measurement, urine"
+  },
+  "51078": {
+    "loinc": "2078-4",
+    "label": "Chloride, Urine",
+    "snomed_code": "C0201953",
+    "snomed_term": "Measurement of chloride in urine"
+  },
+  "51079": {
+    "loinc": "3397-7",
+    "label": "Cocaine, Urine",
+    "snomed_code": "271072009",
+    "snomed_term": "Urine cocaine measurement"
+  },
+  "51080": {
+    "loinc": "2164-2",
+    "label": "Creatinine Clearance",
+    "snomed_code": "C0373595",
+    "snomed_term": "Creatinine renal clearance measurement"
+  },
+  "51081": {
+    "loinc": "2160-0",
+    "label": "Creatinine, Serum",
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement, serum (procedure)"
+  },
+  "51082": {
+    "loinc": "2161-8",
+    "label": "Creatinine, Urine",
+    "snomed_code": "C1318439",
+    "snomed_term": "Urine creatinine measurement"
+  },
+  "51083": {
+    "loinc": "5644-0",
+    "label": "Ethanol, Urine",
+    "snomed_code": "271289006",
+    "snomed_term": "Urine ethanol measurement"
+  },
+  "51084": {
+    "loinc": "2350-7",
+    "label": "Glucose, Urine",
+    "snomed_code": "C0004076",
+    "snomed_term": "Glucose measurement, urine"
+  },
+  "51085": {
+    "loinc": "2106-3",
+    "label": "HCG, Urine, Qualitative",
+    "snomed_code": "C1254846",
+    "snomed_term": "Qualitative Urine HCG Test"
+  },
+  "51086": {
+    "loinc": "13440-3",
+    "label": "Immunofixation, Urine",
+    "snomed_code": "C0551232",
+    "snomed_term": "Interpretation:Imp:Pt:Urine:Nom:Immunofixation"
+  },
+  "51087": {
+    "loinc": "13362-9",
+    "label": "Length of Urine Collection"
+  },
+  "51088": {
+    "loinc": "19124-7",
+    "label": "Magnesium, Urine",
+    "snomed_code": "C0428308",
+    "snomed_term": "Magnesium measurement, urine"
+  },
+  "51089": {
+    "loinc": "3426-4",
+    "label": "Marijuana",
+    "snomed_code": "66689000",
+    "snomed_term": "Cannabinoids measurement"
+  },
+  "51090": {
+    "loinc": "3773-9",
+    "label": "Methadone, Urine",
+    "snomed_code": "271073004",
+    "snomed_term": "Urine methadone measurement"
+  },
+  "51091": {
+    "loinc": "2640-1",
+    "label": "Myoglobin, Urine",
+    "snomed_code": "C0202142",
+    "snomed_term": "Myoglobin measurement, urine"
+  },
+  "51092": {
+    "loinc": "19295-5",
+    "label": "Opiate Screen, Urine",
+    "snomed_code": "C1765329",
+    "snomed_term": "Opiates tested for:Prid:Pt:Urine:Nar:Screen"
+  },
+  "51093": {
+    "loinc": "2695-5",
+    "label": "Osmolality, Urine",
+    "snomed_code": "C0740085",
+    "snomed_term": "Osmolality measurement, urine"
+  },
+  "51094": {
+    "loinc": "2756-5",
+    "label": "pH",
+    "snomed_code": "250573004",
+    "snomed_term": "Hydrogen ion concentration measurement"
+  },
+  "51095": {
+    "loinc": "2778-9",
+    "label": "Phosphate, Urine",
+    "snomed_code": "C6018585",
+    "snomed_term": "Phosphate:{Measurement}:-:Urine:-"
+  },
+  "51096": {
+    "loinc": "2809-2",
+    "label": "Porphobilinogen Screen"
+  },
+  "51097": {
+    "loinc": "2828-2",
+    "label": "Potassium, Urine",
+    "snomed_code": "C0202195",
+    "snomed_term": "Potassium measurement, urine"
+  },
+  "51098": {
+    "loinc": "13438-7",
+    "label": "Prot. Electrophoresis, Urine"
+  },
+  "51099": {
+    "loinc": "2890-2",
+    "label": "Protein/Creatinine Ratio",
+    "snomed_code": "250750009",
+    "snomed_term": "Protein/creatinine ratio measurement"
+  },
+  "51100": {
+    "loinc": "2955-3",
+    "label": "Sodium, Urine",
+    "snomed_code": "C1256585",
+    "snomed_term": "Sodium measurement, urine"
+  },
+  "51101": {
+    "loinc": "13362-9",
+    "label": "Total Collection Time"
+  },
+  "51102": {
+    "loinc": "2888-6",
+    "label": "Total Protein, Urine",
+    "snomed_code": "270999004",
+    "snomed_term": "Urine total protein measurement"
+  },
+  "51104": {
+    "loinc": "3095-7",
+    "label": "Urea Nitrogen, Urine",
+    "snomed_code": "105013009",
+    "snomed_term": "Urea nitrogen measurement, urine"
+  },
+  "51105": {
+    "loinc": "3086-6",
+    "label": "Uric Acid, Urine",
+    "snomed_code": "C2169360",
+    "snomed_term": "random urine uric acid measurement"
+  },
+  "51106": {
+    "loinc": "2161-8",
+    "label": "Urine Creatinine",
+    "snomed_code": "C1318439",
+    "snomed_term": "Urine creatinine measurement"
+  },
+  "51108": {
+    "loinc": "28009-9",
+    "label": "Urine Volume",
+    "snomed_code": "C1254540",
+    "snomed_term": "Urine Volume Measurements"
+  },
+  "51109": {
+    "loinc": "28009-9",
+    "label": "Urine Volume, Total",
+    "snomed_code": "C0796731",
+    "snomed_term": "Carbon dioxide:SCnc:Pt:Urine:Qn"
+  },
+  "51110": {
+    "loinc": "33369-0",
+    "label": "Atypical Lymphocytes",
+    "snomed_code": "C3241972",
+    "snomed_term": "Atypical Lymphocyte Count Measurement"
+  },
+  "51111": {
+    "loinc": "99603-3",
+    "label": "Bands",
+    "snomed_code": "41489001",
+    "snomed_term": "Oligoclonal protein measurement"
+  },
+  "51112": {
+    "loinc": "35069-4",
+    "label": "Basophils",
+    "snomed_code": "63987006",
+    "snomed_term": "Histamine release from basophils measurement"
+  },
+  "51113": {
+    "loinc": "33372-4",
+    "label": "Blasts",
+    "snomed_code": "C4727718",
+    "snomed_term": "Blasts to Total Cells Ratio Measurement"
+  },
+  "51114": {
+    "loinc": "30380-0",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "51115": {
+    "loinc": "11153-4",
+    "label": "Hematocrit, Ascites"
+  },
+  "51116": {
+    "loinc": "26482-0",
+    "label": "Lymphocytes",
+    "snomed_code": "C3889996",
+    "snomed_term": "Activated Lymphocytes Measurement"
+  },
+  "51117": {
+    "loinc": "40517-5",
+    "label": "Macrophage",
+    "snomed_code": "C2825852",
+    "snomed_term": "Macrophage-Derived Chemokine measurement"
+  },
+  "51118": {
+    "loinc": "30432-9",
+    "label": "Mesothelial Cell",
+    "snomed_code": "C4553056",
+    "snomed_term": "Mesothelial Cells to Leukocytes Ratio Measurement"
+  },
+  "51119": {
+    "loinc": "17801-2",
+    "label": "Metamyelocytes",
+    "snomed_code": "C3274418",
+    "snomed_term": "Metamyelocyte to Total Cell Ratio Measurement"
+  },
+  "51120": {
+    "loinc": "26488-7",
+    "label": "Monocytes",
+    "snomed_code": "C3828975",
+    "snomed_term": "Monocytes to Macrocytes Ratio Measurement"
+  },
+  "51121": {
+    "loinc": "17800-4",
+    "label": "Myelocytes",
+    "snomed_code": "C5557077",
+    "snomed_term": "Eosinophilic Myelocytes to Lymphocytes Ratio Measurement"
+  },
+  "51122": {
+    "loinc": "70171-4",
+    "label": "Nucleated RBC",
+    "snomed_code": "C0014762",
+    "snomed_term": "Erythroblasts"
+  },
+  "51123": {
+    "loinc": "30409-7",
+    "label": "Other",
+    "snomed_code": "C5413516",
+    "snomed_term": "Coagulation time measurement, other methods"
+  },
+  "51124": {
+    "loinc": "40518-3",
+    "label": "Plasma",
+    "snomed_code": "C0202042",
+    "snomed_term": "Plasma Glucose Measurement"
+  },
+  "51125": {
+    "loinc": "26520-7",
+    "label": "Polys",
+    "snomed_code": "C0482467",
+    "snomed_term": "Carotene^post 15000 U carotene QDx3 for 3D poly:MCnc:Pt:Ser:Qn"
+  },
+  "51126": {
+    "loinc": "17799-8",
+    "label": "Promyelocytes",
+    "snomed_code": "C3274434",
+    "snomed_term": "Promyelocyte to Total Cell Ratio Measurement"
+  },
+  "51127": {
+    "loinc": "26457-2",
+    "label": "RBC, Ascites"
+  },
+  "51130": {
+    "loinc": "8122-4",
+    "label": "Absolute CD3 Count",
+    "snomed_code": "313447006",
+    "snomed_term": "Absolute CD3 count procedure"
+  },
+  "51131": {
+    "loinc": "24467-3",
+    "label": "Absolute CD4 Count",
+    "snomed_code": "313660005",
+    "snomed_term": "Absolute CD4 count procedure"
+  },
+  "51132": {
+    "loinc": "14135-8",
+    "label": "Absolute CD8 Count",
+    "snomed_code": "313448001",
+    "snomed_term": "Absolute CD8 count procedure"
+  },
+  "51133": {
+    "loinc": "731-0",
+    "label": "Absolute Lymphocyte Count",
+    "snomed_code": "C3544087",
+    "snomed_term": "Absolute lymphocyte count"
+  },
+  "51134": {
+    "loinc": "7789-1",
+    "label": "Acanthocytes",
+    "snomed_code": "C2699520",
+    "snomed_term": "Acanthocyte to Erythrocyte Ratio Measurement"
+  },
+  "51135": {
+    "loinc": "1724-4",
+    "label": "ADP",
+    "snomed_code": "C5707400",
+    "snomed_term": "Cyclic ADP Ribose Hydrolase 1 Measurement"
+  },
+  "51136": {
+    "loinc": "27810-1",
+    "label": "Alpha Antiplasmin",
+    "snomed_code": "C3516405",
+    "snomed_term": "Alpha-2 Antiplasmin Measurement"
+  },
+  "51137": {
+    "loinc": "38892-6",
+    "label": "Anisocytosis",
+    "snomed_code": "C1543024",
+    "snomed_term": "Anisocytosis:PrThr:Pt:Bld:Ord"
+  },
+  "51138": {
+    "loinc": "3181-5",
+    "label": "Anticardiolipin Antibody IgG",
+    "snomed_code": "C2346829",
+    "snomed_term": "Anticardiolipin IgG Antibody"
+  },
+  "51139": {
+    "loinc": "3182-3",
+    "label": "Anticardiolipin Antibody IgM",
+    "snomed_code": "C2346830",
+    "snomed_term": "Anticardiolipin IgM Antibody"
+  },
+  "51140": {
+    "loinc": "27811-9",
+    "label": "Antithrombin",
+    "snomed_code": "C2825864",
+    "snomed_term": "Antithrombin Antigen Measurement"
+  },
+  "51141": {
+    "loinc": "4632-6",
+    "label": "APT Test",
+    "snomed_code": "252223008",
+    "snomed_term": "Apt test of gastrointestinal function"
+  },
+  "51142": {
+    "loinc": "35168-4",
+    "label": "Arachadonic Acid"
+  },
+  "51143": {
+    "loinc": "13046-8",
+    "label": "Atypical Lymphocytes",
+    "snomed_code": "C3241972",
+    "snomed_term": "Atypical Lymphocyte Count Measurement"
+  },
+  "51144": {
+    "loinc": "26508-2",
+    "label": "Bands",
+    "snomed_code": "41489001",
+    "snomed_term": "Oligoclonal protein measurement"
+  },
+  "51145": {
+    "loinc": "703-9",
+    "label": "Basophilic Stippling",
+    "snomed_code": "C3272867",
+    "snomed_term": "Basophilic Stippling Measurement"
+  },
+  "51146": {
+    "loinc": "706-2",
+    "label": "Basophils",
+    "snomed_code": "63987006",
+    "snomed_term": "Histamine release from basophils measurement"
+  },
+  "51147": {
+    "loinc": "10371-3",
+    "label": "Bite Cells",
+    "snomed_code": "C2698519",
+    "snomed_term": "Bite Cell to Erythrocyte Ratio Measurement"
+  },
+  "51148": {
+    "loinc": "26446-5",
+    "label": "Blasts",
+    "snomed_code": "C4727718",
+    "snomed_term": "Blasts to Total Cells Ratio Measurement"
+  },
+  "51149": {
+    "loinc": "11067-6",
+    "label": "Bleeding Time",
+    "snomed_code": "C1446468",
+    "snomed_term": "Duke Method for Bleeding Time Measurement"
+  },
+  "51150": {
+    "loinc": "91900-1",
+    "label": "Blood Parasite Smear",
+    "snomed_code": "C2238083",
+    "snomed_term": "blood smear for parasites"
+  },
+  "51152": {
+    "loinc": "8107-5",
+    "label": "CD10",
+    "snomed_code": "C1544515",
+    "snomed_term": "CD10 Ag:PrThr:Pt:Tiss:Ord:Immune stain"
+  },
+  "51153": {
+    "loinc": "17100-9",
+    "label": "CD103",
+    "snomed_code": "C1544839",
+    "snomed_term": "Cells.CD19+CD103+/Cells:NFr:Pt:Tiss:Qn"
+  },
+  "51154": {
+    "loinc": "17107-4",
+    "label": "CD117",
+    "snomed_code": "C5855879",
+    "snomed_term": "CD117 Expression Measurement"
+  },
+  "51155": {
+    "loinc": "8109-1",
+    "label": "CD11c",
+    "snomed_code": "C1526511",
+    "snomed_term": "Cells.CD11b+CD11c+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51156": {
+    "loinc": "8110-9",
+    "label": "CD13",
+    "snomed_code": "C1979137",
+    "snomed_term": "Blasts.cytoplasmic CD13/Blasts:NFr:Pt:Bld:Qn"
+  },
+  "51157": {
+    "loinc": "42869-8",
+    "label": "CD138",
+    "snomed_code": "C1979011",
+    "snomed_term": "Cells.CD38+CD138+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51158": {
+    "loinc": "8111-7",
+    "label": "CD14",
+    "snomed_code": "C3538991",
+    "snomed_term": "CD14 Expressing Cell Measurement"
+  },
+  "51159": {
+    "loinc": "17117-3",
+    "label": "CD15",
+    "snomed_code": "C1979253",
+    "snomed_term": "CD15 Ag:PrThr:Pt:XXX:Ord:Immune stain"
+  },
+  "51161": {
+    "loinc": "8115-8",
+    "label": "CD16",
+    "snomed_code": "C5708432",
+    "snomed_term": "CD16 Expression Measurement"
+  },
+  "51162": {
+    "loinc": "20402-4",
+    "label": "CD16/56 Absolute Count"
+  },
+  "51163": {
+    "loinc": "18267-5",
+    "label": "CD16/56%"
+  },
+  "51164": {
+    "loinc": "8117-4",
+    "label": "CD19",
+    "snomed_code": "C5779672",
+    "snomed_term": "CD19 antigen measurement"
+  },
+  "51165": {
+    "loinc": "8117-4",
+    "label": "CD19 %",
+    "snomed_code": "C5779672",
+    "snomed_term": "CD19 antigen measurement"
+  },
+  "51166": {
+    "loinc": "8116-6",
+    "label": "CD19 Absolute Count",
+    "snomed_code": "408228002",
+    "snomed_term": "Absolute CD19 count"
+  },
+  "51167": {
+    "loinc": "8118-2",
+    "label": "CD2",
+    "snomed_code": "C3539069",
+    "snomed_term": "CD2 Expressing Cell Measurement"
+  },
+  "51168": {
+    "loinc": "8119-0",
+    "label": "CD20",
+    "snomed_code": "C5908499",
+    "snomed_term": "Membrane Spanning 4-Domains A1 Measurement"
+  },
+  "51169": {
+    "loinc": "8119-0",
+    "label": "CD20 %",
+    "snomed_code": "C3540684",
+    "snomed_term": "CD20 Expressing Cell Measurement"
+  },
+  "51170": {
+    "loinc": "9558-8",
+    "label": "CD20 Absolute Count"
+  },
+  "51171": {
+    "loinc": "14017-8",
+    "label": "CD22",
+    "snomed_code": "C1978403",
+    "snomed_term": "Blasts.cytoplasmic CD22/Blasts:NFr:Pt:Bld:Qn"
+  },
+  "51172": {
+    "loinc": "14018-6",
+    "label": "CD23",
+    "snomed_code": "C1831123",
+    "snomed_term": "Cells.CD19+CD23+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51173": {
+    "loinc": "8121-6",
+    "label": "CD25",
+    "snomed_code": "C5854957",
+    "snomed_term": "CD25 Expression Measurement"
+  },
+  "51174": {
+    "loinc": "8124-0",
+    "label": "CD3 %",
+    "snomed_code": "C5908501",
+    "snomed_term": "CD3 T-Cell Marker Measurement"
+  },
+  "51175": {
+    "loinc": "8122-4",
+    "label": "CD3 Absolute Count",
+    "snomed_code": "313447006",
+    "snomed_term": "Absolute CD3 count procedure"
+  },
+  "51176": {
+    "loinc": "8124-0",
+    "label": "CD3 Cells, Percent",
+    "snomed_code": "C5856956",
+    "snomed_term": "T Lymphocyte to Total Blood Cell Percent Measurement"
+  },
+  "51177": {
+    "loinc": "8102-6",
+    "label": "CD33",
+    "snomed_code": "C1148206",
+    "snomed_term": "Cells.CD13+CD33+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51178": {
+    "loinc": "8125-7",
+    "label": "CD34",
+    "snomed_code": "C3538723",
+    "snomed_term": "CD34 Measurement"
+  },
+  "51179": {
+    "loinc": "8126-5",
+    "label": "CD38",
+    "snomed_code": "C5855887",
+    "snomed_term": "CD38 Expression Measurement"
+  },
+  "51180": {
+    "loinc": "8123-2",
+    "label": "CD4 Cells, Percent",
+    "snomed_code": "C5856646",
+    "snomed_term": "Helper T Lymphocyte to Total Blood Cell Percent Measurement"
+  },
+  "51181": {
+    "loinc": "54218-3",
+    "label": "CD4/CD8 Ratio",
+    "snomed_code": "C3641615",
+    "snomed_term": "CD4 Cell to CD8 Cell Ratio Measurement"
+  },
+  "51182": {
+    "loinc": "17148-8",
+    "label": "CD41",
+    "snomed_code": "C1642555",
+    "snomed_term": "Cells.CD9+CD41+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51183": {
+    "loinc": "8130-7",
+    "label": "CD45",
+    "snomed_code": "C4055336",
+    "snomed_term": "CD45 to Lymphocyte Ratio Measurement"
+  },
+  "51184": {
+    "loinc": "8132-3",
+    "label": "CD5",
+    "snomed_code": "C5891055",
+    "snomed_term": "T-Cell Surface Glycoprotein CD5 Measurement"
+  },
+  "51185": {
+    "loinc": "8132-3",
+    "label": "CD5 %",
+    "snomed_code": "C5891055",
+    "snomed_term": "T-Cell Surface Glycoprotein CD5 Measurement"
+  },
+  "51186": {
+    "loinc": "9559-6",
+    "label": "CD5 Absolute Count",
+    "snomed_code": "C1254965",
+    "snomed_term": "Whole Blood Absolute Cd5 Lymphocyte Counts"
+  },
+  "51187": {
+    "loinc": "17175-1",
+    "label": "CD55",
+    "snomed_code": "C2599040",
+    "snomed_term": "Erythrocytes.CD55 deficient/Erythrocytes:NFr:Pt:Bld:Qn"
+  },
+  "51188": {
+    "loinc": "8133-1",
+    "label": "CD56",
+    "snomed_code": "C5908500",
+    "snomed_term": "Neural Cell Adhesion Molecule 1 Measurement"
+  },
+  "51189": {
+    "loinc": "8134-9",
+    "label": "CD57",
+    "snomed_code": "C5855889",
+    "snomed_term": "CD57 Expression Measurement"
+  },
+  "51190": {
+    "loinc": "17177-7",
+    "label": "CD59",
+    "snomed_code": "C0881718",
+    "snomed_term": "Cells.CD14+CD16+CD59+:PrThr:Pt:Ser:Ord"
+  },
+  "51191": {
+    "loinc": "17183-5",
+    "label": "CD64",
+    "snomed_code": "C5855890",
+    "snomed_term": "CD64 Expression Measurement"
+  },
+  "51192": {
+    "loinc": "8135-6",
+    "label": "CD7",
+    "snomed_code": "C1624708",
+    "snomed_term": "Cells.CD4+CD7+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51193": {
+    "loinc": "8136-4",
+    "label": "CD71",
+    "snomed_code": "C5855891",
+    "snomed_term": "CD71 Expression Measurement"
+  },
+  "51194": {
+    "loinc": "8101-8",
+    "label": "CD8 Cells, Percent",
+    "snomed_code": "C5856648",
+    "snomed_term": "Cytotoxic T Lymphocyte to Total Blood Cell Percent Measurement"
+  },
+  "51195": {
+    "loinc": "78685-5",
+    "label": "Collagen",
+    "snomed_code": "313527000",
+    "snomed_term": "Urine collagen measurement"
+  },
+  "51196": {
+    "loinc": "48065-7",
+    "label": "D-Dimer",
+    "snomed_code": "C2826333",
+    "snomed_term": "D-Dimer Measurement"
+  },
+  "51197": {
+    "loinc": "11274-8",
+    "label": "Elliptocytes",
+    "snomed_code": "C5938186",
+    "snomed_term": "Elliptocytes:PrThr:Pt:Bld:Ord"
+  },
+  "51198": {
+    "loinc": "681-7",
+    "label": "Envelope Cells",
+    "snomed_code": "C0598099",
+    "snomed_term": "cell envelope"
+  },
+  "51199": {
+    "loinc": "711-2",
+    "label": "Eosinophil Count",
+    "snomed_code": "C1147698",
+    "snomed_term": "Eosinophils/Leukocytes:NFr:Pt:Urine:Qn:Manual count"
+  },
+  "51200": {
+    "loinc": "713-8",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "51201": {
+    "loinc": "2230-1",
+    "label": "Epinepherine",
+    "snomed_code": "C0673251",
+    "snomed_term": "LET-lidocaine, epinepherine, tetracaine"
+  },
+  "51202": {
+    "loinc": "3289-6",
+    "label": "Factor II",
+    "snomed_code": "104937003",
+    "snomed_term": "Insulin-like growth factor-II measurement"
+  },
+  "51203": {
+    "loinc": "3187-2",
+    "label": "Factor IX",
+    "snomed_code": "C0200408",
+    "snomed_term": "Clotting factor IX assay"
+  },
+  "51204": {
+    "loinc": "3193-0",
+    "label": "Factor V",
+    "snomed_code": "C3274393",
+    "snomed_term": "Factor V Measurement"
+  },
+  "51205": {
+    "loinc": "3198-9",
+    "label": "Factor VII",
+    "snomed_code": "C2825856",
+    "snomed_term": "Factor VII measurement"
+  },
+  "51206": {
+    "loinc": "3209-4",
+    "label": "Factor VIII",
+    "snomed_code": "C2825857",
+    "snomed_term": "Factor VIII measurement"
+  },
+  "51207": {
+    "loinc": "3204-5",
+    "label": "Factor VIII Inhibitor",
+    "snomed_code": "C4722049",
+    "snomed_term": "Factor VIII Inhibitor Measurement"
+  },
+  "51208": {
+    "loinc": "3218-5",
+    "label": "Factor X",
+    "snomed_code": "C3274394",
+    "snomed_term": "Factor X Measurement"
+  },
+  "51209": {
+    "loinc": "3226-8",
+    "label": "Factor XI",
+    "snomed_code": "C5235469",
+    "snomed_term": "Factor XI Measurement"
+  },
+  "51210": {
+    "loinc": "3232-6",
+    "label": "Factor XII",
+    "snomed_code": "C5235471",
+    "snomed_term": "Factor XII Measurement"
+  },
+  "51211": {
+    "loinc": "27815-0",
+    "label": "Factor XIII",
+    "snomed_code": "C3813128",
+    "snomed_term": "Factor XIII Measurement"
+  },
+  "51212": {
+    "loinc": "4576-5",
+    "label": "Fetal Hemoglobin",
+    "snomed_code": "C0546643",
+    "snomed_term": "Hemoglobin, fetal, chemical measurement"
+  },
+  "51213": {
+    "loinc": "30226-5",
+    "label": "Fibrin Degradation Products",
+    "snomed_code": "C0200453",
+    "snomed_term": "Fibrin-fibrinogen split products assay"
+  },
+  "51214": {
+    "loinc": "3255-7",
+    "label": "Fibrinogen, Functional",
+    "snomed_code": "C4528264",
+    "snomed_term": "Functional Fibrinogen Measurement"
+  },
+  "51215": {
+    "loinc": "17220-5",
+    "label": "FMC-7",
+    "snomed_code": "116831005",
+    "snomed_term": "FMC-7+ cell"
+  },
+  "51216": {
+    "loinc": "10373-9",
+    "label": "Fragmented Cells",
+    "snomed_code": "70310009",
+    "snomed_term": "Schistocyte"
+  },
+  "51217": {
+    "loinc": "42502-5",
+    "label": "Glyco A"
+  },
+  "51218": {
+    "loinc": "30394-1",
+    "label": "Granulocyte Count"
+  },
+  "51219": {
+    "loinc": "5909-7",
+    "label": "H/O Smear"
+  },
+  "51220": {
+    "loinc": "716-1",
+    "label": "Heinz Body Prep"
+  },
+  "51221": {
+    "loinc": "4544-3",
+    "label": "Hematocrit"
+  },
+  "51222": {
+    "loinc": "718-7",
+    "label": "Hemoglobin",
+    "snomed_code": "C0518015",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "51223": {
+    "loinc": "4551-8",
+    "label": "Hemoglobin A2"
+  },
+  "51224": {
+    "loinc": "4563-3",
+    "label": "Hemoglobin C"
+  },
+  "51225": {
+    "loinc": "4576-5",
+    "label": "Hemoglobin F"
+  },
+  "51226": {
+    "loinc": "4546-8",
+    "label": "Hemogloblin A"
+  },
+  "51227": {
+    "loinc": "4625-0",
+    "label": "Hemogloblin S"
+  },
+  "51228": {
+    "loinc": "66483-9",
+    "label": "Heparin"
+  },
+  "51229": {
+    "loinc": "32684-3",
+    "label": "Heparin, LMW"
+  },
+  "51230": {
+    "loinc": "32621-5",
+    "label": "HLA-DR"
+  },
+  "51231": {
+    "loinc": "7793-3",
+    "label": "Howell-Jolly Bodies"
+  },
+  "51232": {
+    "loinc": "30450-1",
+    "label": "Hypersegmented Neutrophils"
+  },
+  "51233": {
+    "loinc": "728-6",
+    "label": "Hypochromia"
+  },
+  "51234": {
+    "loinc": "55230-7",
+    "label": "Immunophenotyping"
+  },
+  "51235": {
+    "loinc": "40744-5",
+    "label": "Inhibitor Screen"
+  },
+  "51236": {
+    "loinc": "5909-7",
+    "label": "Inpatient Hematology/Oncology Smear"
+  },
+  "51237": {
+    "loinc": "6301-6",
+    "label": "INR(PT)"
+  },
+  "51238": {
+    "loinc": "17096-9",
+    "label": "Kappa"
+  },
+  "51239": {
+    "loinc": "17224-7",
+    "label": "Lambda"
+  },
+  "51240": {
+    "loinc": "32146-3",
+    "label": "Large Platelets"
+  },
+  "51241": {
+    "loinc": "4659-9",
+    "label": "Leukocyte Alkaline Phosphatase"
+  },
+  "51242": {
+    "loinc": "26463-0",
+    "label": "LUC"
+  },
+  "51243": {
+    "loinc": "3281-3",
+    "label": "Lupus Anticoagulant"
+  },
+  "51244": {
+    "loinc": "736-9",
+    "label": "Lymphocytes",
+    "snomed_code": "C3889996",
+    "snomed_term": "Activated Lymphocytes Measurement"
+  },
+  "51245": {
+    "loinc": "736-9",
+    "label": "Lymphocytes, Percent"
+  },
+  "51246": {
+    "loinc": "30424-6",
+    "label": "Macrocytes"
+  },
+  "51247": {
+    "loinc": "10376-2",
+    "label": "MacroOvalocytes"
+  },
+  "51248": {
+    "loinc": "785-6",
+    "label": "MCH"
+  },
+  "51249": {
+    "loinc": "786-4",
+    "label": "MCHC"
+  },
+  "51250": {
+    "loinc": "787-2",
+    "label": "MCV"
+  },
+  "51251": {
+    "loinc": "28541-1",
+    "label": "Metamyelocytes",
+    "snomed_code": "C3274418",
+    "snomed_term": "Metamyelocyte to Total Cell Ratio Measurement"
+  },
+  "51252": {
+    "loinc": "30434-5",
+    "label": "Microcytes"
+  },
+  "51253": {
+    "loinc": "742-7",
+    "label": "Monocyte Count"
+  },
+  "51254": {
+    "loinc": "5905-5",
+    "label": "Monocytes",
+    "snomed_code": "C3828975",
+    "snomed_term": "Monocytes to Macrocytes Ratio Measurement"
+  },
+  "51255": {
+    "loinc": "26498-6",
+    "label": "Myelocytes",
+    "snomed_code": "C5557077",
+    "snomed_term": "Eosinophilic Myelocytes to Lymphocytes Ratio Measurement"
+  },
+  "51256": {
+    "loinc": "770-8",
+    "label": "Neutrophils"
+  },
+  "51257": {
+    "loinc": "58413-6",
+    "label": "Nucleated Red Cells"
+  },
+  "51258": {
+    "loinc": "34964-7",
+    "label": "Osmotic Fragility"
+  },
+  "51259": {
+    "loinc": "26471-3",
+    "label": "Other Cells"
+  },
+  "51260": {
+    "loinc": "774-0",
+    "label": "Ovalocytes"
+  },
+  "51261": {
+    "loinc": "7795-8",
+    "label": "Pappenheimer Bodies"
+  },
+  "51262": {
+    "loinc": "10377-0",
+    "label": "Pencil Cells"
+  },
+  "51263": {
+    "loinc": "13047-6",
+    "label": "Plasma Cells"
+  },
+  "51264": {
+    "loinc": "7796-6",
+    "label": "Platelet Clumps"
+  },
+  "51265": {
+    "loinc": "777-3",
+    "label": "Platelet Count"
+  },
+  "51266": {
+    "loinc": "9317-9",
+    "label": "Platelet Smear"
+  },
+  "51267": {
+    "loinc": "779-9",
+    "label": "Poikilocytosis"
+  },
+  "51268": {
+    "loinc": "10378-8",
+    "label": "Polychromasia"
+  },
+  "51269": {
+    "loinc": "783-1",
+    "label": "Promyelocytes",
+    "snomed_code": "C3274434",
+    "snomed_term": "Promyelocyte to Total Cell Ratio Measurement"
+  },
+  "51270": {
+    "loinc": "27820-0",
+    "label": "Protein C, Antigen"
+  },
+  "51271": {
+    "loinc": "27819-2",
+    "label": "Protein C, Functional"
+  },
+  "51272": {
+    "loinc": "27823-4",
+    "label": "Protein S, Antigen"
+  },
+  "51273": {
+    "loinc": "27822-6",
+    "label": "Protein S, Functional"
+  },
+  "51274": {
+    "loinc": "5902-2",
+    "label": "PT"
+  },
+  "51275": {
+    "loinc": "14979-9",
+    "label": "PTT"
+  },
+  "51276": {
+    "loinc": "32546-4",
+    "label": "Quantitative G6PD"
+  },
+  "51277": {
+    "loinc": "788-0",
+    "label": "RDW"
+  },
+  "51278": {
+    "loinc": "800-3",
+    "label": "Red Blood Cell Fragments"
+  },
+  "51279": {
+    "loinc": "789-8",
+    "label": "Red Blood Cells"
+  },
+  "51280": {
+    "loinc": "6683-7",
+    "label": "Reptilase Time"
+  },
+  "51281": {
+    "loinc": "5942-8",
+    "label": "Reptilase Time Control"
+  },
+  "51282": {
+    "loinc": "14196-0",
+    "label": "Reticulocyte Count, Absolute"
+  },
+  "51283": {
+    "loinc": "60474-4",
+    "label": "Reticulocyte Count, Automated"
+  },
+  "51284": {
+    "loinc": "40665-2",
+    "label": "Reticulocyte Count, Manual"
+  },
+  "51285": {
+    "loinc": "76686-5",
+    "label": "Reticulocyte, Cellular Hemoglobin"
+  },
+  "51286": {
+    "loinc": "18975-3",
+    "label": "Ristocetin"
+  },
+  "51287": {
+    "loinc": "800-3",
+    "label": "Schistocytes"
+  },
+  "51288": {
+    "loinc": "4537-7",
+    "label": "Sedimentation Rate"
+  },
+  "51289": {
+    "loinc": "3128-6",
+    "label": "Serum Viscosity"
+  },
+  "51290": {
+    "loinc": "801-1",
+    "label": "Sickle Cell Preparation"
+  },
+  "51291": {
+    "loinc": "801-1",
+    "label": "Sickle Cells"
+  },
+  "51292": {
+    "loinc": "802-9",
+    "label": "Spherocytes"
+  },
+  "51293": {
+    "loinc": "13534-3",
+    "label": "Sugar Water Test"
+  },
+  "51294": {
+    "loinc": "10381-2",
+    "label": "Target Cells"
+  },
+  "51295": {
+    "loinc": "2983-5",
+    "label": "TdT"
+  },
+  "51296": {
+    "loinc": "7791-7",
+    "label": "Teardrop Cells"
+  },
+  "51297": {
+    "loinc": "3243-3",
+    "label": "Thrombin"
+  },
+  "51298": {
+    "loinc": "6014-5",
+    "label": "Von Willebrand Factor Activity"
+  },
+  "51299": {
+    "loinc": "27816-8",
+    "label": "Von Willebrand Factor Antigen"
+  },
+  "51300": {
+    "loinc": "6690-2",
+    "label": "WBC Count"
+  },
+  "51301": {
+    "loinc": "6690-2",
+    "label": "White Blood Cells"
+  },
+  "51302": {
+    "loinc": "55433-7",
+    "label": "Young Cells"
+  },
+  "51303": {
+    "loinc": "51216-0",
+    "label": "CD10",
+    "snomed_code": "C1544515",
+    "snomed_term": "CD10 Ag:PrThr:Pt:Tiss:Ord:Immune stain"
+  },
+  "51304": {
+    "loinc": "51221-0",
+    "label": "CD103",
+    "snomed_code": "C1544839",
+    "snomed_term": "Cells.CD19+CD103+/Cells:NFr:Pt:Tiss:Qn"
+  },
+  "51305": {
+    "loinc": "42866-4",
+    "label": "CD117",
+    "snomed_code": "C5855879",
+    "snomed_term": "CD117 Expression Measurement"
+  },
+  "51306": {
+    "loinc": "33202-3",
+    "label": "CD11c",
+    "snomed_code": "C1526511",
+    "snomed_term": "Cells.CD11b+CD11c+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51307": {
+    "loinc": "51237-6",
+    "label": "CD13",
+    "snomed_code": "C1979137",
+    "snomed_term": "Blasts.cytoplasmic CD13/Blasts:NFr:Pt:Bld:Qn"
+  },
+  "51308": {
+    "loinc": "42870-6",
+    "label": "CD138",
+    "snomed_code": "C1979011",
+    "snomed_term": "Cells.CD38+CD138+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51309": {
+    "loinc": "32507-6",
+    "label": "CD14",
+    "snomed_code": "C3538991",
+    "snomed_term": "CD14 Expressing Cell Measurement"
+  },
+  "51310": {
+    "loinc": "51251-7",
+    "label": "CD15",
+    "snomed_code": "C1979253",
+    "snomed_term": "CD15 Ag:PrThr:Pt:XXX:Ord:Immune stain"
+  },
+  "51311": {
+    "loinc": "51086-7",
+    "label": "CD16",
+    "snomed_code": "C5708432",
+    "snomed_term": "CD16 Expression Measurement"
+  },
+  "51312": {
+    "loinc": "51255-8",
+    "label": "CD16/56"
+  },
+  "51313": {
+    "loinc": "32525-8",
+    "label": "CD19",
+    "snomed_code": "C5779672",
+    "snomed_term": "CD19 antigen measurement"
+  },
+  "51314": {
+    "loinc": "32527-4",
+    "label": "CD2",
+    "snomed_code": "C3539069",
+    "snomed_term": "CD2 Expressing Cell Measurement"
+  },
+  "51315": {
+    "loinc": "51115-4",
+    "label": "CD20",
+    "snomed_code": "C5908499",
+    "snomed_term": "Membrane Spanning 4-Domains A1 Measurement"
+  },
+  "51316": {
+    "loinc": "51124-6",
+    "label": "CD22",
+    "snomed_code": "C1978403",
+    "snomed_term": "Blasts.cytoplasmic CD22/Blasts:NFr:Pt:Bld:Qn"
+  },
+  "51317": {
+    "loinc": "51268-1",
+    "label": "CD23",
+    "snomed_code": "C1831123",
+    "snomed_term": "Cells.CD19+CD23+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51318": {
+    "loinc": "32493-9",
+    "label": "CD25",
+    "snomed_code": "C5854957",
+    "snomed_term": "CD25 Expression Measurement"
+  },
+  "51319": {
+    "loinc": "32529-0",
+    "label": "CD3"
+  },
+  "51320": {
+    "loinc": "51293-9",
+    "label": "CD33",
+    "snomed_code": "C1148206",
+    "snomed_term": "Cells.CD13+CD33+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51321": {
+    "loinc": "57400-4",
+    "label": "CD34",
+    "snomed_code": "C3538723",
+    "snomed_term": "CD34 Measurement"
+  },
+  "51322": {
+    "loinc": "51298-8",
+    "label": "CD38",
+    "snomed_code": "C5855887",
+    "snomed_term": "CD38 Expression Measurement"
+  },
+  "51323": {
+    "loinc": "32533-2",
+    "label": "CD4"
+  },
+  "51324": {
+    "loinc": "51319-2",
+    "label": "CD41",
+    "snomed_code": "C1642555",
+    "snomed_term": "Cells.CD9+CD41+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51325": {
+    "loinc": "51340-8",
+    "label": "CD45",
+    "snomed_code": "C4055336",
+    "snomed_term": "CD45 to Lymphocyte Ratio Measurement"
+  },
+  "51326": {
+    "loinc": "35640-2",
+    "label": "CD5",
+    "snomed_code": "C5891055",
+    "snomed_term": "T-Cell Surface Glycoprotein CD5 Measurement"
+  },
+  "51327": {
+    "loinc": "51344-0",
+    "label": "CD55",
+    "snomed_code": "C2599040",
+    "snomed_term": "Erythrocytes.CD55 deficient/Erythrocytes:NFr:Pt:Bld:Qn"
+  },
+  "51328": {
+    "loinc": "51280-6",
+    "label": "CD56",
+    "snomed_code": "C5908500",
+    "snomed_term": "Neural Cell Adhesion Molecule 1 Measurement"
+  },
+  "51329": {
+    "loinc": "32497-0",
+    "label": "CD57",
+    "snomed_code": "C5855889",
+    "snomed_term": "CD57 Expression Measurement"
+  },
+  "51330": {
+    "loinc": "51358-0",
+    "label": "CD59",
+    "snomed_code": "C0881718",
+    "snomed_term": "Cells.CD14+CD16+CD59+:PrThr:Pt:Ser:Ord"
+  },
+  "51331": {
+    "loinc": "51365-5",
+    "label": "CD64",
+    "snomed_code": "C5855890",
+    "snomed_term": "CD64 Expression Measurement"
+  },
+  "51332": {
+    "loinc": "35641-0",
+    "label": "CD7",
+    "snomed_code": "C1624708",
+    "snomed_term": "Cells.CD4+CD7+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51333": {
+    "loinc": "21169-8",
+    "label": "CD71",
+    "snomed_code": "C5855891",
+    "snomed_term": "CD71 Expression Measurement"
+  },
+  "51334": {
+    "loinc": "32535-7",
+    "label": "CD8"
+  },
+  "51335": {
+    "loinc": "44061-0",
+    "label": "FMC-7",
+    "snomed_code": "116831005",
+    "snomed_term": "FMC-7+ cell"
+  },
+  "51336": {
+    "loinc": "55864-3",
+    "label": "Glyco A"
+  },
+  "51337": {
+    "loinc": "51380-4",
+    "label": "HLA-DR"
+  },
+  "51338": {
+    "loinc": "55230-7",
+    "label": "Immunophenotyping"
+  },
+  "51339": {
+    "loinc": "13513-7",
+    "label": "Iron Stain"
+  },
+  "51340": {
+    "loinc": "46237-4",
+    "label": "Kappa"
+  },
+  "51341": {
+    "loinc": "20618-5",
+    "label": "Lambda"
+  },
+  "51342": {
+    "loinc": "10355-6",
+    "label": "Wright Giemsa"
+  },
+  "51365": {
+    "loinc": "33371-6",
+    "label": "Atypical Lymphocytes",
+    "snomed_code": "C3241972",
+    "snomed_term": "Atypical Lymphocyte Count Measurement"
+  },
+  "51366": {
+    "loinc": "33361-7",
+    "label": "Bands",
+    "snomed_code": "41489001",
+    "snomed_term": "Oligoclonal protein measurement"
+  },
+  "51367": {
+    "loinc": "17833-5",
+    "label": "Basophils",
+    "snomed_code": "63987006",
+    "snomed_term": "Histamine release from basophils measurement"
+  },
+  "51368": {
+    "loinc": "17834-3",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "51369": {
+    "loinc": "70168-0",
+    "label": "Hematocrit, Joint Fluid"
+  },
+  "51370": {
+    "loinc": "5781-0",
+    "label": "Joint Crystals, Birefringence"
+  },
+  "51371": {
+    "loinc": "14271-1",
+    "label": "Joint Crystals, Comment"
+  },
+  "51372": {
+    "loinc": "38458-6",
+    "label": "Joint Crystals, Location"
+  },
+  "51373": {
+    "loinc": "38458-6",
+    "label": "Joint Crystals, Number"
+  },
+  "51374": {
+    "loinc": "5781-0",
+    "label": "Joint Crystals, Shape"
+  },
+  "51375": {
+    "loinc": "26483-8",
+    "label": "Lymphocytes",
+    "snomed_code": "C3889996",
+    "snomed_term": "Activated Lymphocytes Measurement"
+  },
+  "51376": {
+    "loinc": "33376-5",
+    "label": "Macrophage",
+    "snomed_code": "C2825852",
+    "snomed_term": "Macrophage-Derived Chemokine measurement"
+  },
+  "51377": {
+    "loinc": "33365-8",
+    "label": "Mesothelial Cells"
+  },
+  "51378": {
+    "loinc": "17801-2",
+    "label": "Metamyelocytes",
+    "snomed_code": "C3274418",
+    "snomed_term": "Metamyelocyte to Total Cell Ratio Measurement"
+  },
+  "51379": {
+    "loinc": "17835-0",
+    "label": "Monocytes",
+    "snomed_code": "C3828975",
+    "snomed_term": "Monocytes to Macrocytes Ratio Measurement"
+  },
+  "51380": {
+    "loinc": "68545-3",
+    "label": "NRBC"
+  },
+  "51381": {
+    "loinc": "30410-5",
+    "label": "Other",
+    "snomed_code": "C5413516",
+    "snomed_term": "Coagulation time measurement, other methods"
+  },
+  "51382": {
+    "loinc": "26522-3",
+    "label": "Polys",
+    "snomed_code": "C0482467",
+    "snomed_term": "Carotene^post 15000 U carotene QDx3 for 3D poly:MCnc:Pt:Ser:Qn"
+  },
+  "51383": {
+    "loinc": "26458-0",
+    "label": "RBC, Joint Fluid"
+  },
+  "51385": {
+    "loinc": "30417-0",
+    "label": "Atypical Lymphocytes",
+    "snomed_code": "C3241972",
+    "snomed_term": "Atypical Lymphocyte Count Measurement"
+  },
+  "51386": {
+    "loinc": "26510-8",
+    "label": "Bands",
+    "snomed_code": "41489001",
+    "snomed_term": "Oligoclonal protein measurement"
+  },
+  "51387": {
+    "loinc": "28543-7",
+    "label": "Basophils",
+    "snomed_code": "63987006",
+    "snomed_term": "Histamine release from basophils measurement"
+  },
+  "51388": {
+    "loinc": "51217-8",
+    "label": "CD10",
+    "snomed_code": "C1544515",
+    "snomed_term": "CD10 Ag:PrThr:Pt:Tiss:Ord:Immune stain"
+  },
+  "51389": {
+    "loinc": "42864-9",
+    "label": "CD103",
+    "snomed_code": "C1544839",
+    "snomed_term": "Cells.CD19+CD103+/Cells:NFr:Pt:Tiss:Qn"
+  },
+  "51390": {
+    "loinc": "42867-2",
+    "label": "CD117",
+    "snomed_code": "C5855879",
+    "snomed_term": "CD117 Expression Measurement"
+  },
+  "51391": {
+    "loinc": "51232-7",
+    "label": "CD11c",
+    "snomed_code": "C1526511",
+    "snomed_term": "Cells.CD11b+CD11c+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51392": {
+    "loinc": "51238-4",
+    "label": "CD13",
+    "snomed_code": "C1979137",
+    "snomed_term": "Blasts.cytoplasmic CD13/Blasts:NFr:Pt:Bld:Qn"
+  },
+  "51393": {
+    "loinc": "42871-4",
+    "label": "CD138",
+    "snomed_code": "C1979011",
+    "snomed_term": "Cells.CD38+CD138+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51394": {
+    "loinc": "51248-3",
+    "label": "CD14",
+    "snomed_code": "C3538991",
+    "snomed_term": "CD14 Expressing Cell Measurement"
+  },
+  "51395": {
+    "loinc": "51252-5",
+    "label": "CD15",
+    "snomed_code": "C1979253",
+    "snomed_term": "CD15 Ag:PrThr:Pt:XXX:Ord:Immune stain"
+  },
+  "51396": {
+    "loinc": "17828-5",
+    "label": "CD16",
+    "snomed_code": "C5708432",
+    "snomed_term": "CD16 Expression Measurement"
+  },
+  "51397": {
+    "loinc": "18268-3",
+    "label": "CD16/56"
+  },
+  "51398": {
+    "loinc": "17829-3",
+    "label": "CD19",
+    "snomed_code": "C5779672",
+    "snomed_term": "CD19 antigen measurement"
+  },
+  "51399": {
+    "loinc": "17827-7",
+    "label": "CD2",
+    "snomed_code": "C3539069",
+    "snomed_term": "CD2 Expressing Cell Measurement"
+  },
+  "51400": {
+    "loinc": "57418-6",
+    "label": "CD20",
+    "snomed_code": "C5908499",
+    "snomed_term": "Membrane Spanning 4-Domains A1 Measurement"
+  },
+  "51401": {
+    "loinc": "42875-5",
+    "label": "CD22",
+    "snomed_code": "C1978403",
+    "snomed_term": "Blasts.cytoplasmic CD22/Blasts:NFr:Pt:Bld:Qn"
+  },
+  "51402": {
+    "loinc": "51269-9",
+    "label": "CD23",
+    "snomed_code": "C1831123",
+    "snomed_term": "Cells.CD19+CD23+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51403": {
+    "loinc": "51271-5",
+    "label": "CD25",
+    "snomed_code": "C5854957",
+    "snomed_term": "CD25 Expression Measurement"
+  },
+  "51404": {
+    "loinc": "17826-9",
+    "label": "CD3"
+  },
+  "51405": {
+    "loinc": "51294-7",
+    "label": "CD33",
+    "snomed_code": "C1148206",
+    "snomed_term": "Cells.CD13+CD33+/Cells:NFr:Pt:XXX:Qn"
+  },
+  "51406": {
+    "loinc": "58939-0",
+    "label": "CD34",
+    "snomed_code": "C3538723",
+    "snomed_term": "CD34 Measurement"
+  },
+  "51407": {
+    "loinc": "51299-6",
+    "label": "CD38",
+    "snomed_code": "C5855887",
+    "snomed_term": "CD38 Expression Measurement"
+  },
+  "51408": {
+    "loinc": "17822-8",
+    "label": "CD4"
+  },
+  "51409": {
+    "loinc": "18266-7",
+    "label": "CD4/CD8 Ratio",
+    "snomed_code": "C3641615",
+    "snomed_term": "CD4 Cell to CD8 Cell Ratio Measurement"
+  },
+  "51410": {
+    "loinc": "51320-0",
+    "label": "CD41",
+    "snomed_code": "C1642555",
+    "snomed_term": "Cells.CD9+CD41+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51411": {
+    "loinc": "17823-6",
+    "label": "CD45",
+    "snomed_code": "C4055336",
+    "snomed_term": "CD45 to Lymphocyte Ratio Measurement"
+  },
+  "51412": {
+    "loinc": "57423-6",
+    "label": "CD5",
+    "snomed_code": "C5891055",
+    "snomed_term": "T-Cell Surface Glycoprotein CD5 Measurement"
+  },
+  "51413": {
+    "loinc": "57424-4",
+    "label": "CD56",
+    "snomed_code": "C5908500",
+    "snomed_term": "Neural Cell Adhesion Molecule 1 Measurement"
+  },
+  "51414": {
+    "loinc": "51351-5",
+    "label": "CD57",
+    "snomed_code": "C5855889",
+    "snomed_term": "CD57 Expression Measurement"
+  },
+  "51415": {
+    "loinc": "51366-3",
+    "label": "CD64",
+    "snomed_code": "C5855890",
+    "snomed_term": "CD64 Expression Measurement"
+  },
+  "51416": {
+    "loinc": "57425-1",
+    "label": "CD7",
+    "snomed_code": "C1624708",
+    "snomed_term": "Cells.CD4+CD7+/Cells:NFr:Pt:Bld:Qn"
+  },
+  "51417": {
+    "loinc": "57426-9",
+    "label": "CD71",
+    "snomed_code": "C5855891",
+    "snomed_term": "CD71 Expression Measurement"
+  },
+  "51418": {
+    "loinc": "17824-4",
+    "label": "CD8"
+  },
+  "51419": {
+    "loinc": "26452-3",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "51420": {
+    "loinc": "57428-5",
+    "label": "FMC-7",
+    "snomed_code": "116831005",
+    "snomed_term": "FMC-7+ cell"
+  },
+  "51421": {
+    "loinc": "55864-3",
+    "label": "Glyco A"
+  },
+  "51422": {
+    "loinc": "11153-4",
+    "label": "Hematocrit, Other Fluid"
+  },
+  "51423": {
+    "loinc": "51381-2",
+    "label": "HLA-DR"
+  },
+  "51424": {
+    "loinc": "55230-7",
+    "label": "Immunophenotyping"
+  },
+  "51425": {
+    "loinc": "46238-2",
+    "label": "Kappa"
+  },
+  "51426": {
+    "loinc": "20618-5",
+    "label": "Lambda"
+  },
+  "51427": {
+    "loinc": "11031-2",
+    "label": "Lymphocytes",
+    "snomed_code": "C3889996",
+    "snomed_term": "Activated Lymphocytes Measurement"
+  },
+  "51428": {
+    "loinc": "30427-9",
+    "label": "Macrophage",
+    "snomed_code": "C2825852",
+    "snomed_term": "Macrophage-Derived Chemokine measurement"
+  },
+  "51429": {
+    "loinc": "28544-5",
+    "label": "Mesothelial cells"
+  },
+  "51430": {
+    "loinc": "17801-2",
+    "label": "Metamyelocytes",
+    "snomed_code": "C3274418",
+    "snomed_term": "Metamyelocyte to Total Cell Ratio Measurement"
+  },
+  "51431": {
+    "loinc": "26487-9",
+    "label": "Monos"
+  },
+  "51432": {
+    "loinc": "17800-4",
+    "label": "Myelocytes",
+    "snomed_code": "C5557077",
+    "snomed_term": "Eosinophilic Myelocytes to Lymphocytes Ratio Measurement"
+  },
+  "51433": {
+    "loinc": "49229-8",
+    "label": "NRBC"
+  },
+  "51434": {
+    "loinc": "76350-8",
+    "label": "Other Cell"
+  },
+  "51435": {
+    "loinc": "17803-8",
+    "label": "Plasma",
+    "snomed_code": "C0202042",
+    "snomed_term": "Plasma Glucose Measurement"
+  },
+  "51436": {
+    "loinc": "26518-1",
+    "label": "Polys",
+    "snomed_code": "C0482467",
+    "snomed_term": "Carotene^post 15000 U carotene QDx3 for 3D poly:MCnc:Pt:Ser:Qn"
+  },
+  "51437": {
+    "loinc": "17799-8",
+    "label": "Promyelocytes",
+    "snomed_code": "C3274434",
+    "snomed_term": "Promyelocyte to Total Cell Ratio Measurement"
+  },
+  "51438": {
+    "loinc": "26455-6",
+    "label": "RBC, Other Fluid"
+  },
+  "51440": {
+    "loinc": "33370-8",
+    "label": "Atypical Lymphocytes",
+    "snomed_code": "C3241972",
+    "snomed_term": "Atypical Lymphocyte Count Measurement"
+  },
+  "51441": {
+    "loinc": "99604-1",
+    "label": "Bands",
+    "snomed_code": "41489001",
+    "snomed_term": "Oligoclonal protein measurement"
+  },
+  "51442": {
+    "loinc": "35070-2",
+    "label": "Basophils",
+    "snomed_code": "63987006",
+    "snomed_term": "Histamine release from basophils measurement"
+  },
+  "51443": {
+    "loinc": "33373-2",
+    "label": "Blasts",
+    "snomed_code": "C4727718",
+    "snomed_term": "Blasts to Total Cells Ratio Measurement"
+  },
+  "51444": {
+    "loinc": "30379-2",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "51445": {
+    "loinc": "70169-8",
+    "label": "Hematocrit, Pleural"
+  },
+  "51446": {
+    "loinc": "26481-2",
+    "label": "Lymphocytes",
+    "snomed_code": "C3889996",
+    "snomed_term": "Activated Lymphocytes Measurement"
+  },
+  "51447": {
+    "loinc": "40520-9",
+    "label": "Macrophages"
+  },
+  "51448": {
+    "loinc": "30431-1",
+    "label": "Mesothelial Cells"
+  },
+  "51449": {
+    "loinc": "17801-2",
+    "label": "Metamyelocytes",
+    "snomed_code": "C3274418",
+    "snomed_term": "Metamyelocyte to Total Cell Ratio Measurement"
+  },
+  "51450": {
+    "loinc": "33362-5",
+    "label": "Monos"
+  },
+  "51451": {
+    "loinc": "17800-4",
+    "label": "Myelocytes",
+    "snomed_code": "C5557077",
+    "snomed_term": "Eosinophilic Myelocytes to Lymphocytes Ratio Measurement"
+  },
+  "51452": {
+    "loinc": "70170-6",
+    "label": "NRBC"
+  },
+  "51453": {
+    "loinc": "30408-9",
+    "label": "Other",
+    "snomed_code": "C5413516",
+    "snomed_term": "Coagulation time measurement, other methods"
+  },
+  "51454": {
+    "loinc": "40522-5",
+    "label": "Plasma Cells"
+  },
+  "51455": {
+    "loinc": "26519-9",
+    "label": "Polys",
+    "snomed_code": "C0482467",
+    "snomed_term": "Carotene^post 15000 U carotene QDx3 for 3D poly:MCnc:Pt:Ser:Qn"
+  },
+  "51456": {
+    "loinc": "17799-8",
+    "label": "Promyelocytes",
+    "snomed_code": "C3274434",
+    "snomed_term": "Promyelocyte to Total Cell Ratio Measurement"
+  },
+  "51457": {
+    "loinc": "26456-4",
+    "label": "RBC, Pleural"
+  },
+  "51459": {
+    "loinc": "55433-7",
+    "label": "Young Cells"
+  },
+  "51460": {
+    "loinc": "2335-8",
+    "label": "Blood, Occult"
+  },
+  "51461": {
+    "loinc": "25144-7",
+    "label": "Ammonium Biurate"
+  },
+  "51462": {
+    "loinc": "60340-7",
+    "label": "Amorphous Crystals"
+  },
+  "51463": {
+    "loinc": "5769-5",
+    "label": "Bacteria"
+  },
+  "51464": {
+    "loinc": "5770-3",
+    "label": "Bilirubin"
+  },
+  "51465": {
+    "loinc": "5771-1",
+    "label": "Bilirubin Crystals"
+  },
+  "51466": {
+    "loinc": "53963-5",
+    "label": "Blood"
+  },
+  "51467": {
+    "loinc": "18487-9",
+    "label": "Broad Casts"
+  },
+  "51468": {
+    "loinc": "5773-7",
+    "label": "Calcium Carbonate Crystals"
+  },
+  "51469": {
+    "loinc": "5774-5",
+    "label": "Calcium Oxalate Crystals"
+  },
+  "51470": {
+    "loinc": "5775-2",
+    "label": "Calcium Phosphate Crystals"
+  },
+  "51471": {
+    "loinc": "38995-7",
+    "label": "Cellular Cast"
+  },
+  "51472": {
+    "loinc": "5777-8",
+    "label": "Cholesterol Crystals"
+  },
+  "51473": {
+    "loinc": "5784-4",
+    "label": "Cysteine Crystals"
+  },
+  "51474": {
+    "loinc": "25156-1",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "51475": {
+    "loinc": "5786-9",
+    "label": "Epithelial Casts"
+  },
+  "51476": {
+    "loinc": "5787-7",
+    "label": "Epithelial Cells"
+  },
+  "51477": {
+    "loinc": "2272-3",
+    "label": "Free Fat"
+  },
+  "51478": {
+    "loinc": "5792-7",
+    "label": "Glucose",
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "51479": {
+    "loinc": "5793-5",
+    "label": "Granular Casts"
+  },
+  "51480": {
+    "loinc": "17809-5",
+    "label": "Hematocrit"
+  },
+  "51481": {
+    "loinc": "4644-1",
+    "label": "Hemosiderin"
+  },
+  "51482": {
+    "loinc": "5796-8",
+    "label": "Hyaline Casts"
+  },
+  "51483": {
+    "loinc": "41865-7",
+    "label": "Hyphenated Yeast"
+  },
+  "51484": {
+    "loinc": "5797-6",
+    "label": "Ketone"
+  },
+  "51485": {
+    "loinc": "5798-4",
+    "label": "Leucine Crystals"
+  },
+  "51486": {
+    "loinc": "20455-2",
+    "label": "Leukocytes"
+  },
+  "51487": {
+    "loinc": "5802-4",
+    "label": "Nitrite"
+  },
+  "51488": {
+    "loinc": "41284-1",
+    "label": "Non-squamous Epithelial Cells"
+  },
+  "51489": {
+    "loinc": "41284-1",
+    "label": "NonSquamous Epithelial Cell"
+  },
+  "51490": {
+    "loinc": "5788-5",
+    "label": "Oval Fat Body"
+  },
+  "51491": {
+    "loinc": "5803-2",
+    "label": "pH",
+    "snomed_code": "250573004",
+    "snomed_term": "Hydrogen ion concentration measurement"
+  },
+  "51492": {
+    "loinc": "5804-0",
+    "label": "Protein"
+  },
+  "51493": {
+    "loinc": "13945-1",
+    "label": "RBC"
+  },
+  "51494": {
+    "loinc": "5807-3",
+    "label": "RBC Casts"
+  },
+  "51495": {
+    "loinc": "58449-0",
+    "label": "RBC Clumps"
+  },
+  "51496": {
+    "loinc": "5809-9",
+    "label": "Reducing Substances, Urine"
+  },
+  "51497": {
+    "loinc": "26052-1",
+    "label": "Renal Epithelial Cells"
+  },
+  "51498": {
+    "loinc": "5811-5",
+    "label": "Specific Gravity"
+  },
+  "51499": {
+    "loinc": "8248-7",
+    "label": "Sperm"
+  },
+  "51500": {
+    "loinc": "5812-3",
+    "label": "Sulfonamides"
+  },
+  "51501": {
+    "loinc": "30089-7",
+    "label": "Transitional Epithelial Cells"
+  },
+  "51502": {
+    "loinc": "33905-1",
+    "label": "Trichomonas"
+  },
+  "51503": {
+    "loinc": "5814-9",
+    "label": "Triple Phosphate Crystals"
+  },
+  "51504": {
+    "loinc": "5815-6",
+    "label": "Tyrosine Crystals"
+  },
+  "51505": {
+    "loinc": "5817-2",
+    "label": "Uric Acid Crystals"
+  },
+  "51506": {
+    "loinc": "5767-9",
+    "label": "Urine Appearance"
+  },
+  "51507": {
+    "loinc": "9842-6",
+    "label": "Urine Casts, Other"
+  },
+  "51508": {
+    "loinc": "5778-6",
+    "label": "Urine Color"
+  },
+  "51509": {
+    "loinc": "11279-7",
+    "label": "Urine Comments"
+  },
+  "51510": {
+    "loinc": "5783-6",
+    "label": "Urine Crystals, Other"
+  },
+  "51511": {
+    "loinc": "25158-7",
+    "label": "Urine Fat Bodies"
+  },
+  "51512": {
+    "loinc": "8247-9",
+    "label": "Urine Mucous"
+  },
+  "51513": {
+    "loinc": "19159-3",
+    "label": "Urine Specimen Type"
+  },
+  "51514": {
+    "loinc": "20405-7",
+    "label": "Urobilinogen"
+  },
+  "51515": {
+    "loinc": "5819-8",
+    "label": "Waxy Casts"
+  },
+  "51516": {
+    "loinc": "5821-4",
+    "label": "WBC"
+  },
+  "51517": {
+    "loinc": "5820-6",
+    "label": "WBC Casts"
+  },
+  "51518": {
+    "loinc": "67848-2",
+    "label": "WBC Clumps"
+  },
+  "51519": {
+    "loinc": "5822-2",
+    "label": "Yeast"
+  },
+  "51556": {
+    "loinc": "5382-7",
+    "label": "Anti-Microsomal Antibodies"
+  },
+  "51557": {
+    "loinc": "8077-0",
+    "label": "Anti-Microsomal Antibody"
+  },
+  "51558": {
+    "loinc": "8091-1",
+    "label": "Antirnp"
+  },
+  "51559": {
+    "loinc": "8093-7",
+    "label": "Anti-ro"
+  },
+  "51560": {
+    "loinc": "94562-6",
+    "label": "Anti-SARS-CoV-2 IgA"
+  },
+  "51561": {
+    "loinc": "94563-4",
+    "label": "Anti-SARS-CoV-2 IgG"
+  },
+  "51562": {
+    "loinc": "66878-0",
+    "label": "Anti-Skin Antibody"
+  },
+  "51563": {
+    "loinc": "14252-1",
+    "label": "Anti-sm"
+  },
+  "51565": {
+    "loinc": "76127-0",
+    "label": "Argon"
+  },
+  "51566": {
+    "loinc": "2871-2",
+    "label": "Beta"
+  },
+  "51567": {
+    "loinc": "6873-4",
+    "label": "Beta Hydroxybutyrate"
+  },
+  "51568": {
+    "loinc": "33898-8",
+    "label": "Bilirubin, Neonatal"
+  },
+  "51569": {
+    "loinc": "15152-2",
+    "label": "Bilirubin, Neonatal, Direct"
+  },
+  "51570": {
+    "loinc": "1971-1",
+    "label": "Bilirubin, Neonatal, Indirect"
+  },
+  "51572": {
+    "loinc": "6891-6",
+    "label": "Bioavailable Testosterone"
+  },
+  "51573": {
+    "loinc": "1984-4",
+    "label": "Bromide"
+  },
+  "51574": {
+    "loinc": "4477-6",
+    "label": "C1 Inhibitor"
+  },
+  "51575": {
+    "loinc": "4478-4",
+    "label": "C1q"
+  },
+  "51576": {
+    "loinc": "4484-2",
+    "label": "C2"
+  },
+  "51577": {
+    "loinc": "4505-4",
+    "label": "C5"
+  },
+  "51578": {
+    "loinc": "4507-0",
+    "label": "C6"
+  },
+  "51579": {
+    "loinc": "24108-3",
+    "label": "CA 19-9"
+  },
+  "51580": {
+    "loinc": "12189-7",
+    "label": "Calculated CK-MB"
+  },
+  "51581": {
+    "loinc": "2053-7",
+    "label": "Carotene"
+  },
+  "51582": {
+    "loinc": "4532-8",
+    "label": "CH50"
+  },
+  "51583": {
+    "loinc": "2083-4",
+    "label": "Chol Estr"
+  },
+  "51584": {
+    "loinc": "2121-2",
+    "label": "Chylomicrons"
+  },
+  "51585": {
+    "loinc": "26643-7",
+    "label": "Clostrid"
+  },
+  "51586": {
+    "loinc": "22244-8",
+    "label": "CMV IgG Ab"
+  },
+  "51587": {
+    "loinc": "5124-3",
+    "label": "CMV IgG Ab Value"
+  },
+  "51588": {
+    "loinc": "30325-5",
+    "label": "CMV IgM Ab"
+  },
+  "51589": {
+    "loinc": "5126-8",
+    "label": "CMV IgM Ab Value"
+  },
+  "51590": {
+    "loinc": "20475-0",
+    "label": "CMV Interpretation"
+  },
+  "51592": {
+    "loinc": "1968-7",
+    "label": "Conj Bili"
+  },
+  "51593": {
+    "loinc": "5631-7",
+    "label": "Copper"
+  },
+  "51594": {
+    "loinc": "9642-0",
+    "label": "Creatine Kinase, Isoenzyme BB"
+  },
+  "51595": {
+    "loinc": "20569-0",
+    "label": "Creatine Kinase, Isoenzyme MB"
+  },
+  "51596": {
+    "loinc": "9643-8",
+    "label": "Creatine Kinase, Isoenzyme MM"
+  },
+  "51598": {
+    "loinc": "54206-8",
+    "label": "Cytomegalovirus Viral Load"
+  },
+  "51606": {
+    "loinc": "3559-2",
+    "label": "Digitoxin"
+  },
+  "51607": {
+    "loinc": "23883-2",
+    "label": "Dimeric Inhibin A, Maternal Screen"
+  },
+  "51609": {
+    "loinc": "3576-6",
+    "label": "Disopyramide"
+  },
+  "51610": {
+    "loinc": "1970-3",
+    "label": "Dlta Bili"
+  },
+  "51611": {
+    "loinc": "43995-0",
+    "label": "Down Syndrome Risk"
+  },
+  "51613": {
+    "loinc": "27353-2",
+    "label": "eAG"
+  },
+  "51614": {
+    "loinc": "7883-2",
+    "label": "Epstein-Barr Virus  EBNA IgG Ab"
+  },
+  "51615": {
+    "loinc": "7883-2",
+    "label": "Epstein-Barr Virus EBNA IgG Ab"
+  },
+  "51616": {
+    "loinc": "31374-2",
+    "label": "Epstein-Barr Virus IgG Ab Value"
+  },
+  "51617": {
+    "loinc": "31375-9",
+    "label": "Epstein-Barr Virus IgM Ab Value"
+  },
+  "51618": {
+    "loinc": "49564-8",
+    "label": "Epstein-Barr Virus Interpretation"
+  },
+  "51619": {
+    "loinc": "7885-7",
+    "label": "Epstein-Barr Virus VCA IgG Ab"
+  },
+  "51620": {
+    "loinc": "7886-5",
+    "label": "Epstein-Barr Virus VCA IgM Ab"
+  },
+  "51621": {
+    "loinc": "5646-5",
+    "label": "Ethylene Glycol"
+  },
+  "51622": {
+    "loinc": "2269-9",
+    "label": "Factor B"
+  },
+  "51623": {
+    "loinc": "3255-7",
+    "label": "Fibrinogen"
+  },
+  "51624": {
+    "loinc": "1994-3",
+    "label": "Free Calcium",
+    "snomed_code": "C0596235",
+    "snomed_term": "calcium ion"
+  },
+  "51625": {
+    "loinc": "36916-5",
+    "label": "Free Kappa"
+  },
+  "51626": {
+    "loinc": "48378-4",
+    "label": "Free Kappa/Free Lambda Ratio"
+  },
+  "51627": {
+    "loinc": "33944-0",
+    "label": "Free Lambda"
+  },
+  "51628": {
+    "loinc": "15069-8",
+    "label": "Fructosamine"
+  },
+  "51629": {
+    "loinc": "15069-8",
+    "label": "Fructosamine Plus"
+  },
+  "51630": {
+    "loinc": "2874-6",
+    "label": "Gamma"
+  },
+  "51631": {
+    "loinc": "4548-4",
+    "label": "Glycated Hemoglobin"
+  },
+  "51632": {
+    "loinc": "2963-7",
+    "label": "Growth Hormone"
+  },
+  "51633": {
+    "loinc": "13954-3",
+    "label": "Hbeag"
+  },
+  "51634": {
+    "loinc": "5196-1",
+    "label": "Hbsag"
+  },
+  "51635": {
+    "loinc": "5196-1",
+    "label": "Hbsag"
+  },
+  "51636": {
+    "loinc": "32166-1",
+    "label": "HCG, Multiples of Median"
+  },
+  "51637": {
+    "loinc": "2110-5",
+    "label": "HCG, Qualitative"
+  },
+  "51638": {
+    "loinc": "4544-3",
+    "label": "Hematocrit"
+  },
+  "51639": {
+    "loinc": "4544-3",
+    "label": "Hematocrit"
+  },
+  "51640": {
+    "loinc": "718-7",
+    "label": "Hemoglobin",
+    "snomed_code": "C0518015",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "51641": {
+    "loinc": "4546-8",
+    "label": "Hemoglobin  A"
+  },
+  "51642": {
+    "loinc": "4547-6",
+    "label": "Hemoglobin  A1"
+  },
+  "51643": {
+    "loinc": "51615-3",
+    "label": "Hemoglobin  A2"
+  },
+  "51644": {
+    "loinc": "4563-3",
+    "label": "Hemoglobin  C"
+  },
+  "51645": {
+    "loinc": "20509-6",
+    "label": "Hemoglobin, Calculated"
+  },
+  "51646": {
+    "loinc": "4576-5",
+    "label": "Hemoglobin  F"
+  },
+  "51647": {
+    "loinc": "4625-0",
+    "label": "Hemoglobin  S"
+  },
+  "51648": {
+    "loinc": "48398-2",
+    "label": "Hepatitis B Viral Load"
+  },
+  "51649": {
+    "loinc": "5189-6",
+    "label": "Hepatitis B Virus E Antibody"
+  },
+  "51650": {
+    "loinc": "5191-2",
+    "label": "Hepatitis B Virus E Antigen"
+  },
+  "51651": {
+    "loinc": "38180-6",
+    "label": "Hepatitis C Viral Load"
+  },
+  "51652": {
+    "loinc": "30522-7",
+    "label": "High-Sensitivity CRP"
+  },
+  "51653": {
+    "loinc": "29893-5",
+    "label": "HIV 1 Ab Confirmation"
+  },
+  "51654": {
+    "loinc": "29541-0",
+    "label": "HIV 1 Viral Load"
+  },
+  "51655": {
+    "loinc": "30361-0",
+    "label": "HIV 2 Ab Confirmation"
+  },
+  "51656": {
+    "loinc": "32351-9",
+    "label": "Hlap"
+  },
+  "51666": {
+    "loinc": "17859-0",
+    "label": "H. pylori IgG Ab"
+  },
+  "51667": {
+    "loinc": "5176-3",
+    "label": "H. pylori IgG Ab Value"
+  },
+  "51668": {
+    "loinc": "32352-7",
+    "label": "Hsap"
+  },
+  "51669": {
+    "loinc": "22362-8",
+    "label": "Htlv Ab"
+  },
+  "51670": {
+    "loinc": "39222-5",
+    "label": "Icd9"
+  },
+  "51672": {
+    "loinc": "5228-2",
+    "label": "Immune Complexes"
+  },
+  "51673": {
+    "loinc": "13169-8",
+    "label": "Immunoelectrophoresis"
+  },
+  "51674": {
+    "loinc": "2462-0",
+    "label": "Immunoglobulin E"
+  },
+  "51675": {
+    "loinc": "6301-6",
+    "label": "INR(PT)"
+  },
+  "51676": {
+    "loinc": "20448-7",
+    "label": "Insulin"
+  },
+  "51677": {
+    "loinc": "2823-3",
+    "label": "K (GREEN)"
+  },
+  "51679": {
+    "loinc": "4659-9",
+    "label": "Lap"
+  },
+  "51680": {
+    "loinc": "2536-1",
+    "label": "LD, Isoenzyme 1"
+  },
+  "51681": {
+    "loinc": "2539-5",
+    "label": "LD, Isoenzyme 2"
+  },
+  "51682": {
+    "loinc": "2542-9",
+    "label": "LD, Isoenzyme 3"
+  },
+  "51683": {
+    "loinc": "2545-2",
+    "label": "LD, Isoenzyme 4"
+  },
+  "51684": {
+    "loinc": "2548-6",
+    "label": "LD, Isoenzyme 5"
+  },
+  "51685": {
+    "loinc": "3714-3",
+    "label": "Lidocaine"
+  },
+  "51687": {
+    "loinc": "20510-4",
+    "label": "Lipo Electrophoresis"
+  },
+  "51688": {
+    "loinc": "38173-1",
+    "label": "Lyme C6 Ab"
+  },
+  "51689": {
+    "loinc": "34148-7",
+    "label": "Lyme G and M Value"
+  },
+  "51690": {
+    "loinc": "736-9",
+    "label": "Lymphocytes",
+    "snomed_code": "C3889996",
+    "snomed_term": "Activated Lymphocytes Measurement"
+  },
+  "51691": {
+    "loinc": "787-2",
+    "label": "MCV"
+  },
+  "51692": {
+    "loinc": "31418-7",
+    "label": "Monospot, Rapid Antigen"
+  },
+  "51693": {
+    "loinc": "22415-4",
+    "label": "Mumps IgG Ab"
+  },
+  "51694": {
+    "loinc": "7966-5",
+    "label": "Mumps IgG Ab Value"
+  },
+  "51695": {
+    "loinc": "2639-3",
+    "label": "Myoglobin"
+  },
+  "51696": {
+    "loinc": "48803-1",
+    "label": "Neural Tube Defect Risk"
+  },
+  "51697": {
+    "loinc": "751-8",
+    "label": "Neutrophils"
+  },
+  "51701": {
+    "loinc": "18182-6",
+    "label": "Osmolality, Calculated"
+  },
+  "51704": {
+    "loinc": "777-3",
+    "label": "Platelet Count"
+  },
+  "51705": {
+    "loinc": "3978-4",
+    "label": "Primidone"
+  },
+  "51707": {
+    "loinc": "2839-9",
+    "label": "Progesterone"
+  },
+  "51708": {
+    "loinc": "16935-9",
+    "label": "Qnthbsab"
+  },
+  "51709": {
+    "loinc": "31147-2",
+    "label": "Quantitative RPR Test"
+  },
+  "51710": {
+    "loinc": "20507-0",
+    "label": "Rapid Plasma Reagin Test"
+  },
+  "51711": {
+    "loinc": "789-8",
+    "label": "Red Blood Cells"
+  },
+  "51713": {
+    "loinc": "11011-4",
+    "label": "Reflex Confirmatory Hepatitis C Viral Load"
+  },
+  "51714": {
+    "loinc": "56888-1",
+    "label": "Reflex HIV Confirmation"
+  },
+  "51715": {
+    "loinc": "2915-7",
+    "label": "Renin"
+  },
+  "51716": {
+    "loinc": "2915-7",
+    "label": "Renin"
+  },
+  "51721": {
+    "loinc": "3052-8",
+    "label": "Reverse T3"
+  },
+  "51722": {
+    "loinc": "2089-1",
+    "label": "RFXLDLM"
+  },
+  "51723": {
+    "loinc": "22496-4",
+    "label": "Rubella"
+  },
+  "51724": {
+    "loinc": "25514-1",
+    "label": "Rubella IgG Ab"
+  },
+  "51725": {
+    "loinc": "20479-2",
+    "label": "Rubeola IgG Ab"
+  },
+  "51726": {
+    "loinc": "5244-9",
+    "label": "Rubeola IgG Ab Value"
+  },
+  "51728": {
+    "loinc": "2132-9",
+    "label": "Serum B12"
+  },
+  "51729": {
+    "loinc": "2132-9",
+    "label": "Serum B12"
+  },
+  "51730": {
+    "loinc": "2284-8",
+    "label": "Serum Folate"
+  },
+  "51731": {
+    "loinc": "5132-6",
+    "label": "Single Stranded DNA"
+  },
+  "51738": {
+    "loinc": "3021-3",
+    "label": "Thyroid Binding Globulin"
+  },
+  "51739": {
+    "loinc": "2028-9",
+    "label": "Total CO2"
+  },
+  "51740": {
+    "loinc": "29587-3",
+    "label": "Toxic Screen"
+  },
+  "51741": {
+    "loinc": "22580-5",
+    "label": "Toxoplasma IgG Ab"
+  },
+  "51742": {
+    "loinc": "5388-4",
+    "label": "Toxoplasma IgG Ab Value"
+  },
+  "51743": {
+    "loinc": "40678-5",
+    "label": "Toxoplasma IgM Ab"
+  },
+  "51744": {
+    "loinc": "5390-0",
+    "label": "Toxoplasma IgM Ab Value"
+  },
+  "51745": {
+    "loinc": "20464-4",
+    "label": "Toxoplasma Interpretation"
+  },
+  "51746": {
+    "loinc": "2502-3",
+    "label": "Transferrin Saturation"
+  },
+  "51747": {
+    "loinc": "22587-0",
+    "label": "Treponemal Antibody Test"
+  },
+  "51748": {
+    "loinc": "22587-0",
+    "label": "Treponema pallidum (Syphilis) Ab"
+  },
+  "51749": {
+    "loinc": "11597-2",
+    "label": "Treponema pallidum (syphilis) value"
+  },
+  "51750": {
+    "loinc": "20466-9",
+    "label": "UE3, Multiples of Median"
+  },
+  "51751": {
+    "loinc": "1971-1",
+    "label": "Uncon Bil"
+  },
+  "51753": {
+    "loinc": "19162-7",
+    "label": "VZV IgG Ab"
+  },
+  "51754": {
+    "loinc": "8047-3",
+    "label": "VZV IgG Ab Value"
+  },
+  "51755": {
+    "loinc": "6690-2",
+    "label": "White Blood Cells"
+  },
+  "51756": {
+    "loinc": "6690-2",
+    "label": "White Blood Cells"
+  },
+  "51758": {
+    "loinc": "32347-7",
+    "label": "Xylose"
+  },
+  "51761": {
+    "loinc": "5763-8",
+    "label": "Zinc"
+  },
+  "51769": {
+    "loinc": "5334-8",
+    "label": "RUBIgGV"
+  },
+  "51770": {
+    "loinc": "77147-7",
+    "label": "MDRDgfr"
+  },
+  "51773": {
+    "loinc": "36913-2",
+    "label": "RFXFRKL"
+  },
+  "51774": {
+    "loinc": "48159-8",
+    "label": "RFXHCV"
+  },
+  "51775": {
+    "loinc": "1746-7",
+    "label": "(Albumin)"
+  },
+  "51776": {
+    "loinc": "1746-7",
+    "label": "<Albumin>"
+  },
+  "51777": {
+    "loinc": "1746-7",
+    "label": "Albumin, CSF"
+  },
+  "51778": {
+    "loinc": "13972-5",
+    "label": "Alpha-1"
+  },
+  "51779": {
+    "loinc": "13975-8",
+    "label": "Alpha-2"
+  },
+  "51780": {
+    "loinc": "14389-1",
+    "label": "Amylase, CSF"
+  },
+  "51781": {
+    "loinc": "13976-6",
+    "label": "Beta"
+  },
+  "51782": {
+    "loinc": "16460-8",
+    "label": "Bicarbonate, CSF"
+  },
+  "51783": {
+    "loinc": "1973-7",
+    "label": "Bilirubin, Total, CSF"
+  },
+  "51784": {
+    "loinc": "2070-1",
+    "label": "Chloride, CSF"
+  },
+  "51785": {
+    "loinc": "14439-4",
+    "label": "Cholesterol, CSF"
+  },
+  "51786": {
+    "loinc": "77496-8",
+    "label": "Clostrid"
+  },
+  "51787": {
+    "loinc": "14398-2",
+    "label": "Creatinine, CSF"
+  },
+  "51788": {
+    "loinc": "31788-3",
+    "label": "Cryptococ"
+  },
+  "51790": {
+    "loinc": "2342-4",
+    "label": "Glucose, CSF"
+  },
+  "51791": {
+    "loinc": "29541-0",
+    "label": "HIV 1 Viral Load"
+  },
+  "51792": {
+    "loinc": "40685-0",
+    "label": "Immunoelectrophoresis, CSF"
+  },
+  "51793": {
+    "loinc": "2464-6",
+    "label": "Immunoglobulin G, CSF"
+  },
+  "51794": {
+    "loinc": "2464-6",
+    "label": "Immunoglobulin G, CSF"
+  },
+  "51795": {
+    "loinc": "2528-8",
+    "label": "Lactate Dehydrogenase, CSF"
+  },
+  "51797": {
+    "loinc": "2696-3",
+    "label": "Osmolality, CSF"
+  },
+  "51798": {
+    "loinc": "13439-5",
+    "label": "PEP, CSF"
+  },
+  "51799": {
+    "loinc": "2873-8",
+    "label": "PEP, CSF, Gamma Region"
+  },
+  "51800": {
+    "loinc": "2819-1",
+    "label": "Potassium, CSF"
+  },
+  "51801": {
+    "loinc": "2948-8",
+    "label": "Sodium, CSF"
+  },
+  "51802": {
+    "loinc": "2880-3",
+    "label": "Total Protein, CSF"
+  },
+  "51803": {
+    "loinc": "14446-9",
+    "label": "Triglycerides, CSF"
+  },
+  "51804": {
+    "loinc": "14000-4",
+    "label": "Urea Nitrogen, CSF"
+  },
+  "51805": {
+    "loinc": "13902-2",
+    "label": "Uric Acid, CSF"
+  },
+  "51807": {
+    "loinc": "1752-5",
+    "label": "(Albumin)"
+  },
+  "51808": {
+    "loinc": "15125-8",
+    "label": "Alpha-1"
+  },
+  "51809": {
+    "loinc": "15126-6",
+    "label": "Alpha-2"
+  },
+  "51810": {
+    "loinc": "15127-4",
+    "label": "Beta"
+  },
+  "51811": {
+    "loinc": "22735-5",
+    "label": "Bicarbonate,Joint Fluid"
+  },
+  "51812": {
+    "loinc": "14423-8",
+    "label": "Bilirubin, Total, Joint Fluid"
+  },
+  "51813": {
+    "loinc": "32307-1",
+    "label": "Chloride, Joint Fluid"
+  },
+  "51814": {
+    "loinc": "14443-6",
+    "label": "Cholesterol, Joint Fluid"
+  },
+  "51815": {
+    "loinc": "97614-2",
+    "label": "Clostrid"
+  },
+  "51816": {
+    "loinc": "29533-7",
+    "label": "Cryptococ"
+  },
+  "51818": {
+    "loinc": "42601-5",
+    "label": "IgG, Joint Fluid"
+  },
+  "51819": {
+    "loinc": "13169-8",
+    "label": "Immunoelectrophoresis, Joint Fluid"
+  },
+  "51820": {
+    "loinc": "2696-3",
+    "label": "Osmolality, Joint Fluid"
+  },
+  "51821": {
+    "loinc": "2875-3",
+    "label": "PEP, Joint Fluid, Gamma Region"
+  },
+  "51822": {
+    "loinc": "14172-1",
+    "label": "Potassium, Joint Fluid"
+  },
+  "51823": {
+    "loinc": "32340-2",
+    "label": "Sodium, Joint Fluid"
+  },
+  "51824": {
+    "loinc": "14449-3",
+    "label": "Triglycerides, Joint Fluid"
+  },
+  "51825": {
+    "loinc": "14396-6",
+    "label": "Urea Nitrogen, Joint Fluid"
+  },
+  "51826": {
+    "loinc": "3085-8",
+    "label": "Uric Acid, Joint Fluid"
+  },
+  "51829": {
+    "loinc": "2271-5",
+    "label": "72 Hr Fat"
+  },
+  "51832": {
+    "loinc": "31217-3",
+    "label": "Adenovirus"
+  },
+  "51833": {
+    "loinc": "1832-5",
+    "label": "AFP, Amniotic Fluid"
+  },
+  "51834": {
+    "loinc": "11207-8",
+    "label": "AFP, Body Fluid"
+  },
+  "51835": {
+    "loinc": "1747-5",
+    "label": "(Albumi"
+  },
+  "51836": {
+    "loinc": "1747-5",
+    "label": "<Albumin>"
+  },
+  "51837": {
+    "loinc": "17812-9",
+    "label": "Alpha-1"
+  },
+  "51838": {
+    "loinc": "17814-5",
+    "label": "Alpha-2"
+  },
+  "51840": {
+    "loinc": "17816-0",
+    "label": "Beta"
+  },
+  "51841": {
+    "loinc": "2335-8",
+    "label": "Blood, Occult"
+  },
+  "51842": {
+    "loinc": "3093-2",
+    "label": "Bun"
+  },
+  "51843": {
+    "loinc": "61367-9",
+    "label": "C. diff PCR"
+  },
+  "51844": {
+    "loinc": "6364-4",
+    "label": "C diff Toxin Antigen Assay"
+  },
+  "51845": {
+    "loinc": "21184-7",
+    "label": "Chlamydia pneumoniae"
+  },
+  "51846": {
+    "loinc": "43304-5",
+    "label": "Chlamydia trachomatis"
+  },
+  "51847": {
+    "loinc": "20799-3",
+    "label": "Clostrid"
+  },
+  "51848": {
+    "loinc": "41001-9",
+    "label": "Coronavirus, NOT CoVID-19"
+  },
+  "51853": {
+    "loinc": "94763-0",
+    "label": "COVID-19"
+  },
+  "51854": {
+    "loinc": "16692-6",
+    "label": "Cryptococ"
+  },
+  "51855": {
+    "loinc": "30165-5",
+    "label": "DSPC, Amniotic Fluid"
+  },
+  "51858": {
+    "loinc": "25836-8",
+    "label": "HIV 1 Viral Load"
+  },
+  "51859": {
+    "loinc": "38917-1",
+    "label": "Human Metapneumovirus"
+  },
+  "51860": {
+    "loinc": "40991-2",
+    "label": "Human Rhinovirus/Enterovirus"
+  },
+  "51861": {
+    "loinc": "13169-8",
+    "label": "Immunoelectrophoresis, Fluid"
+  },
+  "51862": {
+    "loinc": "15183-7",
+    "label": "Immunoglobulin G, Body Fluid"
+  },
+  "51863": {
+    "loinc": "5862-8",
+    "label": "Influenza A"
+  },
+  "51864": {
+    "loinc": "34487-9",
+    "label": "Influenza A by PCR"
+  },
+  "51865": {
+    "loinc": "34487-9",
+    "label": "Influenza A by PCR"
+  },
+  "51866": {
+    "loinc": "49521-8",
+    "label": "Influenza A H1"
+  },
+  "51867": {
+    "loinc": "55465-9",
+    "label": "Influenza A H1-2009"
+  },
+  "51868": {
+    "loinc": "49524-2",
+    "label": "Influenza A H3"
+  },
+  "51869": {
+    "loinc": "31859-2",
+    "label": "Influenza A, Rapid Antigen"
+  },
+  "51870": {
+    "loinc": "31859-2",
+    "label": "Influenza A, Rapid Antigen"
+  },
+  "51871": {
+    "loinc": "5866-9",
+    "label": "Influenza B"
+  },
+  "51872": {
+    "loinc": "40982-1",
+    "label": "Influenza B by PCR"
+  },
+  "51873": {
+    "loinc": "40982-1",
+    "label": "Influenza B by PCR"
+  },
+  "51874": {
+    "loinc": "31864-2",
+    "label": "Influenza B, Rapid Antigen"
+  },
+  "51875": {
+    "loinc": "80383-3",
+    "label": "Influenza B, Rapid Antigen"
+  },
+  "51876": {
+    "loinc": "14976-5",
+    "label": "L/S Ratio, Amniotic Fluid"
+  },
+  "51877": {
+    "loinc": "35492-8",
+    "label": "MRSA PCR"
+  },
+  "51878": {
+    "loinc": "19054-6",
+    "label": "Mycoplasma pneumoniae"
+  },
+  "51879": {
+    "loinc": "43305-2",
+    "label": "Neisseria gonorrhoeae"
+  },
+  "51880": {
+    "loinc": "97525-0",
+    "label": "Norovirus Genogroup I"
+  },
+  "51881": {
+    "loinc": "97532-6",
+    "label": "Norovirus Genogroup II"
+  },
+  "51882": {
+    "loinc": "673-4",
+    "label": "O & P"
+  },
+  "51883": {
+    "loinc": "55097-0",
+    "label": "Parainfluenza 1"
+  },
+  "51884": {
+    "loinc": "55098-8",
+    "label": "Parainfluenza 2"
+  },
+  "51885": {
+    "loinc": "55099-6",
+    "label": "Parainfluenza 3"
+  },
+  "51886": {
+    "loinc": "41010-0",
+    "label": "Parainfluenza 4"
+  },
+  "51887": {
+    "loinc": "88698-6",
+    "label": "PEP, Body Fluid"
+  },
+  "51888": {
+    "loinc": "17818-6",
+    "label": "PEP, Body Fluid, Gamma Region"
+  },
+  "51889": {
+    "loinc": "2785-4",
+    "label": "Phosphatidylglycerol"
+  },
+  "51890": {
+    "loinc": "94558-4",
+    "label": "Rapid COVID-19"
+  },
+  "51891": {
+    "loinc": "30075-6",
+    "label": "Respiratory Syncytial Virus A"
+  },
+  "51892": {
+    "loinc": "30076-4",
+    "label": "Respiratory Syncytial Virus B"
+  },
+  "51893": {
+    "loinc": "61404-0",
+    "label": "Staph aureus PCR"
+  },
+  "51894": {
+    "loinc": "78012-2",
+    "label": "Strep A, Rapid Antigen"
+  },
+  "51895": {
+    "loinc": "78012-2",
+    "label": "Strep A, Rapid Antigen"
+  },
+  "51896": {
+    "loinc": "10763-1",
+    "label": "Sudan Stain"
+  },
+  "51897": {
+    "loinc": "30562-3",
+    "label": "Surfactant/Albumin"
+  },
+  "51898": {
+    "loinc": "30562-3",
+    "label": "Surf/Alb"
+  },
+  "51899": {
+    "loinc": "32766-8",
+    "label": "Trichomonas vaginalis"
+  },
+  "51900": {
+    "loinc": "53612-8",
+    "label": "Uric Acid, Body Fluid"
+  },
+  "51910": {
+    "loinc": "1748-3",
+    "label": "(Albumin)"
+  },
+  "51911": {
+    "loinc": "17812-9",
+    "label": "Alpha-1"
+  },
+  "51912": {
+    "loinc": "17814-5",
+    "label": "Alpha-2"
+  },
+  "51913": {
+    "loinc": "17816-0",
+    "label": "Beta"
+  },
+  "51914": {
+    "loinc": "77496-8",
+    "label": "Clostrid"
+  },
+  "51915": {
+    "loinc": "29533-7",
+    "label": "Cryptococ"
+  },
+  "51917": {
+    "loinc": "13169-8",
+    "label": "Immunoelectrophoresis, Pleural"
+  },
+  "51918": {
+    "loinc": "15183-7",
+    "label": "Immunoglobulin G, Pleural"
+  },
+  "51919": {
+    "loinc": "2690-6",
+    "label": "Osmolality, Pleural"
+  },
+  "51920": {
+    "loinc": "17818-6",
+    "label": "PEP, Pleural, Gamma Region"
+  },
+  "51921": {
+    "loinc": "77621-1",
+    "label": "proBNP, Pleural"
+  },
+  "51922": {
+    "loinc": "14394-1",
+    "label": "Urea Nitrogen, Pleural"
+  },
+  "51923": {
+    "loinc": "60469-4",
+    "label": "Uric Acid, Pleural"
+  },
+  "51925": {
+    "loinc": "2271-5",
+    "label": "72 Hr Fat"
+  },
+  "51926": {
+    "loinc": "54346-2",
+    "label": "(Albumin)"
+  },
+  "51927": {
+    "loinc": "54346-2",
+    "label": "Albumin, Stool"
+  },
+  "51928": {
+    "loinc": "17812-9",
+    "label": "Alpha-1"
+  },
+  "51929": {
+    "loinc": "17814-5",
+    "label": "Alpha-2"
+  },
+  "51930": {
+    "loinc": "32298-2",
+    "label": "Amylase, Stool"
+  },
+  "51931": {
+    "loinc": "17816-0",
+    "label": "Beta"
+  },
+  "51932": {
+    "loinc": "1976-0",
+    "label": "Bilirubin, Total, Stool"
+  },
+  "51933": {
+    "loinc": "54067-4",
+    "label": "C. diff PCR"
+  },
+  "51934": {
+    "loinc": "34713-8",
+    "label": "C Diff Toxin Antigen Assay"
+  },
+  "51935": {
+    "loinc": "32308-9",
+    "label": "Cholesterol, Stool"
+  },
+  "51936": {
+    "loinc": "34712-0",
+    "label": "Clostrid"
+  },
+  "51937": {
+    "loinc": "47610-1",
+    "label": "Creatinine, Stool"
+  },
+  "51938": {
+    "loinc": "29533-7",
+    "label": "Cryptococ"
+  },
+  "51940": {
+    "loinc": "17818-6",
+    "label": "Gamma"
+  },
+  "51941": {
+    "loinc": "51595-7",
+    "label": "Glucose, Stool"
+  },
+  "51942": {
+    "loinc": "15183-7",
+    "label": "IgG, Stool"
+  },
+  "51943": {
+    "loinc": "13169-8",
+    "label": "Immunoelectrophoresis, Stool"
+  },
+  "51944": {
+    "loinc": "32324-6",
+    "label": "Lactate Dehydrogenase, Stool"
+  },
+  "51945": {
+    "loinc": "54905-5",
+    "label": "Norovirus Genogroup I"
+  },
+  "51946": {
+    "loinc": "54906-3",
+    "label": "Norovirus Genogroup II"
+  },
+  "51947": {
+    "loinc": "10701-1",
+    "label": "O & P"
+  },
+  "51948": {
+    "loinc": "10753-2",
+    "label": "Sudan Stain"
+  },
+  "51949": {
+    "loinc": "47739-8",
+    "label": "Total Protein, Stool"
+  },
+  "51950": {
+    "loinc": "77360-6",
+    "label": "Triglycerides, Stool"
+  },
+  "51951": {
+    "loinc": "3093-2",
+    "label": "Urea Nitrogen, Stool"
+  },
+  "51952": {
+    "loinc": "32343-6",
+    "label": "Uric Acid, Stool"
+  },
+  "51957": {
+    "loinc": "1666-7",
+    "label": "17-Hydroxycorticosteroids"
+  },
+  "51958": {
+    "loinc": "6766-0",
+    "label": "17-Ketosteroids, Urine"
+  },
+  "51959": {
+    "loinc": "1695-6",
+    "label": "5-HIAA, Urine"
+  },
+  "51960": {
+    "loinc": "49724-8",
+    "label": "Aldolase"
+  },
+  "51961": {
+    "loinc": "13990-7",
+    "label": "Alpha-1"
+  },
+  "51962": {
+    "loinc": "13993-1",
+    "label": "Alpha-2"
+  },
+  "51963": {
+    "loinc": "30077-2",
+    "label": "Amylase/Creatinine Clearance"
+  },
+  "51964": {
+    "loinc": "1799-6",
+    "label": "Amylase, Serum"
+  },
+  "51965": {
+    "loinc": "13994-9",
+    "label": "Beta"
+  },
+  "51966": {
+    "loinc": "1977-8",
+    "label": "Bilirubin"
+  },
+  "51967": {
+    "loinc": "53963-5",
+    "label": "Blood"
+  },
+  "51968": {
+    "loinc": "22712-4",
+    "label": "Camp"
+  },
+  "51969": {
+    "loinc": "2057-8",
+    "label": "Catecholamines, Urine"
+  },
+  "51972": {
+    "loinc": "14467-5",
+    "label": "Chlamydia trachomatis"
+  },
+  "51974": {
+    "loinc": "5632-5",
+    "label": "Copper, Urine"
+  },
+  "51975": {
+    "loinc": "2136-0",
+    "label": "Coproporphyrins"
+  },
+  "51976": {
+    "loinc": "28550-2",
+    "label": "Cortisol, Urine"
+  },
+  "51977": {
+    "loinc": "2161-8",
+    "label": "Creatinine, Blood"
+  },
+  "51979": {
+    "loinc": "2253-3",
+    "label": "Estriol, Urine"
+  },
+  "51980": {
+    "loinc": "11235-9",
+    "label": "Fentanyl"
+  },
+  "51981": {
+    "loinc": "2350-7",
+    "label": "Glucose",
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "51982": {
+    "loinc": "29585-7",
+    "label": "Immunoelectrophoresis, Urine"
+  },
+  "51983": {
+    "loinc": "2499-2",
+    "label": "Iron, Urine"
+  },
+  "51984": {
+    "loinc": "49779-2",
+    "label": "Ketone"
+  },
+  "51985": {
+    "loinc": "20455-2",
+    "label": "Leukocytes"
+  },
+  "51986": {
+    "loinc": "60256-5",
+    "label": "Neisseria gonorrhoeae"
+  },
+  "51987": {
+    "loinc": "32710-6",
+    "label": "Nitrite"
+  },
+  "51988": {
+    "loinc": "75665-0",
+    "label": "O & P"
+  },
+  "51989": {
+    "loinc": "10998-3",
+    "label": "Oxycodone"
+  },
+  "51990": {
+    "loinc": "19670-9",
+    "label": "Phenothiazine Screen, Urine"
+  },
+  "51991": {
+    "loinc": "19141-1",
+    "label": "Propoxyphene, Urine"
+  },
+  "51992": {
+    "loinc": "20454-5",
+    "label": "Protein"
+  },
+  "51994": {
+    "loinc": "2965-2",
+    "label": "Specific Gravity"
+  },
+  "51996": {
+    "loinc": "5813-1",
+    "label": "Trichomonas vaginalis"
+  },
+  "51999": {
+    "loinc": "1799-6",
+    "label": "Urine Amylase"
+  },
+  "52000": {
+    "loinc": "2161-8",
+    "label": "Urine  Creatinine"
+  },
+  "52001": {
+    "loinc": "13995-6",
+    "label": "Urine PEP, Gamma region"
+  },
+  "52002": {
+    "loinc": "3107-0",
+    "label": "Urobilinogen"
+  },
+  "52003": {
+    "loinc": "3112-0",
+    "label": "Uroporphyrins"
+  },
+  "52013": {
+    "loinc": "3122-9",
+    "label": "Vanillylmandelic Acid"
+  },
+  "52015": {
+    "loinc": "47806-5",
+    "label": "Xylose"
+  },
+  "52017": {
+    "loinc": "40957-3",
+    "label": "Zinc, Urine"
+  },
+  "52022": {
+    "loinc": "1751-7",
+    "label": "Albumin, Blood"
+  },
+  "52024": {
+    "loinc": "38483-4",
+    "label": "Creatinine, Whole Blood"
+  },
+  "52026": {
+    "loinc": "76633-7",
+    "label": "Estimated GFR (MDRD equation)"
+  },
+  "52027": {
+    "loinc": "2339-0",
+    "label": "Glucose, Whole Blood"
+  },
+  "52028": {
+    "loinc": "32354-3",
+    "label": "Hematocrit"
+  },
+  "52029": {
+    "loinc": "49936-8",
+    "label": "% Ionized Calcium"
+  },
+  "52030": {
+    "loinc": "25461-5",
+    "label": "Lithium",
+    "snomed_code": "54392006",
+    "snomed_term": "Lithium measurement"
+  },
+  "52031": {
+    "loinc": "2692-2",
+    "label": "Osmolality"
+  },
+  "52032": {
+    "loinc": "19214-6",
+    "label": "P50 of Hemoglobin"
+  },
+  "52033": {
+    "loinc": "66746-9",
+    "label": "Specimen Type"
+  },
+  "52034": {
+    "loinc": "49765-1",
+    "label": "Total Calcium"
+  },
+  "52035": {
+    "loinc": "49765-1",
+    "label": "Total Calcium"
+  },
+  "52037": {
+    "loinc": "20565-8",
+    "label": "WB tCO2"
+  },
+  "52038": {
+    "loinc": "1925-7",
+    "label": "Base Excess",
+    "snomed_code": "C0201985",
+    "snomed_term": "Base excess measurement"
+  },
+  "52039": {
+    "loinc": "1960-4",
+    "label": "Calculated Bicarbonate"
+  },
+  "52040": {
+    "loinc": "2019-8",
+    "label": "pCO2",
+    "snomed_code": "C0546666",
+    "snomed_term": "pH, PCO2 Astrup-Anderson nomogram measurement"
+  },
+  "52041": {
+    "loinc": "2744-1",
+    "label": "pH",
+    "snomed_code": "250573004",
+    "snomed_term": "Hydrogen ion concentration measurement"
+  },
+  "52042": {
+    "loinc": "2703-7",
+    "label": "pO2",
+    "snomed_code": "C1283004",
+    "snomed_term": "PO2 measurement"
+  },
+  "52044": {
+    "loinc": "2695-5",
+    "label": "Osmolality, Urine",
+    "snomed_code": "C0740085",
+    "snomed_term": "Osmolality measurement, urine"
+  },
+  "52045": {
+    "loinc": "2756-5",
+    "label": "pH, Urine"
+  },
+  "52046": {
+    "loinc": "2828-2",
+    "label": "Potassium, Urine",
+    "snomed_code": "C0202195",
+    "snomed_term": "Potassium measurement, urine"
+  },
+  "52047": {
+    "loinc": "2955-3",
+    "label": "Sodium, Urine",
+    "snomed_code": "C1256585",
+    "snomed_term": "Sodium measurement, urine"
+  },
+  "52048": {
+    "loinc": "35041-3",
+    "label": "Atyps#"
+  },
+  "52049": {
+    "loinc": "35014-0",
+    "label": "Bands#"
+  },
+  "52050": {
+    "loinc": "35073-6",
+    "label": "Basos#"
+  },
+  "52051": {
+    "loinc": "35065-2",
+    "label": "Blasts#"
+  },
+  "52052": {
+    "loinc": "35061-1",
+    "label": "Eos#"
+  },
+  "52053": {
+    "loinc": "35057-9",
+    "label": "Histio#"
+  },
+  "52054": {
+    "loinc": "40516-7",
+    "label": "Histiocyte"
+  },
+  "52055": {
+    "loinc": "33384-9",
+    "label": "Hyperseg"
+  },
+  "52056": {
+    "loinc": "35010-8",
+    "label": "Hyperseg#"
+  },
+  "52057": {
+    "loinc": "35097-5",
+    "label": "Lymphs#"
+  },
+  "52058": {
+    "loinc": "26476-2",
+    "label": "Metas#"
+  },
+  "52059": {
+    "loinc": "35027-2",
+    "label": "Monos#"
+  },
+  "52060": {
+    "loinc": "35016-5",
+    "label": "Myelos#"
+  },
+  "52061": {
+    "loinc": "26460-6",
+    "label": "Nuc Rbcs#"
+  },
+  "52062": {
+    "loinc": "35006-6",
+    "label": "Plasma#"
+  },
+  "52063": {
+    "loinc": "35005-8",
+    "label": "Polys#"
+  },
+  "52064": {
+    "loinc": "34996-9",
+    "label": "Promyelo#"
+  },
+  "52065": {
+    "loinc": "51926-4",
+    "label": "Total Nucleated Cells, Ascites"
+  },
+  "52069": {
+    "loinc": "704-7",
+    "label": "Absolute Basophil Count"
+  },
+  "52070": {
+    "loinc": "8116-6",
+    "label": "Absolute CD19 Count"
+  },
+  "52071": {
+    "loinc": "9558-8",
+    "label": "Absolute CD20 Count"
+  },
+  "52072": {
+    "loinc": "14113-5",
+    "label": "Absolute CD56 Count"
+  },
+  "52073": {
+    "loinc": "711-2",
+    "label": "Absolute Eosinophil Count"
+  },
+  "52074": {
+    "loinc": "742-7",
+    "label": "Absolute Monocyte Count"
+  },
+  "52075": {
+    "loinc": "751-8",
+    "label": "Absolute Neutrophil Count"
+  },
+  "52076": {
+    "loinc": "11020-5",
+    "label": "Acid Phosphatase Stain"
+  },
+  "52077": {
+    "loinc": "3084-1",
+    "label": "Acidserum"
+  },
+  "52078": {
+    "loinc": "27811-9",
+    "label": "Antithrombin III"
+  },
+  "52079": {
+    "loinc": "3306-8",
+    "label": "ASA Tol"
+  },
+  "52082": {
+    "loinc": "53814-0",
+    "label": "Aspirin Reactivity"
+  },
+  "52085": {
+    "loinc": "11067-6",
+    "label": "Bleed Tm"
+  },
+  "52086": {
+    "loinc": "11067-6",
+    "label": "Bleed Tm"
+  },
+  "52087": {
+    "loinc": "20402-4",
+    "label": "CD15/56"
+  },
+  "52088": {
+    "loinc": "20476-8",
+    "label": "CD 1a"
+  },
+  "52089": {
+    "loinc": "17137-1",
+    "label": "CD30"
+  },
+  "52090": {
+    "loinc": "19122-1",
+    "label": "CD42"
+  },
+  "52091": {
+    "loinc": "17172-8",
+    "label": "CD52"
+  },
+  "52092": {
+    "loinc": "8133-1",
+    "label": "CD56 %"
+  },
+  "52093": {
+    "loinc": "14113-5",
+    "label": "CD56 Absolute Count"
+  },
+  "52094": {
+    "loinc": "20478-4",
+    "label": "CD61"
+  },
+  "52095": {
+    "loinc": "32855-9",
+    "label": "CD62"
+  },
+  "52096": {
+    "loinc": "10780-5",
+    "label": "Chloroacetate"
+  },
+  "52097": {
+    "loinc": "34550-4",
+    "label": "Circ Ab"
+  },
+  "52098": {
+    "loinc": "3244-1",
+    "label": "Clot Lysis"
+  },
+  "52099": {
+    "loinc": "3245-8",
+    "label": "Clot Retraction"
+  },
+  "52100": {
+    "loinc": "52768-9",
+    "label": "Clot Time"
+  },
+  "52101": {
+    "loinc": "38483-4",
+    "label": "Cr"
+  },
+  "52102": {
+    "loinc": "7790-9",
+    "label": "Crenated Cells"
+  },
+  "52103": {
+    "loinc": "34550-4",
+    "label": "Cross Imm"
+  },
+  "52104": {
+    "loinc": "5117-7",
+    "label": "Cryoglob"
+  },
+  "52105": {
+    "loinc": "24374-1",
+    "label": "Direct Antiplatelet Antibodies"
+  },
+  "52106": {
+    "loinc": "18286-5",
+    "label": "Donath-l"
+  },
+  "52107": {
+    "loinc": "50410-0",
+    "label": "dRVVT - Confirmation"
+  },
+  "52108": {
+    "loinc": "97642-3",
+    "label": "dRVVT - Normalized Ratio"
+  },
+  "52109": {
+    "loinc": "6303-2",
+    "label": "dRVVT - Screen"
+  },
+  "52111": {
+    "loinc": "7790-9",
+    "label": "Echinocytes"
+  },
+  "52112": {
+    "loinc": "3244-1",
+    "label": "Euglobulin Lysis"
+  },
+  "52113": {
+    "loinc": "3185-6",
+    "label": "Factor IX Inhibitor"
+  },
+  "52114": {
+    "loinc": "10521-3",
+    "label": "Factor VIII Antigen"
+  },
+  "52115": {
+    "loinc": "3255-7",
+    "label": "Fibrinoge"
+  },
+  "52116": {
+    "loinc": "3255-7",
+    "label": "Fibrinogen"
+  },
+  "52117": {
+    "loinc": "3256-5",
+    "label": "Fibrinogen, Immunologic"
+  },
+  "52119": {
+    "loinc": "3276-3",
+    "label": "Fitzgerld"
+  },
+  "52120": {
+    "loinc": "3276-3",
+    "label": "Fitzgerld"
+  },
+  "52121": {
+    "loinc": "6005-3",
+    "label": "Fletcher"
+  },
+  "52122": {
+    "loinc": "30226-5",
+    "label": "Fsp"
+  },
+  "52123": {
+    "loinc": "2356-4",
+    "label": "G6PD, Qualitative"
+  },
+  "52124": {
+    "loinc": "32546-4",
+    "label": "G6pd Spec"
+  },
+  "52125": {
+    "loinc": "2383-8",
+    "label": "Glutathione"
+  },
+  "52126": {
+    "loinc": "716-1",
+    "label": "Heinz Aph"
+  },
+  "52127": {
+    "loinc": "10374-7",
+    "label": "Helmet Cells"
+  },
+  "52128": {
+    "loinc": "59185-9",
+    "label": "Hemoglobin H Inclusion"
+  },
+  "52129": {
+    "loinc": "48343-8",
+    "label": "Hemoglobin Other"
+  },
+  "52130": {
+    "loinc": "44721-9",
+    "label": "Histiocytes"
+  },
+  "52131": {
+    "loinc": "73816-1",
+    "label": "HIT-Ab Interpreted Result"
+  },
+  "52132": {
+    "loinc": "45155-9",
+    "label": "HIT-Ab Numerical Result"
+  },
+  "52133": {
+    "loinc": "3276-3",
+    "label": "Hmwk"
+  },
+  "52134": {
+    "loinc": "34550-4",
+    "label": "IG"
+  },
+  "52135": {
+    "loinc": "38518-7",
+    "label": "Immature Granulocytes"
+  },
+  "52138": {
+    "loinc": "13053-4",
+    "label": "Kct"
+  },
+  "52139": {
+    "loinc": "13507-9",
+    "label": "LE Prep"
+  },
+  "52140": {
+    "loinc": "34571-0",
+    "label": "LS"
+  },
+  "52141": {
+    "loinc": "32700-7",
+    "label": "Malaria Smear"
+  },
+  "52142": {
+    "loinc": "32623-1",
+    "label": "Mean Platelet Volume"
+  },
+  "52143": {
+    "loinc": "17263-5",
+    "label": "Methemalb"
+  },
+  "52144": {
+    "loinc": "2613-8",
+    "label": "Methemoglobin",
+    "snomed_code": "C0546660",
+    "snomed_term": "Methemoglobin measurement"
+  },
+  "52145": {
+    "loinc": "31418-7",
+    "label": "Mono Spot Test"
+  },
+  "52146": {
+    "loinc": "10765-6",
+    "label": "Naphtol Acetate Stain"
+  },
+  "52149": {
+    "loinc": "6005-3",
+    "label": "NFletcher"
+  },
+  "52150": {
+    "loinc": "11016-3",
+    "label": "Non-Specific Esterase"
+  },
+  "52151": {
+    "loinc": "34188-3",
+    "label": "NRBC"
+  },
+  "52152": {
+    "loinc": "32862-5",
+    "label": "Osmotic Fragility, Incubated"
+  },
+  "52154": {
+    "loinc": "49010-2",
+    "label": "P2Y12 Reaction Units"
+  },
+  "52155": {
+    "loinc": "9786-5",
+    "label": "Periodic Acid Schiff Stain"
+  },
+  "52156": {
+    "loinc": "11018-9",
+    "label": "Peroxidase Staining"
+  },
+  "52157": {
+    "loinc": "721-1",
+    "label": "Plasma Hemoglobin"
+  },
+  "52158": {
+    "loinc": "5970-9",
+    "label": "Plasminogen"
+  },
+  "52159": {
+    "loinc": "21027-8",
+    "label": "Platelet Aggregation"
+  },
+  "52160": {
+    "loinc": "13594-7",
+    "label": "Prekallekrein"
+  },
+  "52162": {
+    "loinc": "5892-5",
+    "label": "Protein S"
+  },
+  "52163": {
+    "loinc": "5901-4",
+    "label": "PT Control"
+  },
+  "52164": {
+    "loinc": "5902-2",
+    "label": "PT Mean"
+  },
+  "52165": {
+    "loinc": "13488-2",
+    "label": "PTT Control"
+  },
+  "52166": {
+    "loinc": "34571-0",
+    "label": "PTT-LA"
+  },
+  "52167": {
+    "loinc": "5899-0",
+    "label": "PTT mea"
+  },
+  "52168": {
+    "loinc": "11227-6",
+    "label": "Pyruvate Kinase"
+  },
+  "52170": {
+    "loinc": "789-8",
+    "label": "Rbc"
+  },
+  "52171": {
+    "loinc": "6742-1",
+    "label": "RBC Morphology"
+  },
+  "52172": {
+    "loinc": "21000-5",
+    "label": "RDW-SD"
+  },
+  "52173": {
+    "loinc": "72695-0",
+    "label": "Red Blood Cell Enzyme"
+  },
+  "52174": {
+    "loinc": "5942-8",
+    "label": "Reptilase Time, Control"
+  },
+  "52175": {
+    "loinc": "6014-5",
+    "label": "Ristocetin Response"
+  },
+  "52176": {
+    "loinc": "7797-4",
+    "label": "Rouleaux"
+  },
+  "52177": {
+    "loinc": "66736-0",
+    "label": "SCT - Confirmation"
+  },
+  "52178": {
+    "loinc": "66736-0",
+    "label": "SCT - Normalized Ratio"
+  },
+  "52179": {
+    "loinc": "66736-0",
+    "label": "SCT - Screen"
+  },
+  "52180": {
+    "loinc": "75883-9",
+    "label": "STA-CLOT"
+  },
+  "52181": {
+    "loinc": "10380-4",
+    "label": "Stomatocyte"
+  },
+  "52182": {
+    "loinc": "11019-7",
+    "label": "Sudan Black Staining"
+  },
+  "52183": {
+    "loinc": "4684-7",
+    "label": "Sulf Hgb"
+  },
+  "52184": {
+    "loinc": "80713-1",
+    "label": "TCR Alpha-Beta"
+  },
+  "52185": {
+    "loinc": "80714-9",
+    "label": "TCR Gamma-Delta"
+  },
+  "52187": {
+    "loinc": "3243-3",
+    "label": "Thrombin Time"
+  },
+  "52188": {
+    "loinc": "5955-0",
+    "label": "Thrombin Time Control"
+  },
+  "52189": {
+    "loinc": "5955-0",
+    "label": "Thrombin Time Control"
+  },
+  "52190": {
+    "loinc": "50376-3",
+    "label": "Tissue Thromboplastin Inhibitor"
+  },
+  "52192": {
+    "loinc": "11020-5",
+    "label": "Trap Stain"
+  },
+  "52193": {
+    "loinc": "38521-1",
+    "label": "Viii Ag"
+  },
+  "52196": {
+    "loinc": "57782-5",
+    "label": "WAM Manual Diff"
+  },
+  "52197": {
+    "loinc": "57782-5",
+    "label": "WAM MANUAL DIFF 2"
+  },
+  "52198": {
+    "loinc": "789-8",
+    "label": "ErytFlg"
+  },
+  "52199": {
+    "loinc": "800-3",
+    "label": "FragFlg"
+  },
+  "52200": {
+    "loinc": "32207-3",
+    "label": "PltDist"
+  },
+  "52201": {
+    "loinc": "777-3",
+    "label": "PltScat"
+  },
+  "52202": {
+    "loinc": "7796-6",
+    "label": "PltClmp"
+  },
+  "52203": {
+    "loinc": "51638-5",
+    "label": "RBCAgg"
+  },
+  "52204": {
+    "loinc": "788-0",
+    "label": "RBCDist"
+  },
+  "52205": {
+    "loinc": "14196-0",
+    "label": "RetScat"
+  },
+  "52206": {
+    "loinc": "4679-7",
+    "label": "RetFlg"
+  },
+  "52207": {
+    "loinc": "718-7",
+    "label": "TurbHbI"
+  },
+  "52208": {
+    "loinc": "704-7",
+    "label": "BasoFlg"
+  },
+  "52209": {
+    "loinc": "711-2",
+    "label": "EosFlg"
+  },
+  "52210": {
+    "loinc": "30411-3",
+    "label": "LeftShf"
+  },
+  "52211": {
+    "loinc": "731-0",
+    "label": "LymFlg"
+  },
+  "52212": {
+    "loinc": "5905-5",
+    "label": "MonoFlg"
+  },
+  "52213": {
+    "loinc": "771-6",
+    "label": "NRBCFlg"
+  },
+  "52214": {
+    "loinc": "30412-1",
+    "label": "AbnLymp"
+  },
+  "52216": {
+    "loinc": "30376-8",
+    "label": "BlasFlg"
+  },
+  "52218": {
+    "loinc": "34550-4",
+    "label": "IG Flg"
+  },
+  "52219": {
+    "loinc": "6690-2",
+    "label": "WBCScat"
+  },
+  "52220": {
+    "loinc": "26471-3",
+    "label": "wbcp"
+  },
+  "52221": {
+    "loinc": "30416-2",
+    "label": "Atypical Lymphocytes",
+    "snomed_code": "C3241972",
+    "snomed_term": "Atypical Lymphocyte Count Measurement"
+  },
+  "52222": {
+    "loinc": "35043-9",
+    "label": "Atyps#"
+  },
+  "52223": {
+    "loinc": "26509-0",
+    "label": "Bands",
+    "snomed_code": "41489001",
+    "snomed_term": "Oligoclonal protein measurement"
+  },
+  "52224": {
+    "loinc": "35015-7",
+    "label": "Bands#"
+  },
+  "52225": {
+    "loinc": "30374-3",
+    "label": "Basophils",
+    "snomed_code": "63987006",
+    "snomed_term": "Histamine release from basophils measurement"
+  },
+  "52226": {
+    "loinc": "35072-8",
+    "label": "Basos#"
+  },
+  "52227": {
+    "loinc": "26447-3",
+    "label": "Blasts",
+    "snomed_code": "C4727718",
+    "snomed_term": "Blasts to Total Cells Ratio Measurement"
+  },
+  "52228": {
+    "loinc": "35068-6",
+    "label": "Blasts#"
+  },
+  "52255": {
+    "loinc": "34958-9",
+    "label": "Eos#"
+  },
+  "52256": {
+    "loinc": "26451-5",
+    "label": "Eosinophils",
+    "snomed_code": "C1141979",
+    "snomed_term": "Eosinophils urine measurement"
+  },
+  "52257": {
+    "loinc": "30398-2",
+    "label": "Hematocrit, CSF"
+  },
+  "52258": {
+    "loinc": "20504-7",
+    "label": "Histiocyte"
+  },
+  "52259": {
+    "loinc": "35056-1",
+    "label": "Histiocytes#"
+  },
+  "52260": {
+    "loinc": "26506-6",
+    "label": "Hypersegmented Neutrophils"
+  },
+  "52261": {
+    "loinc": "35011-6",
+    "label": "Hypersegmented Neutrophils #"
+  },
+  "52262": {
+    "loinc": "55230-7",
+    "label": "Immunophenotyping"
+  },
+  "52263": {
+    "loinc": "21176-3",
+    "label": "Lining Cell"
+  },
+  "52264": {
+    "loinc": "26479-6",
+    "label": "Lymphs"
+  },
+  "52265": {
+    "loinc": "26475-4",
+    "label": "Lymphs#"
+  },
+  "52266": {
+    "loinc": "30426-1",
+    "label": "Macrophage",
+    "snomed_code": "C2825852",
+    "snomed_term": "Macrophage-Derived Chemokine measurement"
+  },
+  "52267": {
+    "loinc": "35038-9",
+    "label": "Macrophage#"
+  },
+  "52268": {
+    "loinc": "30429-5",
+    "label": "Mesothelial cells"
+  },
+  "52269": {
+    "loinc": "35034-8",
+    "label": "Mesothelial cells #"
+  },
+  "52270": {
+    "loinc": "30366-9",
+    "label": "Metamyelocytes",
+    "snomed_code": "C3274418",
+    "snomed_term": "Metamyelocyte to Total Cell Ratio Measurement"
+  },
+  "52271": {
+    "loinc": "35030-6",
+    "label": "Metas#"
+  },
+  "52272": {
+    "loinc": "26486-1",
+    "label": "Monocytes",
+    "snomed_code": "C3828975",
+    "snomed_term": "Monocytes to Macrocytes Ratio Measurement"
+  },
+  "52273": {
+    "loinc": "35026-4",
+    "label": "Monos#"
+  },
+  "52274": {
+    "loinc": "30447-7",
+    "label": "Myelocytes",
+    "snomed_code": "C5557077",
+    "snomed_term": "Eosinophilic Myelocytes to Lymphocytes Ratio Measurement"
+  },
+  "52275": {
+    "loinc": "35017-3",
+    "label": "Myelos#"
+  },
+  "52276": {
+    "loinc": "48778-5",
+    "label": "NRBC"
+  },
+  "52277": {
+    "loinc": "26459-8",
+    "label": "NRBC#"
+  },
+  "52278": {
+    "loinc": "75374-9",
+    "label": "Other",
+    "snomed_code": "C5413516",
+    "snomed_term": "Coagulation time measurement, other methods"
+  },
+  "52279": {
+    "loinc": "47413-0",
+    "label": "Plasma",
+    "snomed_code": "C0202042",
+    "snomed_term": "Plasma Glucose Measurement"
+  },
+  "52280": {
+    "loinc": "35006-6",
+    "label": "Plasma#"
+  },
+  "52281": {
+    "loinc": "26517-3",
+    "label": "Polys",
+    "snomed_code": "C0482467",
+    "snomed_term": "Carotene^post 15000 U carotene QDx3 for 3D poly:MCnc:Pt:Ser:Qn"
+  },
+  "52282": {
+    "loinc": "35001-7",
+    "label": "Polys#"
+  },
+  "52283": {
+    "loinc": "30467-5",
+    "label": "Promyelocytes",
+    "snomed_code": "C3274434",
+    "snomed_term": "Promyelocyte to Total Cell Ratio Measurement"
+  },
+  "52284": {
+    "loinc": "34995-1",
+    "label": "Promyelocytes#"
+  },
+  "52285": {
+    "loinc": "26454-9",
+    "label": "RBC, CSF"
+  },
+  "52286": {
+    "loinc": "58470-6",
+    "label": "Total Nucleated Cells, CSF"
+  },
+  "52291": {
+    "loinc": "35044-7",
+    "label": "Atyps#"
+  },
+  "52292": {
+    "loinc": "35013-2",
+    "label": "Bands#"
+  },
+  "52293": {
+    "loinc": "35074-4",
+    "label": "Basos#"
+  },
+  "52294": {
+    "loinc": "33374-0",
+    "label": "Blasts",
+    "snomed_code": "C4727718",
+    "snomed_term": "Blasts to Total Cells Ratio Measurement"
+  },
+  "52295": {
+    "loinc": "35064-5",
+    "label": "Blasts#"
+  },
+  "52296": {
+    "loinc": "35060-3",
+    "label": "Eos#"
+  },
+  "52297": {
+    "loinc": "35057-9",
+    "label": "Histio#"
+  },
+  "52298": {
+    "loinc": "40489-7",
+    "label": "Histiocyte"
+  },
+  "52299": {
+    "loinc": "33386-4",
+    "label": "Hypersegmented Neutrophils"
+  },
+  "52300": {
+    "loinc": "35009-0",
+    "label": "Hypersegmented Neutrophils #"
+  },
+  "52301": {
+    "loinc": "35651-9",
+    "label": "Lining Cell"
+  },
+  "52302": {
+    "loinc": "35049-6",
+    "label": "Lymphs#"
+  },
+  "52303": {
+    "loinc": "35031-4",
+    "label": "Metas#"
+  },
+  "52304": {
+    "loinc": "30435-2",
+    "label": "Monos#"
+  },
+  "52305": {
+    "loinc": "17800-4",
+    "label": "Myelocytes",
+    "snomed_code": "C5557077",
+    "snomed_term": "Eosinophilic Myelocytes to Lymphocytes Ratio Measurement"
+  },
+  "52306": {
+    "loinc": "35016-5",
+    "label": "Myelos#"
+  },
+  "52307": {
+    "loinc": "40492-1",
+    "label": "Plasma",
+    "snomed_code": "C0202042",
+    "snomed_term": "Plasma Glucose Measurement"
+  },
+  "52308": {
+    "loinc": "35006-6",
+    "label": "Plasma#"
+  },
+  "52309": {
+    "loinc": "35004-1",
+    "label": "Polys#"
+  },
+  "52310": {
+    "loinc": "34996-9",
+    "label": "Promyelo#"
+  },
+  "52311": {
+    "loinc": "17799-8",
+    "label": "Promyelocytes",
+    "snomed_code": "C3274434",
+    "snomed_term": "Promyelocyte to Total Cell Ratio Measurement"
+  },
+  "52312": {
+    "loinc": "53557-5",
+    "label": "Total Nucleated Cells, Joint"
+  },
+  "52316": {
+    "loinc": "21391-8",
+    "label": "Acid Phosphatase Stain"
+  },
+  "52319": {
+    "loinc": "52874-5",
+    "label": "CD 1a"
+  },
+  "52320": {
+    "loinc": "51289-7",
+    "label": "CD30"
+  },
+  "52321": {
+    "loinc": "51323-4",
+    "label": "CD42"
+  },
+  "52322": {
+    "loinc": "42886-2",
+    "label": "CD52"
+  },
+  "52323": {
+    "loinc": "51361-4",
+    "label": "CD61"
+  },
+  "52324": {
+    "loinc": "32855-9",
+    "label": "CD62"
+  },
+  "52325": {
+    "loinc": "11017-1",
+    "label": "Chloroacetate Esterase"
+  },
+  "52326": {
+    "loinc": "81423-6",
+    "label": "Naphthol Acetate Stain"
+  },
+  "52327": {
+    "loinc": "13512-9",
+    "label": "Naphthol Butryrate"
+  },
+  "52328": {
+    "loinc": "9786-5",
+    "label": "Periodic Schiff Stain"
+  },
+  "52329": {
+    "loinc": "11018-9",
+    "label": "Peroxidase Stain"
+  },
+  "52330": {
+    "loinc": "11019-7",
+    "label": "Sudan Black Stain"
+  },
+  "52331": {
+    "loinc": "32860-9",
+    "label": "TCR Alpha-Beta"
+  },
+  "52332": {
+    "loinc": "32861-7",
+    "label": "TCR Gamma-Delta"
+  },
+  "52335": {
+    "loinc": "42620-5",
+    "label": "TdT"
+  },
+  "52336": {
+    "loinc": "35045-4",
+    "label": "Atyps#"
+  },
+  "52337": {
+    "loinc": "35014-0",
+    "label": "Bands#"
+  },
+  "52338": {
+    "loinc": "35071-0",
+    "label": "Basos#"
+  },
+  "52339": {
+    "loinc": "26448-1",
+    "label": "Blasts",
+    "snomed_code": "C4727718",
+    "snomed_term": "Blasts to Total Cells Ratio Measurement"
+  },
+  "52340": {
+    "loinc": "35067-8",
+    "label": "Blasts#"
+  },
+  "52341": {
+    "loinc": "52873-7",
+    "label": "CD 1a"
+  },
+  "52342": {
+    "loinc": "51290-5",
+    "label": "CD30"
+  },
+  "52343": {
+    "loinc": "51324-2",
+    "label": "CD42"
+  },
+  "52344": {
+    "loinc": "42885-4",
+    "label": "CD52"
+  },
+  "52345": {
+    "loinc": "43935-6",
+    "label": "CD55",
+    "snomed_code": "C2599040",
+    "snomed_term": "Erythrocytes.CD55 deficient/Erythrocytes:NFr:Pt:Bld:Qn"
+  },
+  "52346": {
+    "loinc": "43938-0",
+    "label": "CD59",
+    "snomed_code": "C0881718",
+    "snomed_term": "Cells.CD14+CD16+CD59+:PrThr:Pt:Ser:Ord"
+  },
+  "52347": {
+    "loinc": "51362-2",
+    "label": "CD61"
+  },
+  "52348": {
+    "loinc": "32855-9",
+    "label": "CD62"
+  },
+  "52349": {
+    "loinc": "32814-6",
+    "label": "Chloroac"
+  },
+  "52350": {
+    "loinc": "35063-7",
+    "label": "Eos#"
+  },
+  "52351": {
+    "loinc": "28067-7",
+    "label": "Fetal Hgb"
+  },
+  "52352": {
+    "loinc": "19114-8",
+    "label": "FETAL LUNG MATURITY - LBC"
+  },
+  "52353": {
+    "loinc": "35057-9",
+    "label": "Histiocyte#"
+  },
+  "52354": {
+    "loinc": "35055-3",
+    "label": "Histiocytes"
+  },
+  "52355": {
+    "loinc": "30453-5",
+    "label": "Hypersegmented Neutrophils"
+  },
+  "52356": {
+    "loinc": "30452-7",
+    "label": "Hypersegmented Neutrophils#"
+  },
+  "52357": {
+    "loinc": "44327-5",
+    "label": "Iron",
+    "snomed_code": "C0337439",
+    "snomed_term": "Iron measurement"
+  },
+  "52358": {
+    "loinc": "35477-9",
+    "label": "Lining Cell"
+  },
+  "52359": {
+    "loinc": "26476-2",
+    "label": "Lymphs#"
+  },
+  "52360": {
+    "loinc": "35031-4",
+    "label": "Metamyelocytes#"
+  },
+  "52361": {
+    "loinc": "35076-9",
+    "label": "Monos#"
+  },
+  "52362": {
+    "loinc": "35016-5",
+    "label": "Myelos#"
+  },
+  "52363": {
+    "loinc": "26460-6",
+    "label": "NRBC#"
+  },
+  "52364": {
+    "loinc": "35006-6",
+    "label": "Plasma#"
+  },
+  "52365": {
+    "loinc": "35002-5",
+    "label": "Polys#"
+  },
+  "52366": {
+    "loinc": "34996-9",
+    "label": "Promyelocyte#"
+  },
+  "52367": {
+    "loinc": "57409-5",
+    "label": "TCR Alpha-Beta"
+  },
+  "52368": {
+    "loinc": "57429-3",
+    "label": "TCR Gamma-Delta"
+  },
+  "52369": {
+    "loinc": "55793-4",
+    "label": "Total Nucleated Cells, Other"
+  },
+  "52373": {
+    "loinc": "52997-4",
+    "label": "TdT"
+  },
+  "52375": {
+    "loinc": "35042-1",
+    "label": "Atyps#"
+  },
+  "52376": {
+    "loinc": "35014-0",
+    "label": "Bands#"
+  },
+  "52377": {
+    "loinc": "35075-1",
+    "label": "Basos#"
+  },
+  "52378": {
+    "loinc": "35066-0",
+    "label": "Blasts#"
+  },
+  "52379": {
+    "loinc": "35062-9",
+    "label": "Eos#"
+  },
+  "52380": {
+    "loinc": "35057-9",
+    "label": "Histiocyte#"
+  },
+  "52381": {
+    "loinc": "40519-1",
+    "label": "Histiocytes"
+  },
+  "52382": {
+    "loinc": "35012-4",
+    "label": "Hypersegmented  Neutrophils#"
+  },
+  "52383": {
+    "loinc": "33385-6",
+    "label": "Hypersegmented Neutrophils"
+  },
+  "52384": {
+    "loinc": "35098-3",
+    "label": "Lymphs#"
+  },
+  "52385": {
+    "loinc": "35031-4",
+    "label": "Metas#"
+  },
+  "52386": {
+    "loinc": "35028-0",
+    "label": "Monos#"
+  },
+  "52387": {
+    "loinc": "35016-5",
+    "label": "Myelos#"
+  },
+  "52388": {
+    "loinc": "35006-6",
+    "label": "Plasma#"
+  },
+  "52389": {
+    "loinc": "35000-9",
+    "label": "Polys#"
+  },
+  "52390": {
+    "loinc": "34996-9",
+    "label": "Promyelocytes#"
+  },
+  "52391": {
+    "loinc": "52819-0",
+    "label": "Total Nucleated Cells, Pleural"
+  },
+  "52403": {
+    "loinc": "1965-3",
+    "label": "Bile"
+  },
+  "52404": {
+    "loinc": "2270-7",
+    "label": "Fat"
+  },
+  "52407": {
+    "loinc": "13655-6",
+    "label": "WBC"
+  },
+  "52408": {
+    "loinc": "630-4",
+    "label": "Bacturia"
+  },
+  "52409": {
+    "loinc": "21033-6",
+    "label": "Budding Yeast"
+  },
+  "52410": {
+    "loinc": "5789-3",
+    "label": "Fatty Casts"
+  },
+  "52411": {
+    "loinc": "5794-3",
+    "label": "Hgb"
+  },
+  "52413": {
+    "loinc": "5821-4",
+    "label": "Leuks"
+  },
+  "52414": {
+    "loinc": "5821-4",
+    "label": "LEUKS"
+  },
+  "52416": {
+    "loinc": "2640-1",
+    "label": "Myoglobin"
+  },
+  "52417": {
+    "loinc": "29571-7",
+    "label": "Pku"
+  },
+  "52434": {
+    "loinc": "41650-3",
+    "label": "Chloride, Whole Blood",
+    "snomed_code": "C0551414",
+    "snomed_term": "Methylene chloride:MCnc:Pt:Bld:Qn"
+  },
+  "52442": {
+    "loinc": "2518-9",
+    "label": "Lactate",
+    "snomed_code": "C0202115",
+    "snomed_term": "Lactic acid measurement"
+  },
+  "52452": {
+    "loinc": "32713-0",
+    "label": "Potassium, Whole Blood",
+    "snomed_code": "C2702996",
+    "snomed_term": "Measurement of potassium in whole blood"
+  },
+  "52455": {
+    "loinc": "32717-1",
+    "label": "Sodium, Whole Blood",
+    "snomed_code": "C2702997",
+    "snomed_term": "Measurement of sodium in whole blood"
+  },
+  "52500": {
+    "loinc": "33037-3",
+    "label": "Anion Gap",
+    "snomed_code": "C0201889",
+    "snomed_term": "Anion gap measurement"
+  },
+  "52535": {
+    "loinc": "2075-0",
+    "label": "Chloride",
+    "snomed_code": "C0201952",
+    "snomed_term": "Chloride measurement"
+  },
+  "52546": {
+    "loinc": "2160-0",
+    "label": "Creatinine",
+    "snomed_code": "C0201975",
+    "snomed_term": "Creatinine measurement"
+  },
+  "52548": {
+    "loinc": "5117-7",
+    "label": "Cryoglobulin",
+    "snomed_code": "C0202093",
+    "snomed_term": "Cryoglobulin measurement"
+  },
+  "52551": {
+    "loinc": "48066-5",
+    "label": "D-Dimer",
+    "snomed_code": "C2826333",
+    "snomed_term": "D-Dimer Measurement"
+  },
+  "52562": {
+    "loinc": "2284-8",
+    "label": "Folate",
+    "snomed_code": "C6019011",
+    "snomed_term": "Folate:{Measurement}:-:Ser/Plas:-"
+  },
+  "52569": {
+    "loinc": "2345-7",
+    "label": "Glucose",
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "52610": {
+    "loinc": "2823-3",
+    "label": "Potassium",
+    "snomed_code": "C0202194",
+    "snomed_term": "Potassium measurement"
+  },
+  "52623": {
+    "loinc": "2951-2",
+    "label": "Sodium",
+    "snomed_code": "C0337443",
+    "snomed_term": "Sodium measurement"
+  },
+  "52642": {
+    "loinc": "10839-9",
+    "label": "Troponin I",
+    "snomed_code": "C0920210",
+    "snomed_term": "Troponin I measurement"
+  },
+  "52647": {
+    "loinc": "3094-0",
+    "label": "Urea Nitrogen",
+    "snomed_code": "24509005",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "52703": {
+    "loinc": "1753-3",
+    "label": "Albumin, Urine",
+    "snomed_code": "271000000",
+    "snomed_term": "Urine albumin measurement"
+  },
+  "52720": {
+    "loinc": "2106-3",
+    "label": "HCG, Urine, Qualitative",
+    "snomed_code": "C1254846",
+    "snomed_term": "Qualitative Urine HCG Test"
+  },
+  "52730": {
+    "loinc": "2756-5",
+    "label": "pH",
+    "snomed_code": "250573004",
+    "snomed_term": "Hydrogen ion concentration measurement"
+  },
+  "52769": {
+    "loinc": "731-0",
+    "label": "Absolute Lymphocyte Count",
+    "snomed_code": "C3544087",
+    "snomed_term": "Absolute lymphocyte count"
+  },
+  "52786": {
+    "loinc": "11067-6",
+    "label": "Bleeding Time",
+    "snomed_code": "C1446468",
+    "snomed_term": "Duke Method for Bleeding Time Measurement"
+  },
+  "52838": {
+    "loinc": "3289-6",
+    "label": "Factor II",
+    "snomed_code": "104937003",
+    "snomed_term": "Insulin-like growth factor-II measurement"
+  },
+  "52840": {
+    "loinc": "3188-0",
+    "label": "Factor IX",
+    "snomed_code": "C0200408",
+    "snomed_term": "Clotting factor IX assay"
+  },
+  "52842": {
+    "loinc": "3193-0",
+    "label": "Factor V",
+    "snomed_code": "C3274393",
+    "snomed_term": "Factor V Measurement"
+  },
+  "52844": {
+    "loinc": "3198-9",
+    "label": "Factor VII",
+    "snomed_code": "C2825856",
+    "snomed_term": "Factor VII measurement"
+  },
+  "52846": {
+    "loinc": "3209-4",
+    "label": "Factor VIII",
+    "snomed_code": "C2825857",
+    "snomed_term": "Factor VIII measurement"
+  },
+  "52849": {
+    "loinc": "3218-5",
+    "label": "Factor X",
+    "snomed_code": "C3274394",
+    "snomed_term": "Factor X Measurement"
+  },
+  "52851": {
+    "loinc": "3226-8",
+    "label": "Factor XI",
+    "snomed_code": "C5235469",
+    "snomed_term": "Factor XI Measurement"
+  },
+  "52853": {
+    "loinc": "3232-6",
+    "label": "Factor XII",
+    "snomed_code": "C5235471",
+    "snomed_term": "Factor XII Measurement"
+  },
+  "52855": {
+    "loinc": "3240-9",
+    "label": "Factor XIII",
+    "snomed_code": "C3813128",
+    "snomed_term": "Factor XIII Measurement"
+  },
+  "52858": {
+    "loinc": "30226-5",
+    "label": "Fibrin Degradation Products",
+    "snomed_code": "C0200453",
+    "snomed_term": "Fibrin-fibrinogen split products assay"
+  },
+  "52889": {
+    "loinc": "3281-3",
+    "label": "Lupus Anticoagulant"
+  },
+  "52921": {
+    "loinc": "5902-2",
+    "label": "PT"
+  },
+  "52923": {
+    "loinc": "3173-2",
+    "label": "PTT"
+  },
+  "52929": {
+    "loinc": "6683-7",
+    "label": "Reptilase Time"
+  },
+  "52934": {
+    "loinc": "40665-2",
+    "label": "Reticulocyte Count, Manual"
+  },
+  "52948": {
+    "loinc": "3243-3",
+    "label": "Thrombin"
+  },
+  "52955": {
+    "loinc": "51216-0",
+    "label": "CD10",
+    "snomed_code": "C1544515",
+    "snomed_term": "CD10 Ag:PrThr:Pt:Tiss:Ord:Immune stain"
+  },
+  "52992": {
+    "loinc": "13513-7",
+    "label": "Iron Stain"
+  },
+  "53012": {
+    "loinc": "68545-3",
+    "label": "NRBC"
+  },
+  "53083": {
+    "loinc": "70170-6",
+    "label": "NRBC"
+  },
+  "53116": {
+    "loinc": "1749-1",
+    "label": "(Albumin)"
+  },
+  "53117": {
+    "loinc": "17812-9",
+    "label": "Alpha-1"
+  },
+  "53118": {
+    "loinc": "17814-5",
+    "label": "Alpha-2"
+  },
+  "53119": {
+    "loinc": "17816-0",
+    "label": "Beta"
+  },
+  "53120": {
+    "loinc": "77496-8",
+    "label": "Clostrid"
+  },
+  "53121": {
+    "loinc": "29533-7",
+    "label": "Cryptococ"
+  },
+  "53123": {
+    "loinc": "13169-8",
+    "label": "Immunoelectrophoresis, Ascites"
+  },
+  "53124": {
+    "loinc": "54901-4",
+    "label": "Immunoglobulin G, Ascites"
+  },
+  "53125": {
+    "loinc": "17818-6",
+    "label": "PEP, Ascites, Gamma Region"
+  },
+  "53126": {
+    "loinc": "32343-6",
+    "label": "Uric Acid, Ascites"
+  },
+  "53128": {
+    "loinc": "1656-8",
+    "label": "11-Deoxycorticosterone"
+  },
+  "53129": {
+    "loinc": "3053-6",
+    "label": "3t"
+  },
+  "53130": {
+    "loinc": "3026-2",
+    "label": "4t"
+  },
+  "53131": {
+    "loinc": "1690-7",
+    "label": "5' Nucleotidase"
+  },
+  "53132": {
+    "loinc": "731-0",
+    "label": "Absolute Lymphocyte Count",
+    "snomed_code": "C3544087",
+    "snomed_term": "Absolute lymphocyte count"
+  },
+  "53133": {
+    "loinc": "751-8",
+    "label": "Absolute Neutrophil"
+  },
+  "53134": {
+    "loinc": "30406-3",
+    "label": "Absolute Other WBC"
+  },
+  "53135": {
+    "loinc": "1714-5",
+    "label": "Acid Phosphatase, Prostatic Fraction"
+  },
+  "53136": {
+    "loinc": "6016-0",
+    "label": "Adrenocorticotrophic Hormone"
+  },
+  "53137": {
+    "loinc": "20450-3",
+    "label": "Afp Mom"
+  },
+  "53138": {
+    "loinc": "2862-1",
+    "label": "(Albumin)"
+  },
+  "53139": {
+    "loinc": "1763-2",
+    "label": "Aldosterone"
+  },
+  "53140": {
+    "loinc": "1763-2",
+    "label": "Aldosterone"
+  },
+  "53141": {
+    "loinc": "2865-4",
+    "label": "Alpha-1"
+  },
+  "53142": {
+    "loinc": "1825-9",
+    "label": "Alpha-1-antitrypsin"
+  },
+  "53143": {
+    "loinc": "2868-8",
+    "label": "Alpha-2"
+  },
+  "53144": {
+    "loinc": "21023-7",
+    "label": "ANCA Titer"
+  },
+  "53145": {
+    "loinc": "49774-3",
+    "label": "Anti-GBM Antibody"
+  },
+  "53146": {
+    "loinc": "13951-9",
+    "label": "Anti Hav"
+  },
+  "53147": {
+    "loinc": "13952-7",
+    "label": "Anti Hbc"
+  },
+  "53148": {
+    "loinc": "13953-5",
+    "label": "Anti Hbe"
+  },
+  "53149": {
+    "loinc": "5193-8",
+    "label": "Anti-hbs"
+  },
+  "53150": {
+    "loinc": "10900-9",
+    "label": "Anti Hbs"
+  },
+  "53151": {
+    "loinc": "8094-5",
+    "label": "Anti-la"
+  }
+}
