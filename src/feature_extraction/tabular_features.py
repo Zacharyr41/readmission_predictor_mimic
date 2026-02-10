@@ -273,10 +273,10 @@ def extract_medication_features(graph: Graph) -> pd.DataFrame:
     """Extract medication features for each admission.
 
     Args:
-        graph: RDF graph containing antibiotic event data.
+        graph: RDF graph containing prescription event data.
 
     Returns:
-        DataFrame with columns: hadm_id, num_distinct_meds, total_antibiotic_days, has_antibiotic
+        DataFrame with columns: hadm_id, num_distinct_meds, total_prescription_days, has_prescription
     """
     # First get all admissions
     all_admissions_query = """
@@ -290,14 +290,14 @@ def extract_medication_features(graph: Graph) -> pd.DataFrame:
     all_admissions = list(graph.query(all_admissions_query))
     hadm_ids = [int(row[0]) for row in all_admissions]
 
-    # Query antibiotic events
+    # Query prescription events
     query = """
     SELECT ?hadmId ?drugName ?startTime ?endTime
     WHERE {
         ?admission rdf:type mimic:HospitalAdmission ;
                    mimic:hasAdmissionId ?hadmId ;
                    mimic:containsICUStay ?icuStay .
-        ?event rdf:type mimic:AntibioticAdmissionEvent ;
+        ?event rdf:type mimic:PrescriptionEvent ;
                mimic:associatedWithICUStay ?icuStay ;
                mimic:hasDrugName ?drugName ;
                time:hasBeginning ?begin ;
@@ -309,7 +309,7 @@ def extract_medication_features(graph: Graph) -> pd.DataFrame:
 
     results = list(graph.query(query))
 
-    # Process antibiotic data
+    # Process prescription data
     abx_data = {}
     for row in results:
         hadm_id = int(row[0])
@@ -341,15 +341,15 @@ def extract_medication_features(graph: Graph) -> pd.DataFrame:
             data.append({
                 "hadm_id": hadm_id,
                 "num_distinct_meds": len(abx_data[hadm_id]["drugs"]),
-                "total_antibiotic_days": abx_data[hadm_id]["total_days"],
-                "has_antibiotic": 1,
+                "total_prescription_days": abx_data[hadm_id]["total_days"],
+                "has_prescription": 1,
             })
         else:
             data.append({
                 "hadm_id": hadm_id,
                 "num_distinct_meds": 0,
-                "total_antibiotic_days": 0.0,
-                "has_antibiotic": 0,
+                "total_prescription_days": 0.0,
+                "has_prescription": 0,
             })
 
     return pd.DataFrame(data)

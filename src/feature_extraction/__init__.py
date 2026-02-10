@@ -8,7 +8,7 @@ Tabular Features:
 - ICU stay characteristics (LOS, admission type)
 - Lab value summaries (mean, min, max, std, abnormal rate)
 - Vital sign summaries (mean, min, max, std, coefficient of variation)
-- Medication features (antibiotic exposure)
+- Medication features (prescription exposure)
 - Diagnosis features (count, primary ICD chapter)
 
 Graph Features:

@@ -1,7 +1,7 @@
 """Tests for clinical event graph writers (TDD Red Phase).
 
 Test suite for Layer 2C: Clinical Event Graph Writers.
-Tests cover ICU stays, ICU days, biomarkers, vitals, antibiotics, diagnoses, and comorbidities.
+Tests cover ICU stays, ICU days, biomarkers, vitals, prescriptions, diagnoses, and comorbidities.
 """
 
 import pytest
@@ -16,7 +16,7 @@ from src.graph_construction.event_writers import (
     write_icu_days,
     write_biomarker_event,
     write_clinical_sign_event,
-    write_antibiotic_event,
+    write_prescription_event,
     write_diagnosis_event,
     write_comorbidity,
 )
@@ -228,31 +228,31 @@ class TestWriteClinicalSignEvent:
         assert bool(result), "ClinicalSignEvent should have all required properties"
 
 
-class TestWriteAntibioticEvent:
-    """Tests for writing AntibioticAdmissionEvent individuals to the graph."""
+class TestWritePrescriptionEvent:
+    """Tests for writing PrescriptionEvent individuals to the graph."""
 
-    def test_write_antibiotic_event_as_interval(
+    def test_write_prescription_event_as_interval(
         self,
         graph_with_ontology: Graph,
         sample_patient_data: dict,
         sample_admission_data: dict,
         sample_icu_stay_data: dict,
-        sample_antibiotic_data: dict,
+        sample_prescription_data: dict,
     ) -> None:
-        """AntibioticAdmissionEvent created as time:ProperInterval with start/stop times."""
+        """PrescriptionEvent created as time:ProperInterval with start/stop times."""
         patient_uri = write_patient(graph_with_ontology, sample_patient_data)
         admission_uri = write_admission(graph_with_ontology, sample_admission_data, patient_uri)
         icu_stay_uri = write_icu_stay(graph_with_ontology, sample_icu_stay_data, admission_uri)
         icu_day_metadata = write_icu_days(graph_with_ontology, sample_icu_stay_data, icu_stay_uri)
 
-        event_uri = write_antibiotic_event(
-            graph_with_ontology, sample_antibiotic_data, icu_stay_uri, icu_day_metadata
+        event_uri = write_prescription_event(
+            graph_with_ontology, sample_prescription_data, icu_stay_uri, icu_day_metadata
         )
 
-        # SPARQL ASK for antibiotic event as interval
+        # SPARQL ASK for prescription event as interval
         query = """
         ASK {
-            ?event rdf:type mimic:AntibioticAdmissionEvent ;
+            ?event rdf:type mimic:PrescriptionEvent ;
                    rdf:type time:ProperInterval ;
                    time:hasBeginning ?begin ;
                    time:hasEnd ?end ;
@@ -271,7 +271,7 @@ class TestWriteAntibioticEvent:
         }
         """
         result = graph_with_ontology.query(query)
-        assert bool(result), "AntibioticAdmissionEvent should be interval with all properties"
+        assert bool(result), "PrescriptionEvent should be interval with all properties"
 
 
 class TestWriteDiagnosisEvent:
@@ -368,16 +368,16 @@ class TestFullPatientGraph:
         for vital in data["vitals"]:
             write_clinical_sign_event(graph_with_ontology, vital, icu_stay_uri, icu_day_metadata)
 
-        for antibiotic in data["antibiotics"]:
-            write_antibiotic_event(graph_with_ontology, antibiotic, icu_stay_uri, icu_day_metadata)
+        for prescription in data["prescriptions"]:
+            write_prescription_event(graph_with_ontology, prescription, icu_stay_uri, icu_day_metadata)
 
         for diagnosis in data["diagnoses"]:
             write_diagnosis_event(graph_with_ontology, diagnosis, admission_uri)
 
         # SPARQL: Count events during ICU Day 1
         # Day 1: 2150-03-01 08:00 -> 2150-03-02 00:00
-        # Events on Day 1: 1 biomarker (10:00), 1 vital (12:00), 1 antibiotic (starts 10:00)
-        # Antibiotic starts at 10:00 on Day 1 so it's linked to Day 1
+        # Events on Day 1: 1 biomarker (10:00), 1 vital (12:00), 1 prescription (starts 10:00)
+        # Prescription starts at 10:00 on Day 1 so it's linked to Day 1
         query = """
         SELECT (COUNT(?event) AS ?count)
         WHERE {
@@ -390,7 +390,7 @@ class TestFullPatientGraph:
         results = list(graph_with_ontology.query(query))
         event_count = int(results[0][0])
 
-        # Day 1 should have 3 events (1 biomarker + 1 vital + 1 antibiotic)
+        # Day 1 should have 3 events (1 biomarker + 1 vital + 1 prescription)
         assert event_count == 3, f"Expected 3 events on ICU Day 1, got {event_count}"
 
         # Verify biomarker on Day 2

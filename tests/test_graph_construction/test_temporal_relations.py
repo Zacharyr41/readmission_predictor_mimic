@@ -20,7 +20,7 @@ from src.graph_construction.event_writers import (
     write_icu_stay,
     write_icu_days,
     write_biomarker_event,
-    write_antibiotic_event,
+    write_prescription_event,
 )
 from src.graph_construction.temporal.allen_relations import (
     _classify_allen_relation,
@@ -187,11 +187,11 @@ class TestComputeAllenRelations:
         assert bool(result), "Expected time:before relation between biomarkers"
 
     def test_during_relation_instant_in_interval(self, graph_with_temporal_setup: tuple) -> None:
-        """Biomarker during antibiotic -> 'during' (biomarker inside antibiotic interval)."""
+        """Biomarker during prescription -> 'during' (biomarker inside prescription interval)."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Antibiotic: 08:00 - 18:00
-        antibiotic = {
+        # Prescription: 08:00 - 18:00
+        prescription = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -202,7 +202,7 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        # Biomarker at 12:00 (inside antibiotic interval)
+        # Biomarker at 12:00 (inside prescription interval)
         biomarker = {
             "stay_id": 300,
             "itemid": 50912,
@@ -216,30 +216,30 @@ class TestComputeAllenRelations:
             "ref_range_upper": 1.3,
         }
 
-        write_antibiotic_event(graph, antibiotic, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, prescription, icu_stay_uri, icu_day_metadata)
         write_biomarker_event(graph, biomarker, icu_stay_uri, icu_day_metadata)
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
         assert count >= 1, f"Expected at least 1 relation, got {count}"
 
-        # Verify time:inside triple exists (biomarker inside antibiotic)
+        # Verify time:inside triple exists (biomarker inside prescription)
         query = """
         ASK {
-            ?biomarker time:inside ?antibiotic .
+            ?biomarker time:inside ?prescription .
             ?biomarker rdf:type mimic:BioMarkerEvent .
-            ?antibiotic rdf:type mimic:AntibioticAdmissionEvent .
+            ?prescription rdf:type mimic:PrescriptionEvent .
         }
         """
         result = graph.query(query)
-        assert bool(result), "Expected time:inside relation (biomarker during antibiotic)"
+        assert bool(result), "Expected time:inside relation (biomarker during prescription)"
 
     def test_overlaps_relation_intervals(self, graph_with_temporal_setup: tuple) -> None:
-        """Two overlapping antibiotics."""
+        """Two overlapping prescriptions."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Antibiotic 1: 08:00 - 14:00
-        antibiotic1 = {
+        # Rx 1: 08:00 - 14:00
+        rx1 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -250,8 +250,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        # Antibiotic 2: 12:00 - 20:00 (overlaps with first)
-        antibiotic2 = {
+        # Rx 2: 12:00 - 20:00 (overlaps with first)
+        rx2 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Ceftriaxone",
@@ -262,8 +262,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        write_antibiotic_event(graph, antibiotic1, icu_stay_uri, icu_day_metadata)
-        write_antibiotic_event(graph, antibiotic2, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx1, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx2, icu_stay_uri, icu_day_metadata)
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
@@ -273,19 +273,19 @@ class TestComputeAllenRelations:
         query = """
         ASK {
             ?a time:intervalOverlaps ?b .
-            ?a rdf:type mimic:AntibioticAdmissionEvent .
-            ?b rdf:type mimic:AntibioticAdmissionEvent .
+            ?a rdf:type mimic:PrescriptionEvent .
+            ?b rdf:type mimic:PrescriptionEvent .
         }
         """
         result = graph.query(query)
         assert bool(result), "Expected time:intervalOverlaps relation"
 
     def test_meets_relation(self, graph_with_temporal_setup: tuple) -> None:
-        """Consecutive antibiotics - first ends exactly when second starts."""
+        """Consecutive prescriptions - first ends exactly when second starts."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Antibiotic 1: 08:00 - 12:00
-        antibiotic1 = {
+        # Rx 1: 08:00 - 12:00
+        rx1 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -296,8 +296,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        # Antibiotic 2: 12:00 - 18:00 (starts exactly when first ends)
-        antibiotic2 = {
+        # Rx 2: 12:00 - 18:00 (starts exactly when first ends)
+        rx2 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Ceftriaxone",
@@ -308,8 +308,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        write_antibiotic_event(graph, antibiotic1, icu_stay_uri, icu_day_metadata)
-        write_antibiotic_event(graph, antibiotic2, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx1, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx2, icu_stay_uri, icu_day_metadata)
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
@@ -319,8 +319,8 @@ class TestComputeAllenRelations:
         query = """
         ASK {
             ?a time:intervalMeets ?b .
-            ?a rdf:type mimic:AntibioticAdmissionEvent .
-            ?b rdf:type mimic:AntibioticAdmissionEvent .
+            ?a rdf:type mimic:PrescriptionEvent .
+            ?b rdf:type mimic:PrescriptionEvent .
         }
         """
         result = graph.query(query)
@@ -330,8 +330,8 @@ class TestComputeAllenRelations:
         """Same-start intervals, A ends first."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Antibiotic 1: 08:00 - 12:00
-        antibiotic1 = {
+        # Rx 1: 08:00 - 12:00
+        rx1 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -342,8 +342,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        # Antibiotic 2: 08:00 - 18:00 (same start, longer)
-        antibiotic2 = {
+        # Rx 2: 08:00 - 18:00 (same start, longer)
+        rx2 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Ceftriaxone",
@@ -354,8 +354,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        write_antibiotic_event(graph, antibiotic1, icu_stay_uri, icu_day_metadata)
-        write_antibiotic_event(graph, antibiotic2, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx1, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx2, icu_stay_uri, icu_day_metadata)
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
@@ -365,8 +365,8 @@ class TestComputeAllenRelations:
         query = """
         ASK {
             ?a time:intervalStarts ?b .
-            ?a rdf:type mimic:AntibioticAdmissionEvent .
-            ?b rdf:type mimic:AntibioticAdmissionEvent .
+            ?a rdf:type mimic:PrescriptionEvent .
+            ?b rdf:type mimic:PrescriptionEvent .
         }
         """
         result = graph.query(query)
@@ -376,8 +376,8 @@ class TestComputeAllenRelations:
         """Same-end intervals, A starts later."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Antibiotic 1: 08:00 - 18:00
-        antibiotic1 = {
+        # Rx 1: 08:00 - 18:00
+        rx1 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -388,8 +388,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        # Antibiotic 2: 12:00 - 18:00 (same end, starts later)
-        antibiotic2 = {
+        # Rx 2: 12:00 - 18:00 (same end, starts later)
+        rx2 = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Ceftriaxone",
@@ -400,8 +400,8 @@ class TestComputeAllenRelations:
             "route": "IV",
         }
 
-        write_antibiotic_event(graph, antibiotic1, icu_stay_uri, icu_day_metadata)
-        write_antibiotic_event(graph, antibiotic2, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx1, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx2, icu_stay_uri, icu_day_metadata)
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
@@ -411,8 +411,8 @@ class TestComputeAllenRelations:
         query = """
         ASK {
             ?a time:intervalFinishes ?b .
-            ?a rdf:type mimic:AntibioticAdmissionEvent .
-            ?b rdf:type mimic:AntibioticAdmissionEvent .
+            ?a rdf:type mimic:PrescriptionEvent .
+            ?b rdf:type mimic:PrescriptionEvent .
         }
         """
         result = graph.query(query)
@@ -520,7 +520,7 @@ class TestComputeAllenRelations:
         assert not bool(result), "Should not have temporal relations between different patients"
 
     def test_relation_count_for_complex_timeline(self, graph_with_temporal_setup: tuple) -> None:
-        """5 biomarkers + 1 antibiotic - verify relation count."""
+        """5 biomarkers + 1 prescription - verify relation count."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
         # 5 biomarkers at different times
@@ -547,8 +547,8 @@ class TestComputeAllenRelations:
             }
             write_biomarker_event(graph, biomarker, icu_stay_uri, icu_day_metadata)
 
-        # 1 antibiotic: 09:00 - 15:00 (overlaps with several biomarkers)
-        antibiotic = {
+        # 1 prescription: 09:00 - 15:00 (overlaps with several biomarkers)
+        rx = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -558,13 +558,13 @@ class TestComputeAllenRelations:
             "dose_unit_rx": "mg",
             "route": "IV",
         }
-        write_antibiotic_event(graph, antibiotic, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx, icu_stay_uri, icu_day_metadata)
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
         # 6 events total, expect multiple relations
         # - Biomarkers form a chain of "before" relations
-        # - Some biomarkers are "during" the antibiotic
+        # - Some biomarkers are "during" the prescription
         # Minimum expected: at least 5 "before" relations from biomarker chain
         assert count >= 5, f"Expected at least 5 relations, got {count}"
 
@@ -772,8 +772,8 @@ class TestBatchTemporalBounds:
             }
             write_biomarker_event(graph, biomarker, icu_stay_uri, icu_day_metadata)
 
-        # 1 antibiotic (interval)
-        antibiotic = {
+        # 1 prescription (interval)
+        rx = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -783,7 +783,7 @@ class TestBatchTemporalBounds:
             "dose_unit_rx": "mg",
             "route": "IV",
         }
-        write_antibiotic_event(graph, antibiotic, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx, icu_stay_uri, icu_day_metadata)
 
         events = _batch_get_temporal_bounds(graph, icu_stay_uri)
 
@@ -804,11 +804,11 @@ class TestBatchTemporalBounds:
     def test_batch_query_handles_missing_bounds(
         self, graph_with_temporal_setup: tuple
     ) -> None:
-        """Antibiotic with NULL stoptime is excluded (same as current behavior)."""
+        """Prescription with NULL stoptime is excluded (same as current behavior)."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Antibiotic with no stoptime (NULL) — should be excluded
-        antibiotic_no_stop = {
+        # Prescription with no stoptime (NULL) — should be excluded
+        rx_no_stop = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Ceftriaxone",
@@ -818,7 +818,7 @@ class TestBatchTemporalBounds:
             "dose_unit_rx": "mg",
             "route": "IV",
         }
-        write_antibiotic_event(graph, antibiotic_no_stop, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx_no_stop, icu_stay_uri, icu_day_metadata)
 
         # 1 valid biomarker
         biomarker = {
@@ -837,7 +837,7 @@ class TestBatchTemporalBounds:
 
         events = _batch_get_temporal_bounds(graph, icu_stay_uri)
 
-        # Only the biomarker should appear (antibiotic has no stoptime -> no end node)
+        # Only the biomarker should appear (prescription has no stoptime -> no end node)
         assert len(events) == 1, f"Expected 1 event (excluding NULL stoptime), got {len(events)}"
 
     def test_batch_query_empty_events(self, graph_with_temporal_setup: tuple) -> None:
@@ -944,8 +944,8 @@ class TestEarlyTermination:
         """1 long interval + 5 contained instants: early termination must NOT skip 'during' relations."""
         graph, patient_uri, icu_stay_uri, icu_day_metadata = graph_with_temporal_setup
 
-        # Long antibiotic interval: 08:00 - 20:00
-        antibiotic = {
+        # Long prescription interval: 08:00 - 20:00
+        rx = {
             "hadm_id": 200,
             "stay_id": 300,
             "drug": "Vancomycin",
@@ -955,7 +955,7 @@ class TestEarlyTermination:
             "dose_unit_rx": "mg",
             "route": "IV",
         }
-        write_antibiotic_event(graph, antibiotic, icu_stay_uri, icu_day_metadata)
+        write_prescription_event(graph, rx, icu_stay_uri, icu_day_metadata)
 
         # 5 biomarkers contained within the interval
         for i in range(5):
@@ -975,7 +975,7 @@ class TestEarlyTermination:
 
         count = compute_allen_relations(graph, icu_stay_uri)
 
-        # 5 "during" relations (each biomarker during the antibiotic)
+        # 5 "during" relations (each biomarker during the prescription)
         # + C(5,2) = 10 "before" relations among the biomarkers
         # = 15 total
         assert count == 15, f"Expected 15 relations (5 during + 10 before), got {count}"
@@ -985,7 +985,7 @@ class TestEarlyTermination:
         SELECT (COUNT(*) AS ?c) WHERE {
             ?bio time:inside ?abx .
             ?bio rdf:type mimic:BioMarkerEvent .
-            ?abx rdf:type mimic:AntibioticAdmissionEvent .
+            ?abx rdf:type mimic:PrescriptionEvent .
         }
         """
         result = list(graph.query(query))
@@ -1099,7 +1099,7 @@ class TestSortedOrderInvariants:
             }, icu_stay_uri, icu_day_metadata)
 
         for i in range(5):
-            write_antibiotic_event(graph, {
+            write_prescription_event(graph, {
                 "hadm_id": 200, "stay_id": 300,
                 "drug": f"Drug{i}",
                 "starttime": datetime(2150, 1, 1, 6 + i * 3, 0, 0),

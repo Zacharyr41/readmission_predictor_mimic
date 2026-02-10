@@ -101,13 +101,13 @@ CV captures variability relative to magnitude, useful for detecting instability.
 | Feature | Type | Description | Source |
 |---------|------|-------------|--------|
 | `num_distinct_meds` | integer | Number of unique medications | Count distinct `mimic:hasDrugName` |
-| `total_antibiotic_days` | float | Total days on antibiotics | Sum of prescription durations |
-| `has_antibiotic` | binary | Any antibiotic prescribed (1 or 0) | Presence of AntibioticAdmissionEvent |
+| `total_prescription_days` | float | Total days on prescriptions | Sum of prescription durations |
+| `has_prescription` | binary | Any prescription present (1 or 0) | Presence of PrescriptionEvent |
 
-**Antibiotic duration calculation:**
+**Prescription duration calculation:**
 ```python
 duration_days = (end_datetime - start_datetime).total_seconds() / (24 * 3600)
-total_antibiotic_days = sum(duration_days for all prescriptions)
+total_prescription_days = sum(duration_days for all prescriptions)
 ```
 
 #### A6. Diagnosis Features
@@ -266,7 +266,7 @@ Typical top features for 30-day readmission prediction:
 | 5 | `Hemoglobin_min` | 0.0456 |
 | 6 | `events_per_icu_day` | 0.0412 |
 | 7 | `BUN_mean` | 0.0389 |
-| 8 | `total_antibiotic_days` | 0.0367 |
+| 8 | `total_prescription_days` | 0.0367 |
 | 9 | `WBC_max` | 0.0345 |
 | 10 | `num_diagnoses` | 0.0321 |
 

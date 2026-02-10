@@ -18,7 +18,7 @@ from src.graph_construction.event_writers import (
     write_icu_days,
     write_biomarker_event,
     write_clinical_sign_event,
-    write_antibiotic_event,
+    write_prescription_event,
     write_diagnosis_event,
 )
 from src.graph_construction.temporal.allen_relations import compute_allen_relations
@@ -46,10 +46,10 @@ def synthetic_feature_graph() -> Graph:
 
     Structure:
     - Patient 1 (age 70, male): 2 admissions
-      - Admission 101: readmitted_30d=True, 1 ICU stay, 5 creatinine values, 3 HR vitals, 1 antibiotic (3 days), 2 diagnoses
+      - Admission 101: readmitted_30d=True, 1 ICU stay, 5 creatinine values, 3 HR vitals, 1 prescription (3 days), 2 diagnoses
       - Admission 102: readmitted_30d=False, 1 ICU stay, 3 biomarkers, 2 vitals
     - Patient 2 (age 55, female): 1 admission
-      - Admission 201: readmitted_30d=False, 1 ICU stay, 4 biomarkers, 2 vitals, 0 antibiotics
+      - Admission 201: readmitted_30d=False, 1 ICU stay, 4 biomarkers, 2 vitals, 0 prescriptions
     - Patient 3 (age 80, male): 2 admissions
       - Admission 301: readmitted_30d=True, 1 ICU stay, sparse events
       - Admission 302: readmitted_30d=False, 1 ICU stay, sparse events
@@ -127,8 +127,8 @@ def synthetic_feature_graph() -> Graph:
         }
         write_clinical_sign_event(g, vital, icu_stay101_uri, icu_day_metadata101)
 
-    # 1 antibiotic (3 days: Jan 1-4)
-    antibiotic101 = {
+    # 1 prescription (3 days: Jan 1-4)
+    rx101 = {
         "hadm_id": 101,
         "stay_id": 1001,
         "drug": "Vancomycin",
@@ -138,7 +138,7 @@ def synthetic_feature_graph() -> Graph:
         "dose_unit_rx": "mg",
         "route": "IV",
     }
-    write_antibiotic_event(g, antibiotic101, icu_stay101_uri, icu_day_metadata101)
+    write_prescription_event(g, rx101, icu_stay101_uri, icu_day_metadata101)
 
     # 2 diagnoses (I63.0, E11.9)
     dx101_1 = {
@@ -537,30 +537,30 @@ class TestExtractMedicationFeatures:
     """(e) test_extract_medication_features"""
 
     def test_returns_dataframe_with_expected_columns(self, synthetic_feature_graph):
-        """Returns DataFrame with hadm_id, num_distinct_meds, total_antibiotic_days, has_antibiotic."""
+        """Returns DataFrame with hadm_id, num_distinct_meds, total_prescription_days, has_prescription."""
         df = extract_medication_features(synthetic_feature_graph)
 
         assert isinstance(df, pd.DataFrame)
         assert "hadm_id" in df.columns
         assert "num_distinct_meds" in df.columns
-        assert "total_antibiotic_days" in df.columns
-        assert "has_antibiotic" in df.columns
+        assert "total_prescription_days" in df.columns
+        assert "has_prescription" in df.columns
 
-    def test_admission101_has_antibiotic(self, synthetic_feature_graph):
-        """Admission 101: has_antibiotic=1, total_antibiotic_days=3."""
+    def test_admission101_has_prescription(self, synthetic_feature_graph):
+        """Admission 101: has_prescription=1, total_prescription_days=3."""
         df = extract_medication_features(synthetic_feature_graph)
 
         row = df[df["hadm_id"] == 101].iloc[0]
-        assert row["has_antibiotic"] == 1
-        assert row["total_antibiotic_days"] == pytest.approx(3.0, rel=0.01)
+        assert row["has_prescription"] == 1
+        assert row["total_prescription_days"] == pytest.approx(3.0, rel=0.01)
 
-    def test_admission201_no_antibiotic(self, synthetic_feature_graph):
-        """Admission 201: has_antibiotic=0."""
+    def test_admission201_no_prescription(self, synthetic_feature_graph):
+        """Admission 201: has_prescription=0."""
         df = extract_medication_features(synthetic_feature_graph)
 
         row = df[df["hadm_id"] == 201].iloc[0]
-        assert row["has_antibiotic"] == 0
-        assert row["total_antibiotic_days"] == 0
+        assert row["has_prescription"] == 0
+        assert row["total_prescription_days"] == 0
 
 
 class TestExtractDiagnosisFeatures:
@@ -598,7 +598,7 @@ class TestExtractTemporalFeatures:
         df = extract_temporal_features(synthetic_feature_graph)
 
         row = df[df["hadm_id"] == 101].iloc[0]
-        # With 5 biomarkers + 3 vitals + 1 antibiotic = 9 events, there should be many before relations
+        # With 5 biomarkers + 3 vitals + 1 prescription = 9 events, there should be many before relations
         assert row["total_temporal_edges"] > 0
 
 

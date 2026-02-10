@@ -22,7 +22,7 @@ from src.graph_construction.event_writers import (
     write_biomarker_event,
     write_clinical_sign_event,
     write_microbiology_event,
-    write_antibiotic_event,
+    write_prescription_event,
     write_diagnosis_event,
 )
 from src.graph_construction.temporal.allen_relations import compute_allen_relations_for_patient
@@ -148,7 +148,7 @@ def build_graph(
     logger.info(f"  BioMarker Events: {stats['biomarkers']}")
     logger.info(f"  Clinical Sign Events: {stats['vitals']}")
     logger.info(f"  Microbiology Events: {stats['microbiology']}")
-    logger.info(f"  Antibiotic Events: {stats['prescriptions']}")
+    logger.info(f"  Prescription Events: {stats['prescriptions']}")
     logger.info(f"  Diagnosis Events: {stats['diagnoses']}")
     logger.info(f"  Allen Relations: {stats['allen_relations']}")
 
@@ -278,10 +278,10 @@ def _process_patient(
                 write_microbiology_event(graph, micro_data, icu_stay_uri, icu_day_metadata)
                 stats["microbiology"] += 1
 
-            # Write prescriptions (antibiotics)
+            # Write prescriptions
             prescriptions = _query_prescriptions(conn, hadm_id, prescriptions_limit)
             for rx_data in prescriptions:
-                write_antibiotic_event(graph, rx_data, icu_stay_uri, icu_day_metadata)
+                write_prescription_event(graph, rx_data, icu_stay_uri, icu_day_metadata)
                 stats["prescriptions"] += 1
 
         # Write diagnoses for this admission

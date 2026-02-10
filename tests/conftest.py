@@ -509,8 +509,8 @@ def sample_clinical_sign_data() -> dict:
 
 
 @pytest.fixture
-def sample_antibiotic_data() -> dict:
-    """Sample antibiotic prescription data for testing."""
+def sample_prescription_data() -> dict:
+    """Sample prescription data for testing."""
     return {
         "hadm_id": 200,
         "stay_id": 300,
@@ -549,7 +549,7 @@ def sample_comorbidity_data() -> dict:
 def full_patient_with_events() -> dict:
     """Complete patient data with all event types for SPARQL integration test.
 
-    Patient: 1 admission, 1 ICU stay (3 days), 2 biomarkers, 1 vital, 1 antibiotic, 1 diagnosis.
+    Patient: 1 admission, 1 ICU stay (3 days), 2 biomarkers, 1 vital, 1 prescription, 1 diagnosis.
     """
     return {
         "patient": {"subject_id": 500, "gender": "M", "anchor_age": 70},
@@ -609,7 +609,7 @@ def full_patient_with_events() -> dict:
                 "valuenum": 82.0,
             },
         ],
-        "antibiotics": [
+        "prescriptions": [
             {
                 "hadm_id": 501,
                 "stay_id": 502,

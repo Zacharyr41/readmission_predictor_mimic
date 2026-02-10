@@ -167,7 +167,7 @@ def query_event_counts(graph: Graph) -> None:
         ("BioMarkerEvent", "Lab tests"),
         ("ClinicalSignEvent", "Vital signs"),
         ("MicrobiologyEvent", "Microbiology"),
-        ("AntibioticAdmissionEvent", "Medications"),
+        ("PrescriptionEvent", "Medications"),
         ("DiagnosisEvent", "Diagnoses"),
     ]
 

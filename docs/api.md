@@ -368,10 +368,10 @@ def write_microbiology_event(
 
 Create MicrobiologyEvent node.
 
-#### `write_antibiotic_event()`
+#### `write_prescription_event()`
 
 ```python
-def write_antibiotic_event(
+def write_prescription_event(
     graph: Graph,
     event_data: dict,
     icu_stay_uri: URIRef,
@@ -379,7 +379,7 @@ def write_antibiotic_event(
 ) -> URIRef
 ```
 
-Create AntibioticAdmissionEvent node.
+Create PrescriptionEvent node.
 
 #### `write_diagnosis_event()`
 
@@ -587,7 +587,7 @@ def extract_medication_features(graph: Graph) -> pd.DataFrame
 Extract medication features.
 
 **Returns:**
-DataFrame with columns: `hadm_id`, `num_distinct_meds`, `total_antibiotic_days`, `has_antibiotic`
+DataFrame with columns: `hadm_id`, `num_distinct_meds`, `total_prescription_days`, `has_prescription`
 
 #### `extract_diagnosis_features()`
 

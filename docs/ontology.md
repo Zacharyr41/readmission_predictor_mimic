@@ -40,7 +40,7 @@ owl:Thing
 │       ├── mimic:BioMarkerEvent
 │       ├── mimic:ClinicalSignEvent
 │       ├── mimic:MicrobiologyEvent
-│       ├── mimic:AntibioticAdmissionEvent
+│       ├── mimic:PrescriptionEvent
 │       └── mimic:DiagnosisEvent
 ├── mimic:Comorbidity
 ├── mimic:Organism
@@ -60,7 +60,7 @@ owl:Thing
 | `mimic:BioMarkerEvent` | Lab test result (biomarker measurement) | `mimic:Event` |
 | `mimic:ClinicalSignEvent` | Vital sign measurement | `mimic:Event` |
 | `mimic:MicrobiologyEvent` | Microbiology culture result | `mimic:Event` |
-| `mimic:AntibioticAdmissionEvent` | Medication administration event | `mimic:Event` |
+| `mimic:PrescriptionEvent` | Medication prescription event | `mimic:Event` |
 | `mimic:DiagnosisEvent` | ICD diagnosis code | `mimic:Event` |
 | `mimic:Comorbidity` | Named comorbidity condition | `owl:Thing` |
 
@@ -153,10 +153,10 @@ Properties with literal values:
 
 | Property | Domain | Range | Description |
 |----------|--------|-------|-------------|
-| `mimic:hasDrugName` | AntibioticAdmissionEvent | xsd:string | Drug name |
-| `mimic:hasDoseValue` | AntibioticAdmissionEvent | xsd:decimal | Dose value |
-| `mimic:hasDoseUnit` | AntibioticAdmissionEvent | xsd:string | Dose unit |
-| `mimic:hasRoute` | AntibioticAdmissionEvent | xsd:string | Administration route |
+| `mimic:hasDrugName` | PrescriptionEvent | xsd:string | Drug name |
+| `mimic:hasDoseValue` | PrescriptionEvent | xsd:decimal | Dose value |
+| `mimic:hasDoseUnit` | PrescriptionEvent | xsd:string | Dose unit |
+| `mimic:hasRoute` | PrescriptionEvent | xsd:string | Administration route |
 
 ### Diagnosis Properties
 
@@ -391,7 +391,7 @@ WHERE {
     ?admission rdf:type mimic:HospitalAdmission ;
                mimic:hasAdmissionId ?hadmId ;
                mimic:containsICUStay ?icuStay .
-    ?event rdf:type mimic:AntibioticAdmissionEvent ;
+    ?event rdf:type mimic:PrescriptionEvent ;
            mimic:associatedWithICUStay ?icuStay ;
            mimic:hasDrugName ?drugName ;
            time:hasBeginning ?begin ;

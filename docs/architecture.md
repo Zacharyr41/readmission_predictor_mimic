@@ -331,7 +331,7 @@ erDiagram
     ICUStay ||--o{ BioMarkerEvent : hasEvent
     ICUStay ||--o{ ClinicalSignEvent : hasEvent
     ICUStay ||--o{ MicrobiologyEvent : hasEvent
-    ICUStay ||--o{ AntibioticEvent : hasEvent
+    ICUStay ||--o{ PrescriptionEvent : hasEvent
     ICUStay {
         int stay_id
         datetime intime

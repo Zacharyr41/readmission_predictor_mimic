@@ -353,13 +353,13 @@ def write_microbiology_event(
 # ==================== Events (Interval-based) ====================
 
 
-def write_antibiotic_event(
+def write_prescription_event(
     graph: Graph,
     rx_data: dict,
     icu_stay_uri: URIRef,
     icu_day_metadata: list[tuple[URIRef, datetime, datetime]],
 ) -> URIRef:
-    """Create AntibioticAdmissionEvent as time:ProperInterval.
+    """Create PrescriptionEvent as time:ProperInterval.
 
     Args:
         graph: RDF graph to write to.
@@ -376,20 +376,20 @@ def write_antibiotic_event(
     drug_slug = _slugify(drug)
     starttime = rx_data["starttime"]
 
-    event_uri = MIMIC_NS[f"AAE-{hadm_id}-{drug_slug}"]
+    event_uri = MIMIC_NS[f"RXE-{hadm_id}-{drug_slug}"]
 
     # Type assertions
-    graph.add((event_uri, RDF.type, MIMIC_NS.AntibioticAdmissionEvent))
+    graph.add((event_uri, RDF.type, MIMIC_NS.PrescriptionEvent))
     graph.add((event_uri, RDF.type, TIME_NS.ProperInterval))
 
     # Temporal bounds
-    begin_uri = MIMIC_NS[f"AAEBegin_{hadm_id}_{drug_slug}"]
+    begin_uri = MIMIC_NS[f"RXEBegin_{hadm_id}_{drug_slug}"]
     _write_instant(graph, begin_uri, rx_data["starttime"])
     graph.add((event_uri, TIME_NS.hasBeginning, begin_uri))
 
     # End time may be NULL for ongoing prescriptions
     if rx_data.get("stoptime") is not None:
-        end_uri = MIMIC_NS[f"AAEEnd_{hadm_id}_{drug_slug}"]
+        end_uri = MIMIC_NS[f"RXEEnd_{hadm_id}_{drug_slug}"]
         _write_instant(graph, end_uri, rx_data["stoptime"])
         graph.add((event_uri, TIME_NS.hasEnd, end_uri))
 

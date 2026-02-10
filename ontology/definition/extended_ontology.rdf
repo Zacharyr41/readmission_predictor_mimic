@@ -190,7 +190,7 @@
     <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDrugName -->
 
     <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDrugName">
-        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#PrescriptionEvent"/>
         <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
         <rdfs:comment>The name of the prescribed drug.</rdfs:comment>
     </owl:DatatypeProperty>
@@ -198,7 +198,7 @@
     <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseValue -->
 
     <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseValue">
-        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#PrescriptionEvent"/>
         <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
         <rdfs:comment>The numeric dose value of the prescription.</rdfs:comment>
     </owl:DatatypeProperty>
@@ -206,7 +206,7 @@
     <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseUnit -->
 
     <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseUnit">
-        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#PrescriptionEvent"/>
         <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
         <rdfs:comment>The unit of the dose (e.g., mg, g, mL).</rdfs:comment>
     </owl:DatatypeProperty>
@@ -214,7 +214,7 @@
     <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRoute -->
 
     <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasRoute">
-        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#AntibioticAdmissionEvent"/>
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#PrescriptionEvent"/>
         <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
         <rdfs:comment>The route of administration (e.g., IV, PO, IM).</rdfs:comment>
     </owl:DatatypeProperty>

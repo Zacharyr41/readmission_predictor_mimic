@@ -95,7 +95,7 @@ def feature_categories(df: pd.DataFrame) -> None:
         "Lab values": [c for c in feature_cols if any(x in c for x in ["_mean", "_min", "_max", "_std", "_count", "_first", "_last", "_abnormal"])
                        and not any(v in c for v in ["Heart", "Resp", "SpO2", "Temp", "BP"])],
         "Vitals": [c for c in feature_cols if any(v in c for v in ["Heart", "Resp", "SpO2", "Temp", "BP", "_cv"])],
-        "Medications": [c for c in feature_cols if any(x in c for x in ["antibiotic", "distinct_meds"])],
+        "Medications": [c for c in feature_cols if any(x in c for x in ["prescription", "distinct_meds"])],
         "Diagnoses": [c for c in feature_cols if any(x in c for x in ["num_diagnoses", "icd_chapter"])],
         "Temporal": [c for c in feature_cols if any(x in c for x in ["events_per", "before_rel", "during_rel", "temporal_edges"])],
         "Graph structure": [c for c in feature_cols if any(x in c for x in ["subgraph", "degree"])],
@@ -152,7 +152,7 @@ def feature_statistics(df: pd.DataFrame) -> None:
         "icu_los_hours",
         "num_icu_days",
         "num_distinct_meds",
-        "total_antibiotic_days",
+        "total_prescription_days",
         "num_diagnoses",
         "events_per_icu_day",
         "total_temporal_edges",
