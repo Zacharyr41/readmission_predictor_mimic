@@ -18,6 +18,8 @@ dependencies = [
     "xgboost>=2.0",
     "pydantic>=2.0",
     "pydantic-settings",
+    "google-cloud-bigquery[pandas]>=3.10",
+    "db-dtypes>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -38,5 +40,7 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "bigquery: marks tests that require gcloud auth and BigQuery access (run with '-m bigquery')",
+    "bigquery_e2e: full BigQuery loader test, ~$0.35 per run (run with '-m bigquery_e2e')",
 ]
-addopts = "-v"
+addopts = "-v -m 'not bigquery_e2e'"

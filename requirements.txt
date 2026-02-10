@@ -8,5 +8,7 @@ pydantic>=2.0
 pydantic-settings
 pytest>=8.0
 pytest-cov
+google-cloud-bigquery[pandas]>=3.10
+db-dtypes>=1.0
 neo4j>=5.0
 networkx>=3.0

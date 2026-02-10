@@ -81,6 +81,7 @@ class TestFullPipelineEndToEnd:
             duckdb_path=synthetic_db_path,
             cohort_icd_codes=["I63", "I61", "I60"],  # Stroke codes
             patients_limit=0,  # Process all patients
+            data_source="local",
         )
 
         # Run the pipeline
@@ -163,6 +164,7 @@ class TestFullPipelineEndToEnd:
             duckdb_path=synthetic_db_path,
             cohort_icd_codes=["I63", "I61", "I60"],
             patients_limit=0,
+            data_source="local",
         )
 
         # Run the pipeline
@@ -207,6 +209,7 @@ class TestFullPipelineEndToEnd:
             duckdb_path=synthetic_db_path,
             cohort_icd_codes=["I63", "I61", "I60"],
             patients_limit=2,  # Very small cohort
+            data_source="local",
         )
 
         # Should not raise an error
@@ -375,6 +378,7 @@ class TestPipelineOptimizations:
             cohort_icd_codes=["I63", "I61", "I60"],
             patients_limit=0,
             skip_allen_relations=True,  # Key: skip Allen relations
+            data_source="local",
         )
 
         result = run_pipeline(settings=settings, paths=paths, ontology_dir=ontology_dir)
@@ -447,6 +451,7 @@ class TestPipelineOptimizations:
             vitals_limit=5,  # Max 5 vitals per ICU stay
             diagnoses_limit=3,  # Max 3 diagnoses per admission
             skip_allen_relations=True,  # Skip for speed
+            data_source="local",
         )
 
         result = run_pipeline(settings=settings, paths=paths, ontology_dir=ontology_dir)

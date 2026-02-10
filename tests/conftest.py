@@ -25,6 +25,7 @@ def test_settings(tmp_path: Path) -> Settings:
         mimic_iv_path=tmp_path / "mimic",
         duckdb_path=tmp_path / "test.duckdb",
         clinical_tkg_repo=tmp_path / "tkg",
+        data_source="local",
     )
 
 

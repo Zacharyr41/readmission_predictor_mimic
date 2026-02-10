@@ -49,13 +49,17 @@ flowchart LR
 
 ### Layer 1: Data Ingestion
 
-**Purpose**: Load MIMIC-IV CSV/CSV.GZ files into DuckDB for efficient SQL querying.
+**Purpose**: Load MIMIC-IV data into DuckDB for efficient SQL querying. Supports two data sources:
+- **Local CSVs** (`DATA_SOURCE=local`): Auto-discovers and loads all CSV/CSV.GZ files from `hosp/` and `icu/` directories
+- **Google BigQuery** (`DATA_SOURCE=bigquery`): Pulls data directly from `physionet-data.mimiciv_hosp` / `physionet-data.mimiciv_icu` using two-phase loading — small/dimension tables are loaded in full, then large tables (labevents, chartevents, microbiologyevents, prescriptions) are filtered by cohort subject IDs to minimize data transfer
 
 **Modules**:
-- `src/ingestion/mimic_loader.py` - Auto-discovers and loads all tables from `hosp/` and `icu/` directories
+- `src/ingestion/__init__.py` - Dispatch function `load_mimic_data()` routes to the appropriate loader
+- `src/ingestion/mimic_loader.py` - Local CSV → DuckDB loader
+- `src/ingestion/bigquery_loader.py` - BigQuery → DuckDB loader (two-phase with cohort filtering)
 - `src/ingestion/derived_tables.py` - Creates age, readmission labels, and cohort selection tables
 
-**Input**: MIMIC-IV directory with `hosp/` and `icu/` subdirectories
+**Input**: MIMIC-IV directory (local) or BigQuery project (cloud)
 **Output**: `data/processed/mimiciv.duckdb`
 
 ```mermaid

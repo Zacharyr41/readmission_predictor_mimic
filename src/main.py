@@ -82,12 +82,16 @@ def run_pipeline(
     db_path = settings.duckdb_path
 
     # Stage 1: Ingestion (optional)
-    if not skip_ingestion and settings.mimic_iv_path.exists():
-        logger.info("Stage 1: Loading MIMIC-IV to DuckDB...")
-        from src.ingestion.mimic_loader import load_mimic_to_duckdb
+    if not skip_ingestion:
+        should_ingest = settings.data_source == "bigquery" or settings.mimic_iv_path.exists()
+        if should_ingest:
+            logger.info(f"Stage 1: Loading MIMIC-IV from {settings.data_source}...")
+            from src.ingestion import load_mimic_data
 
-        conn = load_mimic_to_duckdb(settings.mimic_iv_path, db_path)
-        conn.close()
+            conn = load_mimic_data(settings)
+            conn.close()
+        else:
+            logger.info("Stage 1: Skipping ingestion (no data source available)")
     else:
         logger.info("Stage 1: Skipping ingestion (using existing DuckDB)")
 
@@ -316,6 +320,18 @@ def main():
         help="ICD-10 code prefixes for cohort selection",
     )
     parser.add_argument(
+        "--data-source",
+        choices=["local", "bigquery"],
+        default=None,
+        help="Data source for MIMIC-IV (default: from settings)",
+    )
+    parser.add_argument(
+        "--bigquery-project",
+        type=str,
+        default=None,
+        help="GCP project ID for BigQuery billing",
+    )
+    parser.add_argument(
         "--skip-ingestion",
         action="store_true",
         default=True,
@@ -365,6 +381,10 @@ def main():
         updates["skip_allen_relations"] = True
     if args.icd_codes:
         updates["cohort_icd_codes"] = args.icd_codes
+    if args.data_source:
+        updates["data_source"] = args.data_source
+    if args.bigquery_project:
+        updates["bigquery_project"] = args.bigquery_project
 
     if updates:
         settings = settings.model_copy(update=updates)

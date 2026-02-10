@@ -43,10 +43,13 @@ make setup
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env with your MIMIC-IV path
+# Edit .env: set DATA_SOURCE and BIGQUERY_PROJECT (or DATA_SOURCE=local with MIMIC_IV_PATH)
 
 # 3. Run the full pipeline (small cohort for testing)
-python -m src.main --patients-limit 50 --skip-allen --verbose
+# BigQuery (default):
+python -m src.main --run-ingestion --patients-limit 50 --skip-allen --verbose
+# Local CSV fallback:
+python -m src.main --run-ingestion --data-source local --patients-limit 50 --skip-allen --verbose
 
 # 4. View results
 cat outputs/reports/evaluation_xgb.md
@@ -60,6 +63,42 @@ cat outputs/reports/evaluation_xgb.md
   - 16GB RAM minimum (32GB recommended for full cohort)
   - 50GB disk space for DuckDB database
 - **Optional**: Neo4j 5.x for graph visualization
+
+### BigQuery Setup (Alternative to Local CSVs)
+
+If you have PhysioNet credentialed access linked to a GCP project, you can pull MIMIC-IV data directly from BigQuery without downloading CSVs locally.
+
+**Automated setup** (recommended):
+
+```bash
+# Reads BIGQUERY_PROJECT from .env, checks auth, verifies access
+./scripts/setup_bigquery.sh
+```
+
+The script reads `BIGQUERY_PROJECT` from your `.env` (or accepts a CLI argument), walks you through authentication, verifies you can query the MIMIC-IV tables, and sets `DATA_SOURCE=bigquery`.
+
+**Manual setup**:
+
+1. Install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
+2. Complete [PhysioNet credentialing](https://physionet.org/settings/credentialing/) and sign the MIMIC-IV data use agreement
+3. Link your Google account to PhysioNet at [physionet.org/settings/cloud](https://physionet.org/settings/cloud/) under "Google BigQuery"
+4. Create or select a GCP project with billing enabled and the [BigQuery API](https://console.cloud.google.com/apis/library/bigquery.googleapis.com) turned on
+5. Authenticate locally:
+   ```bash
+   gcloud auth application-default login
+   ```
+6. Set environment variables in `.env`:
+   ```
+   DATA_SOURCE=bigquery
+   BIGQUERY_PROJECT=your-gcp-project-id
+   ```
+7. Verify access:
+   ```bash
+   bq --project_id=your-gcp-project-id query --use_legacy_sql=false \
+     "SELECT COUNT(*) FROM \`physionet-data.mimiciv_hosp.patients\`"
+   ```
+
+The BigQuery loader uses two-phase loading: small/dimension tables are loaded in full, then large tables (labevents, chartevents, etc.) are filtered by cohort subject IDs to minimize data transfer.
 
 ## Installation
 
@@ -86,6 +125,8 @@ Core dependencies:
 - `scikit-learn>=1.4` - Machine learning
 - `xgboost>=2.0` - Gradient boosting
 - `pydantic>=2.0` - Configuration validation
+- `google-cloud-bigquery[pandas]>=3.10` - BigQuery data source
+- `db-dtypes>=1.0` - BigQuery pandas type support
 
 Optional:
 - `networkx>=3.0` - Graph algorithms
@@ -99,7 +140,9 @@ Create a `.env` file with the following variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MIMIC_IV_PATH` | Path to MIMIC-IV directory containing `hosp/` and `icu/` | Required |
+| `DATA_SOURCE` | Data source: `local` (CSV files) or `bigquery` (Google BigQuery) | `bigquery` |
+| `BIGQUERY_PROJECT` | GCP project ID for BigQuery billing (required when `DATA_SOURCE=bigquery`) | - |
+| `MIMIC_IV_PATH` | Path to MIMIC-IV directory containing `hosp/` and `icu/` (for `DATA_SOURCE=local`) | Required for local |
 | `DUCKDB_PATH` | Path to DuckDB database file | `data/processed/mimiciv.duckdb` |
 | `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j username | `neo4j` |
@@ -111,6 +154,8 @@ Settings can be configured via environment variables or CLI arguments:
 
 | Setting | Environment Variable | CLI Flag | Default | Description |
 |---------|---------------------|----------|---------|-------------|
+| Data source | `DATA_SOURCE` | `--data-source` | `bigquery` | `local` or `bigquery` |
+| BigQuery project | `BIGQUERY_PROJECT` | `--bigquery-project` | - | GCP project for BigQuery billing |
 | Cohort ICD codes | `COHORT_ICD_CODES` | `--icd-codes` | `["I63", "I61", "I60"]` | ICD-10 prefixes for cohort selection |
 | Readmission window | `READMISSION_WINDOW_DAYS` | - | `30` | Days for readmission label |
 | Patient limit | `PATIENTS_LIMIT` | `--patients-limit` | `0` (unlimited) | Max patients to process |
@@ -199,7 +244,8 @@ readmission_predictor_mimic/
 ├── src/
 │   ├── main.py                  # Pipeline orchestrator
 │   ├── ingestion/               # Layer 1: Data ingestion
-│   │   ├── mimic_loader.py      # DuckDB loader
+│   │   ├── mimic_loader.py      # Local CSV → DuckDB loader
+│   │   ├── bigquery_loader.py   # BigQuery → DuckDB loader
 │   │   └── derived_tables.py    # Age, cohort, readmission labels
 │   ├── graph_construction/      # Layer 2: RDF graph
 │   │   ├── pipeline.py          # Graph build orchestrator
@@ -229,6 +275,8 @@ readmission_predictor_mimic/
 ├── outputs/
 │   ├── models/                  # Trained models
 │   └── reports/                 # Evaluation reports
+├── scripts/
+│   └── setup_bigquery.sh        # BigQuery auth & access setup
 ├── tests/                       # Test suite
 ├── docs/                        # Documentation
 │   ├── architecture.md

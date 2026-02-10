@@ -1,7 +1,7 @@
 """CLI entry point for MIMIC-IV ingestion module.
 
 Usage:
-    python -m src.ingestion [--source-dir PATH] [--db-path PATH]
+    python -m src.ingestion [--source-dir PATH] [--db-path PATH] [--data-source local|bigquery]
 """
 
 import argparse
@@ -9,7 +9,8 @@ import logging
 from pathlib import Path
 
 from config.settings import Settings
-from src.ingestion.mimic_loader import load_mimic_to_duckdb, get_loaded_tables
+from src.ingestion import load_mimic_data
+from src.ingestion.mimic_loader import get_loaded_tables
 from src.ingestion.derived_tables import (
     create_age_table,
     create_readmission_labels,
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 def main():
     """Load MIMIC-IV data into DuckDB and create derived tables."""
     parser = argparse.ArgumentParser(
-        description="Load MIMIC-IV CSV files into DuckDB",
+        description="Load MIMIC-IV data into DuckDB",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -35,6 +36,18 @@ def main():
         "--db-path",
         type=Path,
         help="Path to output DuckDB file (default: from settings)",
+    )
+    parser.add_argument(
+        "--data-source",
+        choices=["local", "bigquery"],
+        default=None,
+        help="Data source for MIMIC-IV (default: from settings)",
+    )
+    parser.add_argument(
+        "--bigquery-project",
+        type=str,
+        default=None,
+        help="GCP project ID for BigQuery billing",
     )
     parser.add_argument(
         "--skip-derived",
@@ -56,17 +69,26 @@ def main():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    # Load settings
+    # Load settings with CLI overrides
+    updates = {}
+    if args.source_dir:
+        updates["mimic_iv_path"] = args.source_dir
+    if args.db_path:
+        updates["duckdb_path"] = args.db_path
+    if args.data_source:
+        updates["data_source"] = args.data_source
+    if args.bigquery_project:
+        updates["bigquery_project"] = args.bigquery_project
+
     settings = Settings()
+    if updates:
+        settings = settings.model_copy(update=updates)
 
-    source_dir = args.source_dir or settings.mimic_iv_path
-    db_path = args.db_path or settings.duckdb_path
+    logger.info(f"Loading MIMIC-IV from {settings.data_source}")
+    logger.info(f"Output DuckDB: {settings.duckdb_path}")
 
-    logger.info(f"Loading MIMIC-IV from {source_dir}")
-    logger.info(f"Output DuckDB: {db_path}")
-
-    # Load data
-    conn = load_mimic_to_duckdb(source_dir, db_path)
+    # Load data via dispatch
+    conn = load_mimic_data(settings)
 
     # Create derived tables
     if not args.skip_derived:
