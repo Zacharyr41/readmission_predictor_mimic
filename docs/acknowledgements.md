@@ -59,6 +59,9 @@ This project relies on several open-source libraries:
 - [XGBoost](https://xgboost.readthedocs.io/) - Gradient boosting
 - [pandas](https://pandas.pydata.org/) - Data manipulation
 - [NetworkX](https://networkx.org/) - Graph algorithms
+- [PyTorch](https://pytorch.org/) - Deep learning framework
+- [Hugging Face Transformers](https://huggingface.co/docs/transformers/) - Pre-trained language models
+- [SapBERT](https://huggingface.co/cambridgeltl/SapBERT-from-PubMedBERT-fulltext) - Biomedical entity embeddings (Liu et al., NAACL 2021)
 
 ## Citation
 

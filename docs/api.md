@@ -862,6 +862,100 @@ Generate a markdown evaluation report.
 
 ---
 
+## Layer 5b: GNN Prediction Pathway
+
+### `src.gnn.embeddings`
+
+SapBERT-based concept embeddings for GNN node features. See [CITATIONS.md](../src/gnn/CITATIONS.md) for academic references.
+
+#### `SapBERTEmbedder`
+
+```python
+class SapBERTEmbedder:
+    MODEL_ID = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
+    EMBEDDING_DIM = 768
+
+    def __init__(self, cache_dir: Path | None = None) -> None: ...
+```
+
+Generate dense 768-dim embeddings for clinical terms using SapBERT (Liu et al., NAACL 2021). The model is loaded lazily on first use.
+
+**Args:**
+- `cache_dir`: Optional HuggingFace cache directory for model weights
+
+#### `SapBERTEmbedder.embed_terms()`
+
+```python
+def embed_terms(self, terms: list[str]) -> torch.Tensor
+```
+
+Embed clinical terms into 768-dim vectors using CLS pooling. Processes in batches of 64.
+
+**Args:**
+- `terms`: Clinical term strings to embed
+
+**Returns:**
+Tensor of shape `(len(terms), 768)`.
+
+#### `SapBERTEmbedder.embed_and_cache()`
+
+```python
+def embed_and_cache(
+    self,
+    terms: list[str],
+    labels: list[str],
+    cache_path: Path,
+) -> dict[str, torch.Tensor]
+```
+
+Embed terms and cache the result to disk. If `cache_path` exists, loads from cache without touching the model.
+
+**Args:**
+- `terms`: Clinical term strings to embed
+- `labels`: Keys for the returned dict (one per term)
+- `cache_path`: File path for the `.pt` cache
+
+**Returns:**
+Dict mapping each label to its 768-dim embedding tensor.
+
+#### `build_concept_embeddings()`
+
+```python
+def build_concept_embeddings(
+    snomed_mapper: SnomedMapper,
+    cache_path: Path = Path("data/processed/concept_embeddings.pt"),
+) -> dict[str, torch.Tensor]
+```
+
+Embed all unique SNOMED concepts from the mapper's 7 internal mapping dictionaries and cache to disk.
+
+**Args:**
+- `snomed_mapper`: A loaded SnomedMapper instance
+- `cache_path`: Where to save/load the `.pt` cache
+
+**Returns:**
+Dict mapping SNOMED code to 768-dim embedding tensor.
+
+#### `embed_unmapped_terms()`
+
+```python
+def embed_unmapped_terms(
+    terms: list[str],
+    cache_path: Path = Path("data/processed/unmapped_embeddings.pt"),
+) -> dict[str, torch.Tensor]
+```
+
+Embed free-text terms that lack SNOMED mappings.
+
+**Args:**
+- `terms`: Raw clinical term strings
+- `cache_path`: Where to save/load the `.pt` cache
+
+**Returns:**
+Dict mapping term string to 768-dim embedding tensor.
+
+---
+
 ## Configuration
 
 ### `config.settings`
