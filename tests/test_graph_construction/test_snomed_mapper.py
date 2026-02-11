@@ -62,6 +62,14 @@ def mappings_dir(tmp_path: Path) -> Path:
     }
     (tmp_path / "comorbidity_to_snomed.json").write_text(json.dumps(comorbidity_data))
 
+    # LOINC -> SNOMED
+    loinc_data = {
+        "_metadata": {"source": "test"},
+        "2160-0": {"snomed_code": "70901006", "snomed_term": "Creatinine measurement"},
+        "2951-2": {"snomed_code": "104934005", "snomed_term": "Sodium measurement"},
+    }
+    (tmp_path / "loinc_to_snomed.json").write_text(json.dumps(loinc_data))
+
     return tmp_path
 
 
@@ -204,6 +212,7 @@ class TestSnomedMapperGracefulDegradation:
         assert stats["drug"] == 3
         assert stats["organism"] == 2
         assert stats["comorbidity"] == 2
+        assert stats["loinc"] == 2
 
 
 class TestSnomedConcept:
@@ -218,3 +227,53 @@ class TestSnomedConcept:
         a = SnomedConcept(code="12345", term="Test")
         b = SnomedConcept(code="12345", term="Test")
         assert a == b
+
+
+class TestCUIRejection:
+    """SCTID validation: CUI codes must be rejected."""
+
+    def test_cui_code_returns_none(self, mappings_dir: Path) -> None:
+        """get_snomed_for_labitem() rejects CUI-format snomed_codes."""
+        # Write a lab entry with a CUI instead of a real SCTID
+        lab_data = {
+            "_metadata": {"source": "test"},
+            "99999": {"snomed_code": "C0201985", "snomed_term": "Fake CUI entry", "loinc": "2160-0"},
+        }
+        (mappings_dir / "labitem_to_snomed.json").write_text(json.dumps(lab_data))
+        mapper = SnomedMapper(mappings_dir)
+        result = mapper.get_snomed_for_labitem(99999)
+        assert result is None, f"CUI code should be rejected, got {result}"
+
+    def test_valid_sctid_is_accepted(self, mapper: SnomedMapper) -> None:
+        """get_snomed_for_labitem() accepts numeric SCTIDs."""
+        result = mapper.get_snomed_for_labitem(50912)
+        assert result is not None
+        assert result.code == "70901006"
+
+
+class TestLoincLookup:
+    """LOINC code to SNOMED concept lookup."""
+
+    @pytest.fixture
+    def loinc_mapper(self, mappings_dir: Path) -> SnomedMapper:
+        loinc_data = {
+            "_metadata": {"source": "test"},
+            "2160-0": {"snomed_code": "70901006", "snomed_term": "Creatinine measurement"},
+            "2951-2": {"snomed_code": "104934005", "snomed_term": "Sodium measurement"},
+        }
+        (mappings_dir / "loinc_to_snomed.json").write_text(json.dumps(loinc_data))
+        return SnomedMapper(mappings_dir)
+
+    def test_loinc_lookup_returns_concept(self, loinc_mapper: SnomedMapper) -> None:
+        result = loinc_mapper.get_snomed_for_loinc("2160-0")
+        assert result is not None
+        assert result.code == "70901006"
+
+    def test_loinc_lookup_unmapped_returns_none(self, loinc_mapper: SnomedMapper) -> None:
+        result = loinc_mapper.get_snomed_for_loinc("99999-9")
+        assert result is None
+
+    def test_loinc_lookup_term_is_populated(self, loinc_mapper: SnomedMapper) -> None:
+        result = loinc_mapper.get_snomed_for_loinc("2160-0")
+        assert result is not None
+        assert result.term and len(result.term) > 0

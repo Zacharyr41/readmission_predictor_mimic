@@ -54,6 +54,11 @@ def synthetic_mapper(tmp_path: Path) -> SnomedMapper:
         "diabetes": {"snomed_code": "73211009", "snomed_term": "Diabetes mellitus"},
     }
 
+    loinc_data = {
+        "_metadata": {"source": "test"},
+        "2160-0": {"snomed_code": "70901006", "snomed_term": "Creatinine measurement"},
+    }
+
     for name, data in [
         ("icd10cm_to_snomed.json", icd_data),
         ("labitem_to_snomed.json", lab_data),
@@ -61,6 +66,7 @@ def synthetic_mapper(tmp_path: Path) -> SnomedMapper:
         ("drug_to_snomed.json", drug_data),
         ("organism_to_snomed.json", org_data),
         ("comorbidity_to_snomed.json", comorbidity_data),
+        ("loinc_to_snomed.json", loinc_data),
     ]:
         (tmp_path / name).write_text(json.dumps(data))
 

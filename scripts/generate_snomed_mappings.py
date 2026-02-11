@@ -264,15 +264,40 @@ def _umls_term_to_snomed(session: requests.Session, term: str, api_key: str):
                     else:
                         sctid = sc_uri
                     return {"snomed_code": sctid, "snomed_term": atom.get("name", "")}
-            # Fallback: use the CUI search result name
-            return {"snomed_code": cui, "snomed_term": results[0].get("name", "")}
+            # No SNOMEDCT_US atom found — do NOT store the CUI as a SNOMED code
+            return None
         except Exception:
             pass
     return None
 
 
+def _load_loinc_snomed_map(mappings_dir: Path) -> dict:
+    """Load loinc_to_snomed.json if available, return {loinc_code: {snomed_code, snomed_term}}."""
+    path = mappings_dir / "loinc_to_snomed.json"
+    if not path.exists():
+        logger.warning("  loinc_to_snomed.json not found at %s — LOINC-first lookup disabled", path)
+        return {}
+    with open(path) as f:
+        data = json.load(f)
+    data.pop("_metadata", None)
+    logger.info("  Loaded %d LOINC->SNOMED entries from %s", len(data), path.name)
+    return data
+
+
+def _is_valid_sctid(code: str) -> bool:
+    """Return True if *code* looks like a valid SNOMED SCTID (5-18 digits)."""
+    import re
+    return bool(re.fullmatch(r"\d{5,18}", str(code)))
+
+
 def generate_labitem_to_snomed(api_key: str, output_path: Path):
-    """Generate lab item -> SNOMED mapping via srdc GitHub + UMLS CUI-based lookup."""
+    """Generate lab item -> SNOMED mapping.
+
+    Strategy (LOINC-first):
+      1. Download item→LOINC from srdc GitHub.
+      2. Look up each LOINC code in loinc_to_snomed.json (from RF2 package).
+      3. Fall back to UMLS term search for any remaining unmapped items.
+    """
     logger.info("Generating lab item -> SNOMED mapping...")
 
     # Download labitems-to-loinc.csv from srdc
@@ -291,42 +316,56 @@ def generate_labitem_to_snomed(api_key: str, output_path: Path):
 
     logger.info(f"  Downloaded {len(item_loinc)} lab item -> LOINC mappings from srdc")
 
-    # For each unique lab label, search UMLS for SNOMED concept
-    unique_labels = {}
-    for itemid, info in item_loinc.items():
-        label = info["label"]
-        if label not in unique_labels:
-            unique_labels[label] = []
-        unique_labels[label].append(itemid)
+    # --- Phase 1: LOINC-first lookup via loinc_to_snomed.json ---
+    loinc_snomed = _load_loinc_snomed_map(output_path.parent)
 
-    logger.info(f"  Looking up SNOMED for {len(unique_labels)} unique lab item names...")
-    session = requests.Session()
-    label_to_snomed = {}
-    for i, label in enumerate(unique_labels):
-        result = _umls_term_to_snomed(session, label, api_key)
-        if result:
-            label_to_snomed[label] = result
-        if (i + 1) % 100 == 0:
-            logger.info(f"    Lab SNOMED lookup: {i+1}/{len(unique_labels)} ({len(label_to_snomed)} mapped)")
-
-    logger.info(f"  Mapped {len(label_to_snomed)}/{len(unique_labels)} lab names to SNOMED")
-
-    # Combine: itemid -> LOINC + SNOMED
     mapping = {}
+    unmapped_labels = {}  # label -> [itemid, ...] for UMLS fallback
+
     for itemid, info in item_loinc.items():
-        label = info["label"]
         loinc = info["loinc"]
+        label = info["label"]
         entry = {"loinc": loinc, "label": label}
-        snomed = label_to_snomed.get(label)
-        if snomed:
-            entry["snomed_code"] = snomed["snomed_code"]
-            entry["snomed_term"] = snomed["snomed_term"]
+
+        loinc_entry = loinc_snomed.get(loinc)
+        if loinc_entry and _is_valid_sctid(loinc_entry.get("snomed_code", "")):
+            entry["snomed_code"] = loinc_entry["snomed_code"]
+            entry["snomed_term"] = loinc_entry.get("snomed_term", "")
+        else:
+            # Queue for UMLS fallback
+            if label not in unmapped_labels:
+                unmapped_labels[label] = []
+            unmapped_labels[label].append(itemid)
+
         mapping[itemid] = entry
+
+    loinc_mapped = sum(1 for v in mapping.values() if "snomed_code" in v)
+    logger.info(f"  Phase 1 (LOINC-first): {loinc_mapped}/{len(mapping)} mapped via LOINC->SNOMED")
+
+    # --- Phase 2: UMLS term search fallback for remaining items ---
+    if unmapped_labels and api_key:
+        logger.info(f"  Phase 2: UMLS term search for {len(unmapped_labels)} unique unmapped labels...")
+        session = requests.Session()
+        label_to_snomed = {}
+        for i, label in enumerate(unmapped_labels):
+            result = _umls_term_to_snomed(session, label, api_key)
+            if result and _is_valid_sctid(result.get("snomed_code", "")):
+                label_to_snomed[label] = result
+            if (i + 1) % 100 == 0:
+                logger.info(f"    UMLS lookup: {i+1}/{len(unmapped_labels)} ({len(label_to_snomed)} mapped)")
+
+        logger.info(f"  Phase 2: {len(label_to_snomed)}/{len(unmapped_labels)} labels mapped via UMLS")
+
+        # Apply UMLS results
+        for label, snomed in label_to_snomed.items():
+            for itemid in unmapped_labels[label]:
+                mapping[itemid]["snomed_code"] = snomed["snomed_code"]
+                mapping[itemid]["snomed_term"] = snomed["snomed_term"]
 
     mapped_count = sum(1 for v in mapping.values() if "snomed_code" in v)
     output = {
         "_metadata": {
-            "source": "srdc/mimic-iv-to-fhir labitems-to-loinc.csv + UMLS CUI-based SNOMED lookup",
+            "source": "srdc/mimic-iv-to-fhir labitems-to-loinc.csv + LOINC-SNOMED RF2 + UMLS fallback",
             "generated": time.strftime("%Y-%m-%d"),
             "total_items": len(mapping),
             "snomed_mapped": mapped_count,

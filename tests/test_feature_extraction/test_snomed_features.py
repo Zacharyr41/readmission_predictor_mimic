@@ -45,7 +45,8 @@ def snomed_mapper(tmp_path: Path) -> SnomedMapper:
     (tmp_path / "drug_to_snomed.json").write_text(json.dumps(drug_data))
     # Empty files for other types (needed by mapper)
     for name in ["labitem_to_snomed.json", "chartitem_to_snomed.json",
-                  "organism_to_snomed.json", "comorbidity_to_snomed.json"]:
+                  "organism_to_snomed.json", "comorbidity_to_snomed.json",
+                  "loinc_to_snomed.json"]:
         (tmp_path / name).write_text(json.dumps({"_metadata": {"source": "test"}}))
     return SnomedMapper(tmp_path)
 

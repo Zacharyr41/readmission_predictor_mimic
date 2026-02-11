@@ -42,6 +42,7 @@ class SnomedMapper:
         self._drug: dict | None = None
         self._organism: dict | None = None
         self._comorbidity: dict | None = None
+        self._loinc: dict | None = None
 
     # ---- lazy loaders ----
 
@@ -92,6 +93,12 @@ class SnomedMapper:
             self._comorbidity = self._load("comorbidity_to_snomed.json")
         return self._comorbidity
 
+    @property
+    def _loinc_map(self) -> dict:
+        if self._loinc is None:
+            self._loinc = self._load("loinc_to_snomed.json")
+        return self._loinc
+
     # ---- helpers ----
 
     @staticmethod
@@ -109,12 +116,17 @@ class SnomedMapper:
         return name.strip()
 
     @staticmethod
+    def _is_valid_sctid(code: str) -> bool:
+        """Check that *code* is a plausible SNOMED CT identifier (5-18 digits)."""
+        return bool(re.fullmatch(r"\d{5,18}", str(code)))
+
+    @staticmethod
     def _to_concept(entry: dict | None) -> SnomedConcept | None:
         if entry is None:
             return None
         code = entry.get("snomed_code")
         term = entry.get("snomed_term")
-        if code and term:
+        if code and term and SnomedMapper._is_valid_sctid(code):
             return SnomedConcept(code=str(code), term=str(term))
         return None
 
@@ -174,6 +186,11 @@ class SnomedMapper:
         entry = self._comorbidity_map.get(name.lower().strip())
         return self._to_concept(entry)
 
+    def get_snomed_for_loinc(self, loinc_code: str) -> SnomedConcept | None:
+        """Look up SNOMED concept for a LOINC code (e.g. '2160-0')."""
+        entry = self._loinc_map.get(loinc_code.strip())
+        return self._to_concept(entry)
+
     def coverage_stats(self) -> dict[str, int]:
         """Return count of loaded mappings per category."""
         return {
@@ -183,4 +200,5 @@ class SnomedMapper:
             "drug": len(self._drug_map),
             "organism": len(self._organism_map),
             "comorbidity": len(self._comorbidity_map),
+            "loinc": len(self._loinc_map),
         }

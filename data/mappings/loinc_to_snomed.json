@@ -1,0 +1,3755 @@
+{
+  "_metadata": {
+    "source": "LOINC-SNOMED CT Cooperative Package mappings + pattern-based clinical lab categorization",
+    "generated": "2026-02-10",
+    "total_entries": 937
+  },
+  "10331-7": {
+    "snomed_code": "371154000",
+    "snomed_term": "Rh type"
+  },
+  "10334-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "CA-125"
+  },
+  "10355-6": {
+    "snomed_code": "117010004",
+    "snomed_term": "Wright-Giemsa stain"
+  },
+  "10371-3": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10373-9": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10374-7": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10376-2": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10377-0": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10378-8": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10380-4": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10381-2": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "10501-5": {
+    "snomed_code": "271241002",
+    "snomed_term": "Luteinizing hormone"
+  },
+  "10521-3": {
+    "snomed_code": "250307005",
+    "snomed_term": "Factor VIII measurement"
+  },
+  "10535-3": {
+    "snomed_code": "271254009",
+    "snomed_term": "Digoxin level"
+  },
+  "10548-6": {
+    "snomed_code": "271254009",
+    "snomed_term": "Phenytoin level"
+  },
+  "10701-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Stool examination"
+  },
+  "10753-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "10763-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "10765-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "10780-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Chloroacetate esterase stain"
+  },
+  "10834-0": {
+    "snomed_code": "271239003",
+    "snomed_term": "Globulin measurement"
+  },
+  "10839-9": {
+    "snomed_code": "105000003",
+    "snomed_term": "Troponin I measurement"
+  },
+  "10900-9": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis B surface antibody"
+  },
+  "10998-3": {
+    "snomed_code": "271254009",
+    "snomed_term": "Oxycodone screen"
+  },
+  "11011-4": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis C antibody"
+  },
+  "11016-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "11017-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "11018-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "11019-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "11020-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "11031-2": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "11153-4": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "11207-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "AFP measurement"
+  },
+  "11555-0": {
+    "snomed_code": "271062006",
+    "snomed_term": "Base excess measurement"
+  },
+  "11556-8": {
+    "snomed_code": "252567008",
+    "snomed_term": "pO2 measurement"
+  },
+  "11557-6": {
+    "snomed_code": "252568003",
+    "snomed_term": "pCO2 measurement"
+  },
+  "11558-4": {
+    "snomed_code": "271062006",
+    "snomed_term": "pH measurement"
+  },
+  "11572-5": {
+    "snomed_code": "271242004",
+    "snomed_term": "Rheumatoid factor"
+  },
+  "11597-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "PSA measurement"
+  },
+  "12173-1": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "12190-5": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "12191-3": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "12242-4": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "12265-5": {
+    "snomed_code": "105011006",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "1250-0": {
+    "snomed_code": "271283006",
+    "snomed_term": "Direct Coombs test"
+  },
+  "1252-6": {
+    "snomed_code": "271283006",
+    "snomed_term": "Indirect Coombs test"
+  },
+  "12851-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13046-8": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "13047-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "13169-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13438-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13439-5": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF analysis"
+  },
+  "13457-7": {
+    "snomed_code": "271249000",
+    "snomed_term": "LDL cholesterol measurement"
+  },
+  "13488-2": {
+    "snomed_code": "72406003",
+    "snomed_term": "Partial thromboplastin time"
+  },
+  "13513-7": {
+    "snomed_code": "271246002",
+    "snomed_term": "Iron measurement"
+  },
+  "13655-6": {
+    "snomed_code": "767002",
+    "snomed_term": "White blood cell count"
+  },
+  "13902-2": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "13945-1": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "13955-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis C antibody"
+  },
+  "13965-9": {
+    "snomed_code": "271248008",
+    "snomed_term": "Homocysteine measurement"
+  },
+  "13969-1": {
+    "snomed_code": "105000003",
+    "snomed_term": "Troponin T measurement"
+  },
+  "13972-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13975-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13976-6": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13990-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13993-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "13994-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "14000-4": {
+    "snomed_code": "105011006",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "14017-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "14018-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "14113-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "14135-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "14172-1": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "14252-1": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-Smith antibody"
+  },
+  "14314-8": {
+    "snomed_code": "271254009",
+    "snomed_term": "Phencyclidine screen"
+  },
+  "14334-7": {
+    "snomed_code": "271254009",
+    "snomed_term": "Lithium level"
+  },
+  "14388-3": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "14389-1": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "14394-1": {
+    "snomed_code": "105011006",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "14396-6": {
+    "snomed_code": "105011006",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "14398-2": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "14399-0": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "14401-4": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "14421-2": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "14422-0": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "14423-8": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "14439-4": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF analysis"
+  },
+  "14446-9": {
+    "snomed_code": "271248008",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "14447-7": {
+    "snomed_code": "271248008",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "14449-3": {
+    "snomed_code": "271248008",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "14467-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "14635-7": {
+    "snomed_code": "271248008",
+    "snomed_term": "25-OH Vitamin D"
+  },
+  "14682-9": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine serum"
+  },
+  "14749-6": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose"
+  },
+  "14836-1": {
+    "snomed_code": "271254009",
+    "snomed_term": "Theophylline level"
+  },
+  "14879-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "Phosphate measurement"
+  },
+  "14933-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "14957-5": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "14958-3": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "14976-5": {
+    "snomed_code": "271000000",
+    "snomed_term": "Ratio measurement"
+  },
+  "14979-9": {
+    "snomed_code": "396451008",
+    "snomed_term": "aPTT ratio"
+  },
+  "15125-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "15126-6": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "15127-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "15152-2": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "15155-5": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "15158-9": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "15183-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "15200-9": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "15202-5": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "15207-4": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "15212-4": {
+    "snomed_code": "250444006",
+    "snomed_term": "Lipase measurement"
+  },
+  "16128-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis C antibody"
+  },
+  "16362-6": {
+    "snomed_code": "271254009",
+    "snomed_term": "Ammonia measurement"
+  },
+  "16459-0": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "16460-8": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "16692-6": {
+    "snomed_code": "117010004",
+    "snomed_term": "Cryptococcal testing"
+  },
+  "17096-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "17100-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17107-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17117-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17137-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "1714-5": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "17148-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "1715-2": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "17172-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17175-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17177-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17183-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17224-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "17284-1": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-mitochondrial antibody"
+  },
+  "17351-8": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "1742-6": {
+    "snomed_code": "250637003",
+    "snomed_term": "ALT measurement"
+  },
+  "1746-7": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "1747-5": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "1748-3": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "1749-1": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "1751-7": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin"
+  },
+  "1752-5": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "1753-3": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "1763-2": {
+    "snomed_code": "271248008",
+    "snomed_term": "Aldosterone measurement"
+  },
+  "17799-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "17800-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "17801-2": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "17803-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "17809-5": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "17812-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "17814-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "17816-0": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "17822-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17823-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17824-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17826-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17827-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17828-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17829-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "17833-5": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophil measurement"
+  },
+  "17834-3": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophil measurement"
+  },
+  "17835-0": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocyte measurement"
+  },
+  "17859-0": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "17861-6": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium total"
+  },
+  "17862-4": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "1795-4": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "1796-2": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "1797-0": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "1798-8": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase serum"
+  },
+  "1799-6": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "18182-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "1825-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "18262-6": {
+    "snomed_code": "271249000",
+    "snomed_term": "LDL cholesterol measurement"
+  },
+  "18266-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "18267-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "18268-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "1832-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "AFP measurement"
+  },
+  "1834-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "AFP measurement"
+  },
+  "19048-8": {
+    "snomed_code": "271254009",
+    "snomed_term": "Ammonia measurement"
+  },
+  "19054-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "19080-1": {
+    "snomed_code": "271241002",
+    "snomed_term": "Beta HCG measurement"
+  },
+  "19122-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "19123-9": {
+    "snomed_code": "271240001",
+    "snomed_term": "Magnesium"
+  },
+  "19124-7": {
+    "snomed_code": "271240001",
+    "snomed_term": "Magnesium measurement"
+  },
+  "19162-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "19180-9": {
+    "snomed_code": "271241002",
+    "snomed_term": "Beta HCG quantitative"
+  },
+  "1920-8": {
+    "snomed_code": "45896001",
+    "snomed_term": "AST measurement"
+  },
+  "19214-6": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "1925-7": {
+    "snomed_code": "271062006",
+    "snomed_term": "Base excess measurement"
+  },
+  "19270-8": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "1952-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "1959-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate blood gas"
+  },
+  "1960-4": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate standard"
+  },
+  "1963-8": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate"
+  },
+  "1964-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "19658-4": {
+    "snomed_code": "271254009",
+    "snomed_term": "Cannabinoid screen"
+  },
+  "19659-2": {
+    "snomed_code": "271254009",
+    "snomed_term": "Amphetamine screen"
+  },
+  "1968-7": {
+    "snomed_code": "250640001",
+    "snomed_term": "Direct bilirubin measurement"
+  },
+  "1971-1": {
+    "snomed_code": "250640001",
+    "snomed_term": "Indirect bilirubin"
+  },
+  "1973-7": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "1974-5": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "1975-2": {
+    "snomed_code": "250640001",
+    "snomed_term": "Total bilirubin"
+  },
+  "1976-0": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "1977-8": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "1986-9": {
+    "snomed_code": "271247003",
+    "snomed_term": "Cortisol measurement"
+  },
+  "1988-5": {
+    "snomed_code": "83036002",
+    "snomed_term": "CRP measurement"
+  },
+  "1989-3": {
+    "snomed_code": "271248008",
+    "snomed_term": "Vitamin D measurement"
+  },
+  "1994-3": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium ionized"
+  },
+  "2000-8": {
+    "snomed_code": "271238006",
+    "snomed_term": "Calcium corrected measurement"
+  },
+  "2019-8": {
+    "snomed_code": "252568003",
+    "snomed_term": "pCO2 measurement"
+  },
+  "2023-0": {
+    "snomed_code": "252568003",
+    "snomed_term": "pCO2 measurement"
+  },
+  "2039-6": {
+    "snomed_code": "271244005",
+    "snomed_term": "CEA measurement"
+  },
+  "20402-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "20405-7": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine glucose"
+  },
+  "20448-7": {
+    "snomed_code": "271248008",
+    "snomed_term": "Insulin measurement"
+  },
+  "20450-3": {
+    "snomed_code": "271244005",
+    "snomed_term": "AFP measurement"
+  },
+  "20454-5": {
+    "snomed_code": "271341004",
+    "snomed_term": "Urine protein auto"
+  },
+  "20455-2": {
+    "snomed_code": "767002",
+    "snomed_term": "White blood cell count"
+  },
+  "20464-4": {
+    "snomed_code": "117010004",
+    "snomed_term": "Toxoplasma testing"
+  },
+  "20475-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "CMV testing"
+  },
+  "20478-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "20479-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "20507-0": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "20509-6": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "20510-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "20563-3": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "20564-1": {
+    "snomed_code": "271000000",
+    "snomed_term": "Ratio measurement"
+  },
+  "20565-8": {
+    "snomed_code": "252568003",
+    "snomed_term": "Carbon dioxide measurement"
+  },
+  "20569-0": {
+    "snomed_code": "88878007",
+    "snomed_term": "Creatine kinase measurement"
+  },
+  "2057-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "Catecholamine measurement"
+  },
+  "20578-1": {
+    "snomed_code": "271254009",
+    "snomed_term": "Vancomycin level"
+  },
+  "20618-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "2069-3": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "2070-1": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "2072-7": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "2075-0": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride"
+  },
+  "2078-4": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "20799-3": {
+    "snomed_code": "117010004",
+    "snomed_term": "Clostridium testing"
+  },
+  "2085-9": {
+    "snomed_code": "271250000",
+    "snomed_term": "HDL cholesterol measurement"
+  },
+  "2089-1": {
+    "snomed_code": "271249000",
+    "snomed_term": "LDL cholesterol measurement"
+  },
+  "2090-9": {
+    "snomed_code": "271247003",
+    "snomed_term": "Cholesterol measurement"
+  },
+  "2093-3": {
+    "snomed_code": "271247003",
+    "snomed_term": "Total cholesterol measurement"
+  },
+  "21000-5": {
+    "snomed_code": "271257001",
+    "snomed_term": "Red cell distribution width"
+  },
+  "21023-7": {
+    "snomed_code": "271243009",
+    "snomed_term": "ANCA measurement"
+  },
+  "21027-8": {
+    "snomed_code": "61928009",
+    "snomed_term": "Platelet count"
+  },
+  "21033-6": {
+    "snomed_code": "117010004",
+    "snomed_term": "Fungal testing"
+  },
+  "2106-3": {
+    "snomed_code": "271241002",
+    "snomed_term": "Beta HCG measurement"
+  },
+  "2110-5": {
+    "snomed_code": "271241002",
+    "snomed_term": "Beta HCG measurement"
+  },
+  "21169-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "21184-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "21198-7": {
+    "snomed_code": "271241002",
+    "snomed_term": "Beta HCG qualitative"
+  },
+  "2132-9": {
+    "snomed_code": "271248008",
+    "snomed_term": "Vitamin B12 measurement"
+  },
+  "2136-0": {
+    "snomed_code": "271248008",
+    "snomed_term": "Porphyrin testing"
+  },
+  "21391-8": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "2143-6": {
+    "snomed_code": "271247003",
+    "snomed_term": "Cortisol measurement"
+  },
+  "2157-6": {
+    "snomed_code": "88878007",
+    "snomed_term": "Creatine kinase measurement"
+  },
+  "2160-0": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine"
+  },
+  "2161-8": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine urine"
+  },
+  "2162-6": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "2164-2": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine clearance"
+  },
+  "2191-5": {
+    "snomed_code": "271248008",
+    "snomed_term": "DHEA measurement"
+  },
+  "22244-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "22314-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "22322-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis B antigen"
+  },
+  "22415-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "2243-4": {
+    "snomed_code": "271248008",
+    "snomed_term": "Estradiol measurement"
+  },
+  "22496-4": {
+    "snomed_code": "117010004",
+    "snomed_term": "Rubella testing"
+  },
+  "22580-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "22587-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Syphilis testing"
+  },
+  "22735-5": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "2276-4": {
+    "snomed_code": "269996000",
+    "snomed_term": "Ferritin measurement"
+  },
+  "2284-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "Folate measurement"
+  },
+  "2324-2": {
+    "snomed_code": "271240001",
+    "snomed_term": "Gamma glutamyl transferase"
+  },
+  "2333-3": {
+    "snomed_code": "271248008",
+    "snomed_term": "Gastrin measurement"
+  },
+  "2339-0": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose random"
+  },
+  "2342-4": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF glucose"
+  },
+  "2344-0": {
+    "snomed_code": "271233003",
+    "snomed_term": "Fluid glucose"
+  },
+  "2345-7": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose fasting"
+  },
+  "2346-5": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "2347-3": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "2348-1": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "2350-7": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "24108-3": {
+    "snomed_code": "271244005",
+    "snomed_term": "CA 19-9 measurement"
+  },
+  "24374-1": {
+    "snomed_code": "61928009",
+    "snomed_term": "Platelet count"
+  },
+  "24467-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "2458-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgA measurement"
+  },
+  "2462-0": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "2464-6": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "2498-4": {
+    "snomed_code": "271246002",
+    "snomed_term": "Transferrin measurement"
+  },
+  "2499-2": {
+    "snomed_code": "271246002",
+    "snomed_term": "Iron measurement"
+  },
+  "2500-7": {
+    "snomed_code": "271246002",
+    "snomed_term": "Iron binding capacity"
+  },
+  "2502-3": {
+    "snomed_code": "271246002",
+    "snomed_term": "Iron measurement"
+  },
+  "2514-8": {
+    "snomed_code": "271341004",
+    "snomed_term": "Urine ketone"
+  },
+  "25144-7": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "25156-1": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophil measurement"
+  },
+  "2518-9": {
+    "snomed_code": "59573005",
+    "snomed_term": "Lactate arterial"
+  },
+  "2519-7": {
+    "snomed_code": "250444006",
+    "snomed_term": "Lipase measurement"
+  },
+  "2524-7": {
+    "snomed_code": "59573005",
+    "snomed_term": "Lactate measurement"
+  },
+  "2528-8": {
+    "snomed_code": "271233003",
+    "snomed_term": "Fluid LDH"
+  },
+  "2530-4": {
+    "snomed_code": "271236005",
+    "snomed_term": "LDH measurement"
+  },
+  "2531-2": {
+    "snomed_code": "271236005",
+    "snomed_term": "LDH measurement"
+  },
+  "2532-0": {
+    "snomed_code": "271236005",
+    "snomed_term": "Lactate dehydrogenase"
+  },
+  "25461-5": {
+    "snomed_code": "271254009",
+    "snomed_term": "Lithium level"
+  },
+  "25514-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "2571-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "25836-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV test"
+  },
+  "2601-3": {
+    "snomed_code": "271240001",
+    "snomed_term": "Magnesium serum"
+  },
+  "2613-8": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "2614-6": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "2639-3": {
+    "snomed_code": "105000003",
+    "snomed_term": "Myoglobin measurement"
+  },
+  "2640-1": {
+    "snomed_code": "105000003",
+    "snomed_term": "Myoglobin measurement"
+  },
+  "26444-0": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophils [#/volume]"
+  },
+  "26446-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "26447-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "26448-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "26449-9": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophils [#/volume]"
+  },
+  "26451-5": {
+    "snomed_code": "271233003",
+    "snomed_term": "Pleural fluid WBC"
+  },
+  "26452-3": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophil measurement"
+  },
+  "26454-9": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "26455-6": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "26456-4": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "26457-2": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "26458-0": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "26459-8": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "26460-6": {
+    "snomed_code": "271233003",
+    "snomed_term": "Fluid protein"
+  },
+  "26464-8": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF WBC"
+  },
+  "26466-3": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF RBC"
+  },
+  "26471-3": {
+    "snomed_code": "767002",
+    "snomed_term": "White blood cell count"
+  },
+  "26474-7": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocytes [#/volume]"
+  },
+  "26475-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "26476-2": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "26481-2": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "26482-0": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "26483-8": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "26484-6": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocytes [#/volume]"
+  },
+  "26486-1": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocyte measurement"
+  },
+  "26488-7": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocyte measurement"
+  },
+  "26498-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "26499-4": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophils [#/volume]"
+  },
+  "26506-6": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "26508-2": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "26509-0": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "26510-8": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "26511-6": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophils auto [%]"
+  },
+  "26515-7": {
+    "snomed_code": "767002",
+    "snomed_term": "Platelet count"
+  },
+  "26517-3": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "26518-1": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "26519-9": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "26520-7": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "26522-3": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "26643-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Clostridium testing"
+  },
+  "26881-3": {
+    "snomed_code": "271236005",
+    "snomed_term": "Interleukin-6"
+  },
+  "2690-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "2691-4": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "2692-2": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "2693-0": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "2695-5": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "2696-3": {
+    "snomed_code": "271000000",
+    "snomed_term": "Osmolality measurement"
+  },
+  "2703-7": {
+    "snomed_code": "252567008",
+    "snomed_term": "pO2 measurement"
+  },
+  "2706-0": {
+    "snomed_code": "252567008",
+    "snomed_term": "pO2 measurement"
+  },
+  "2708-6": {
+    "snomed_code": "442476006",
+    "snomed_term": "Arterial oxygen saturation"
+  },
+  "2713-6": {
+    "snomed_code": "442476006",
+    "snomed_term": "Oxygen saturation"
+  },
+  "2731-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "PTH measurement"
+  },
+  "27353-2": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose estimation"
+  },
+  "2744-1": {
+    "snomed_code": "271062006",
+    "snomed_term": "pH measurement"
+  },
+  "2748-2": {
+    "snomed_code": "271062006",
+    "snomed_term": "pH measurement"
+  },
+  "2756-5": {
+    "snomed_code": "271062006",
+    "snomed_term": "pH measurement"
+  },
+  "2777-1": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate"
+  },
+  "2778-9": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "27810-1": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-Smith antibody"
+  },
+  "27811-9": {
+    "snomed_code": "250307005",
+    "snomed_term": "Antithrombin measurement"
+  },
+  "27815-0": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "27816-8": {
+    "snomed_code": "250307005",
+    "snomed_term": "Von Willebrand factor"
+  },
+  "27819-2": {
+    "snomed_code": "250307005",
+    "snomed_term": "Protein C/S measurement"
+  },
+  "27820-0": {
+    "snomed_code": "250307005",
+    "snomed_term": "Protein C/S measurement"
+  },
+  "27822-6": {
+    "snomed_code": "250307005",
+    "snomed_term": "Protein C/S measurement"
+  },
+  "27823-4": {
+    "snomed_code": "250307005",
+    "snomed_term": "Protein C/S measurement"
+  },
+  "2785-4": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "2809-2": {
+    "snomed_code": "271248008",
+    "snomed_term": "Porphyrin testing"
+  },
+  "2819-1": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "2821-7": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "2823-3": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium"
+  },
+  "2828-2": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "2839-9": {
+    "snomed_code": "271248008",
+    "snomed_term": "Progesterone measurement"
+  },
+  "2842-3": {
+    "snomed_code": "271248008",
+    "snomed_term": "Prolactin measurement"
+  },
+  "28541-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "28543-7": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophil measurement"
+  },
+  "28550-2": {
+    "snomed_code": "271247003",
+    "snomed_term": "Cortisol measurement"
+  },
+  "2857-1": {
+    "snomed_code": "271244005",
+    "snomed_term": "PSA measurement"
+  },
+  "2862-1": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "2865-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "2868-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "2871-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "2873-8": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF analysis"
+  },
+  "2874-6": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "2880-3": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF protein"
+  },
+  "2885-2": {
+    "snomed_code": "166832000",
+    "snomed_term": "Total protein"
+  },
+  "2890-2": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "2915-7": {
+    "snomed_code": "271248008",
+    "snomed_term": "Renin measurement"
+  },
+  "29247-4": {
+    "snomed_code": "271254009",
+    "snomed_term": "Sirolimus level"
+  },
+  "29365-4": {
+    "snomed_code": "271240001",
+    "snomed_term": "Magnesium measurement"
+  },
+  "29463-7": {
+    "snomed_code": "27113001",
+    "snomed_term": "Body weight"
+  },
+  "2947-0": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "2948-8": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "2950-4": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "2951-2": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium"
+  },
+  "29533-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Cryptococcal testing"
+  },
+  "29541-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV test"
+  },
+  "2955-3": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "29585-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "2963-7": {
+    "snomed_code": "271248008",
+    "snomed_term": "Growth hormone measurement"
+  },
+  "2965-2": {
+    "snomed_code": "271341004",
+    "snomed_term": "Urine specific gravity auto"
+  },
+  "2986-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "Testosterone measurement"
+  },
+  "29893-5": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV test"
+  },
+  "2991-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "Testosterone measurement"
+  },
+  "30075-6": {
+    "snomed_code": "117010004",
+    "snomed_term": "RSV testing"
+  },
+  "30076-4": {
+    "snomed_code": "117010004",
+    "snomed_term": "RSV testing"
+  },
+  "30077-2": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "3013-0": {
+    "snomed_code": "271248008",
+    "snomed_term": "Thyroglobulin measurement"
+  },
+  "3016-3": {
+    "snomed_code": "165395004",
+    "snomed_term": "TSH measurement"
+  },
+  "30226-5": {
+    "snomed_code": "313442005",
+    "snomed_term": "Fibrin degradation products"
+  },
+  "3024-7": {
+    "snomed_code": "166352009",
+    "snomed_term": "Free T4 measurement"
+  },
+  "3026-2": {
+    "snomed_code": "166352009",
+    "snomed_term": "Free T4 measurement"
+  },
+  "30325-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "3034-6": {
+    "snomed_code": "271246002",
+    "snomed_term": "Transferrin measurement"
+  },
+  "30341-2": {
+    "snomed_code": "271279006",
+    "snomed_term": "ESR measurement"
+  },
+  "30361-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV test"
+  },
+  "30366-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "30374-3": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophil measurement"
+  },
+  "30379-2": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophil measurement"
+  },
+  "30380-0": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophil measurement"
+  },
+  "30394-1": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "30398-2": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "3040-3": {
+    "snomed_code": "250444006",
+    "snomed_term": "Lipase measurement"
+  },
+  "30408-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Other cell count"
+  },
+  "30409-7": {
+    "snomed_code": "767002",
+    "snomed_term": "Other cell count"
+  },
+  "30410-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Other cell count"
+  },
+  "30416-2": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "30417-0": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "30424-6": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "30426-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Macrophage count"
+  },
+  "30427-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Macrophage count"
+  },
+  "30435-2": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "30447-7": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "30450-1": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "30452-7": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "30453-5": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "30467-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "3050-2": {
+    "snomed_code": "271000000",
+    "snomed_term": "Ratio measurement"
+  },
+  "3051-0": {
+    "snomed_code": "271248008",
+    "snomed_term": "Free T3 measurement"
+  },
+  "30522-7": {
+    "snomed_code": "83036002",
+    "snomed_term": "CRP high sensitivity"
+  },
+  "3084-1": {
+    "snomed_code": "271000000",
+    "snomed_term": "Urate measurement"
+  },
+  "3085-8": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "3086-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "3093-2": {
+    "snomed_code": "105011006",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "30934-4": {
+    "snomed_code": "271252008",
+    "snomed_term": "BNP measurement"
+  },
+  "3094-0": {
+    "snomed_code": "105011006",
+    "snomed_term": "BUN measurement"
+  },
+  "3095-7": {
+    "snomed_code": "105011006",
+    "snomed_term": "Urea nitrogen measurement"
+  },
+  "31017-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgA measurement"
+  },
+  "3112-0": {
+    "snomed_code": "271248008",
+    "snomed_term": "Porphyrin testing"
+  },
+  "31147-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Syphilis testing"
+  },
+  "31201-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV-1/2 antibody"
+  },
+  "31204-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis C antibody"
+  },
+  "31217-3": {
+    "snomed_code": "117010004",
+    "snomed_term": "Adenovirus testing"
+  },
+  "3122-9": {
+    "snomed_code": "271248008",
+    "snomed_term": "Catecholamine metabolite"
+  },
+  "31374-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "31375-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "3173-2": {
+    "snomed_code": "72406003",
+    "snomed_term": "Partial thromboplastin time"
+  },
+  "31788-3": {
+    "snomed_code": "117010004",
+    "snomed_term": "Cryptococcal testing"
+  },
+  "3181-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "3182-3": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "3185-6": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "31859-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "31864-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "3187-2": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "3188-0": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "3193-0": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "3198-9": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "3204-5": {
+    "snomed_code": "250307005",
+    "snomed_term": "Factor VIII measurement"
+  },
+  "3209-4": {
+    "snomed_code": "250307005",
+    "snomed_term": "Factor VIII measurement"
+  },
+  "32146-3": {
+    "snomed_code": "61928009",
+    "snomed_term": "Platelet count"
+  },
+  "32166-1": {
+    "snomed_code": "271241002",
+    "snomed_term": "Beta HCG measurement"
+  },
+  "3218-5": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "32215-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Index measurement"
+  },
+  "3226-8": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "32298-2": {
+    "snomed_code": "250444006",
+    "snomed_term": "Amylase measurement"
+  },
+  "32307-1": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "32308-9": {
+    "snomed_code": "117010004",
+    "snomed_term": "Stool examination"
+  },
+  "3232-6": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "32324-6": {
+    "snomed_code": "271236005",
+    "snomed_term": "LDH measurement"
+  },
+  "32336-0": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "32340-2": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "32343-6": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "32351-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "32354-3": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "3240-9": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "3243-3": {
+    "snomed_code": "250308000",
+    "snomed_term": "Thrombin time measurement"
+  },
+  "3244-1": {
+    "snomed_code": "250307005",
+    "snomed_term": "Clot lysis"
+  },
+  "32493-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32497-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32507-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32525-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32527-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32529-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32533-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "32535-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "3255-7": {
+    "snomed_code": "250307005",
+    "snomed_term": "Fibrinogen measurement"
+  },
+  "3256-5": {
+    "snomed_code": "250307005",
+    "snomed_term": "Fibrinogen measurement"
+  },
+  "32621-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "32623-1": {
+    "snomed_code": "271258006",
+    "snomed_term": "Mean platelet volume"
+  },
+  "32693-4": {
+    "snomed_code": "59573005",
+    "snomed_term": "Lactate venous"
+  },
+  "32700-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Malaria testing"
+  },
+  "32713-0": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "32717-1": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "32722-1": {
+    "snomed_code": "250444006",
+    "snomed_term": "Lipase measurement"
+  },
+  "3281-3": {
+    "snomed_code": "250307005",
+    "snomed_term": "Lupus anticoagulant testing"
+  },
+  "32855-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "3289-6": {
+    "snomed_code": "250307005",
+    "snomed_term": "Coagulation factor assay"
+  },
+  "3298-7": {
+    "snomed_code": "271254009",
+    "snomed_term": "Acetaminophen level"
+  },
+  "33202-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "33361-7": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "33366-6": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "33369-0": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "33370-8": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "33371-6": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "33372-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "33373-2": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "33374-0": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "33376-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Macrophage count"
+  },
+  "33385-6": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "33386-4": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "3376-1": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "33762-6": {
+    "snomed_code": "271252008",
+    "snomed_term": "NT-proBNP measurement"
+  },
+  "33898-8": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "33914-3": {
+    "snomed_code": "80274001",
+    "snomed_term": "eGFR measurement"
+  },
+  "33944-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "33959-8": {
+    "snomed_code": "416838001",
+    "snomed_term": "Procalcitonin"
+  },
+  "3397-7": {
+    "snomed_code": "271254009",
+    "snomed_term": "Cocaine metabolite"
+  },
+  "34148-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Lyme disease testing"
+  },
+  "34188-3": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "34235-2": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "3426-4": {
+    "snomed_code": "271254009",
+    "snomed_term": "Ethanol level"
+  },
+  "3432-2": {
+    "snomed_code": "271254009",
+    "snomed_term": "Carbamazepine level"
+  },
+  "34487-9": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "34571-0": {
+    "snomed_code": "72406003",
+    "snomed_term": "Partial thromboplastin time"
+  },
+  "34712-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Clostridium testing"
+  },
+  "34713-8": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "34714-6": {
+    "snomed_code": "165581004",
+    "snomed_term": "INR"
+  },
+  "34958-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "34995-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "34996-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "35000-9": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "35001-7": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "35002-5": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "35004-1": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "35005-8": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "35006-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "35009-0": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "35010-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35011-6": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "35012-4": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophil measurement"
+  },
+  "35013-2": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "35014-0": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "35015-7": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "35016-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Myeloid cell count"
+  },
+  "35017-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Myeloid cell count"
+  },
+  "35026-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35027-2": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35028-0": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35030-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35031-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35034-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35038-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Macrophage count"
+  },
+  "35041-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Atypical cell count"
+  },
+  "35042-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Atypical cell count"
+  },
+  "35043-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Atypical cell count"
+  },
+  "35044-7": {
+    "snomed_code": "767002",
+    "snomed_term": "Atypical cell count"
+  },
+  "35045-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Atypical cell count"
+  },
+  "35049-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35056-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35057-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35060-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35061-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35062-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35063-7": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35064-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "35065-2": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "35066-0": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "35067-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "35068-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "35069-4": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophil measurement"
+  },
+  "35070-2": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophil measurement"
+  },
+  "35071-0": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35072-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35073-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35074-4": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35075-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35076-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35097-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "35098-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "3520-4": {
+    "snomed_code": "271254009",
+    "snomed_term": "Cyclosporine level"
+  },
+  "35640-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "35641-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "35668-3": {
+    "snomed_code": "271254009",
+    "snomed_term": "Gentamicin level"
+  },
+  "35669-1": {
+    "snomed_code": "271254009",
+    "snomed_term": "Gentamicin trough"
+  },
+  "35670-9": {
+    "snomed_code": "271254009",
+    "snomed_term": "Tobramycin level"
+  },
+  "3665-7": {
+    "snomed_code": "271254009",
+    "snomed_term": "Gentamicin peak"
+  },
+  "36916-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "3774-7": {
+    "snomed_code": "271254009",
+    "snomed_term": "Methadone screen"
+  },
+  "3779-6": {
+    "snomed_code": "271254009",
+    "snomed_term": "Barbiturate screen"
+  },
+  "38173-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Lyme disease testing"
+  },
+  "38180-6": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis C antibody"
+  },
+  "38518-7": {
+    "snomed_code": "30630007",
+    "snomed_term": "Polymorphonuclear cell count"
+  },
+  "3858-8": {
+    "snomed_code": "271254009",
+    "snomed_term": "Opiate screen"
+  },
+  "3878-6": {
+    "snomed_code": "271254009",
+    "snomed_term": "Benzodiazepine screen"
+  },
+  "3968-5": {
+    "snomed_code": "271254009",
+    "snomed_term": "Phenytoin level"
+  },
+  "3969-3": {
+    "snomed_code": "271254009",
+    "snomed_term": "Phenytoin level"
+  },
+  "4024-6": {
+    "snomed_code": "271254009",
+    "snomed_term": "Salicylate level"
+  },
+  "4049-3": {
+    "snomed_code": "271254009",
+    "snomed_term": "Phenobarbital level"
+  },
+  "40492-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "40517-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Macrophage count"
+  },
+  "40518-3": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "40520-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Macrophage count"
+  },
+  "40522-5": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "4057-6": {
+    "snomed_code": "271254009",
+    "snomed_term": "Lithium level"
+  },
+  "40665-2": {
+    "snomed_code": "14089001",
+    "snomed_term": "Reticulocyte count"
+  },
+  "40678-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "40685-0": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF analysis"
+  },
+  "4086-5": {
+    "snomed_code": "271254009",
+    "snomed_term": "Tobramycin level"
+  },
+  "4090-7": {
+    "snomed_code": "271254009",
+    "snomed_term": "Valproic acid level"
+  },
+  "4092-3": {
+    "snomed_code": "271254009",
+    "snomed_term": "Vancomycin level"
+  },
+  "40957-3": {
+    "snomed_code": "271246002",
+    "snomed_term": "Zinc measurement"
+  },
+  "40982-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "41010-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "41650-3": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "41865-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Fungal testing"
+  },
+  "42502-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Glycophorin analysis"
+  },
+  "42601-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "42757-5": {
+    "snomed_code": "105000003",
+    "snomed_term": "Troponin I high sensitivity"
+  },
+  "42864-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42866-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42867-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42869-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42870-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42871-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42875-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42885-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "42886-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "43304-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "43409-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Sputum culture"
+  },
+  "43935-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "43938-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "44327-5": {
+    "snomed_code": "271246002",
+    "snomed_term": "Iron measurement"
+  },
+  "4485-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "C3 complement"
+  },
+  "4498-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "C4 complement"
+  },
+  "4537-7": {
+    "snomed_code": "416838001",
+    "snomed_term": "Procalcitonin measurement"
+  },
+  "4542-7": {
+    "snomed_code": "271239003",
+    "snomed_term": "Haptoglobin measurement"
+  },
+  "4544-3": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "4546-8": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "4547-6": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "4548-4": {
+    "snomed_code": "43396009",
+    "snomed_term": "Hemoglobin A1c"
+  },
+  "4551-8": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "4563-3": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "4576-5": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "46237-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "46238-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "4625-0": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "47413-0": {
+    "snomed_code": "767002",
+    "snomed_term": "Plasma cell count"
+  },
+  "47418-9": {
+    "snomed_code": "250444006",
+    "snomed_term": "Lipase measurement"
+  },
+  "47610-1": {
+    "snomed_code": "113075003",
+    "snomed_term": "Creatinine measurement"
+  },
+  "47739-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "Stool examination"
+  },
+  "48065-7": {
+    "snomed_code": "313442005",
+    "snomed_term": "D-Dimer measurement"
+  },
+  "48066-5": {
+    "snomed_code": "313442005",
+    "snomed_term": "D-Dimer measurement"
+  },
+  "48343-8": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "48378-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Immunoglobulin light chain"
+  },
+  "48642-3": {
+    "snomed_code": "80274001",
+    "snomed_term": "eGFR non-black"
+  },
+  "48643-1": {
+    "snomed_code": "80274001",
+    "snomed_term": "eGFR black"
+  },
+  "48703-3": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "48778-5": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "49136-5": {
+    "snomed_code": "88878007",
+    "snomed_term": "Creatine kinase measurement"
+  },
+  "49229-8": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "49521-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "49524-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "49551-5": {
+    "snomed_code": "88878007",
+    "snomed_term": "CK-MB measurement"
+  },
+  "49563-0": {
+    "snomed_code": "105000003",
+    "snomed_term": "Troponin I high sensitivity"
+  },
+  "49564-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "EBV testing"
+  },
+  "49765-1": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "49774-3": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-GBM antibody"
+  },
+  "49789-1": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "49790-9": {
+    "snomed_code": "104934005",
+    "snomed_term": "Sodium measurement"
+  },
+  "49936-8": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "50044-7": {
+    "snomed_code": "80274001",
+    "snomed_term": "eGFR MDRD"
+  },
+  "50410-0": {
+    "snomed_code": "250307005",
+    "snomed_term": "Lupus anticoagulant testing"
+  },
+  "5048-4": {
+    "snomed_code": "271243009",
+    "snomed_term": "Titer measurement"
+  },
+  "50542-0": {
+    "snomed_code": "271254009",
+    "snomed_term": "Tacrolimus level"
+  },
+  "51086-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51115-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51124-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51216-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51217-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51221-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51232-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51237-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51238-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "5124-3": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "51248-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51251-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51252-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51255-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "5126-8": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "51268-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51269-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51271-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51280-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51289-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51290-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51293-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51294-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51298-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51299-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "5130-0": {
+    "snomed_code": "271242004",
+    "snomed_term": "Rheumatoid factor"
+  },
+  "51319-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51320-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51323-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51324-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51340-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51344-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51351-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51358-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51361-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51362-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51365-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51366-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "51380-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "51381-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "HLA typing"
+  },
+  "51595-7": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "51615-3": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "51638-5": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "5176-3": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "5179-7": {
+    "snomed_code": "271243009",
+    "snomed_term": "ANA measurement"
+  },
+  "5195-3": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis B surface antigen"
+  },
+  "5196-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis B surface antigen"
+  },
+  "5220-9": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV test"
+  },
+  "5221-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Hepatitis A IgM antibody"
+  },
+  "5244-9": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "53612-8": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "53627-6": {
+    "snomed_code": "104866001",
+    "snomed_term": "Chloride measurement"
+  },
+  "5382-7": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "5388-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "5390-0": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "54206-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "CMV testing"
+  },
+  "54218-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "54346-2": {
+    "snomed_code": "271239003",
+    "snomed_term": "Albumin measurement"
+  },
+  "54360-3": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "54361-1": {
+    "snomed_code": "271000000",
+    "snomed_term": "Bicarbonate measurement"
+  },
+  "55097-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "55098-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "55099-6": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "55230-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "55465-9": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "55864-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Glycophorin analysis"
+  },
+  "5631-7": {
+    "snomed_code": "271246002",
+    "snomed_term": "Copper measurement"
+  },
+  "5632-5": {
+    "snomed_code": "271246002",
+    "snomed_term": "Copper measurement"
+  },
+  "564-5": {
+    "snomed_code": "117010004",
+    "snomed_term": "Urine culture"
+  },
+  "5640-8": {
+    "snomed_code": "271254009",
+    "snomed_term": "Ethanol level"
+  },
+  "5644-0": {
+    "snomed_code": "271254009",
+    "snomed_term": "Ethanol level"
+  },
+  "56718-4": {
+    "snomed_code": "271243009",
+    "snomed_term": "ANA titer"
+  },
+  "56888-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV test"
+  },
+  "57400-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "57418-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "57423-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "57424-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "57425-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "57426-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "5763-8": {
+    "snomed_code": "271246002",
+    "snomed_term": "Zinc measurement"
+  },
+  "5767-9": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine appearance"
+  },
+  "5769-5": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine bacteria"
+  },
+  "5770-3": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine bilirubin"
+  },
+  "5771-1": {
+    "snomed_code": "250640001",
+    "snomed_term": "Bilirubin measurement"
+  },
+  "5773-7": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "5774-5": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "5775-2": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "5778-6": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine color"
+  },
+  "5783-6": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine crystal"
+  },
+  "5788-5": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "5792-7": {
+    "snomed_code": "36048009",
+    "snomed_term": "Glucose measurement"
+  },
+  "5794-3": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine red blood cells"
+  },
+  "5795-0": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine WBC"
+  },
+  "5797-6": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine epithelial"
+  },
+  "5799-2": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine leukocyte esterase"
+  },
+  "5802-4": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine nitrite"
+  },
+  "5803-2": {
+    "snomed_code": "271062006",
+    "snomed_term": "Urine pH"
+  },
+  "5804-0": {
+    "snomed_code": "271341004",
+    "snomed_term": "Urine protein"
+  },
+  "5807-3": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "5811-5": {
+    "snomed_code": "271341004",
+    "snomed_term": "Urine specific gravity"
+  },
+  "5814-9": {
+    "snomed_code": "271245006",
+    "snomed_term": "Phosphate measurement"
+  },
+  "5817-2": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "5820-6": {
+    "snomed_code": "767002",
+    "snomed_term": "White blood cell count"
+  },
+  "5822-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Fungal testing"
+  },
+  "58449-0": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "58470-6": {
+    "snomed_code": "271233003",
+    "snomed_term": "CSF analysis"
+  },
+  "5862-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "5866-9": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "58709-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgA measurement"
+  },
+  "5892-5": {
+    "snomed_code": "250307005",
+    "snomed_term": "Protein C/S measurement"
+  },
+  "58939-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "5899-0": {
+    "snomed_code": "72406003",
+    "snomed_term": "Partial thromboplastin time"
+  },
+  "5901-4": {
+    "snomed_code": "396451008",
+    "snomed_term": "Prothrombin time"
+  },
+  "5902-2": {
+    "snomed_code": "396451008",
+    "snomed_term": "Prothrombin time"
+  },
+  "5905-5": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocytes [#/volume]"
+  },
+  "5906-3": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocytes [%]"
+  },
+  "5909-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Smear examination"
+  },
+  "59185-9": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "5942-8": {
+    "snomed_code": "250307005",
+    "snomed_term": "Reptilase time"
+  },
+  "5955-0": {
+    "snomed_code": "250308000",
+    "snomed_term": "Thrombin time measurement"
+  },
+  "600-7": {
+    "snomed_code": "117010004",
+    "snomed_term": "Blood culture"
+  },
+  "60469-4": {
+    "snomed_code": "271000000",
+    "snomed_term": "Uric acid measurement"
+  },
+  "60474-4": {
+    "snomed_code": "14089001",
+    "snomed_term": "Reticulocyte count"
+  },
+  "62238-1": {
+    "snomed_code": "80274001",
+    "snomed_term": "eGFR CKD-EPI"
+  },
+  "6298-4": {
+    "snomed_code": "88480006",
+    "snomed_term": "Potassium measurement"
+  },
+  "6301-6": {
+    "snomed_code": "165581004",
+    "snomed_term": "INR measurement"
+  },
+  "6303-2": {
+    "snomed_code": "250307005",
+    "snomed_term": "Lupus anticoagulant testing"
+  },
+  "63420-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgA measurement"
+  },
+  "6364-4": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "6463-4": {
+    "snomed_code": "117010004",
+    "snomed_term": "Bacteria identified"
+  },
+  "6598-7": {
+    "snomed_code": "105000003",
+    "snomed_term": "Troponin T measurement"
+  },
+  "6683-7": {
+    "snomed_code": "250307005",
+    "snomed_term": "Reptilase time"
+  },
+  "6690-2": {
+    "snomed_code": "767002",
+    "snomed_term": "White blood cell count"
+  },
+  "673-4": {
+    "snomed_code": "117010004",
+    "snomed_term": "Stool examination"
+  },
+  "6742-1": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "6768-6": {
+    "snomed_code": "250641002",
+    "snomed_term": "Alkaline phosphatase"
+  },
+  "67848-2": {
+    "snomed_code": "767002",
+    "snomed_term": "White blood cell count"
+  },
+  "68545-3": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "6873-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "Protein electrophoresis"
+  },
+  "6874-2": {
+    "snomed_code": "83036002",
+    "snomed_term": "Calcium measurement"
+  },
+  "6891-6": {
+    "snomed_code": "271248008",
+    "snomed_term": "Testosterone measurement"
+  },
+  "70168-0": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "70169-8": {
+    "snomed_code": "365636006",
+    "snomed_term": "Hematocrit measurement"
+  },
+  "70170-6": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "70171-4": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "703-9": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophil measurement"
+  },
+  "706-2": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophils [#/volume]"
+  },
+  "707-0": {
+    "snomed_code": "42351005",
+    "snomed_term": "Basophils [%]"
+  },
+  "713-8": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophils [#/volume]"
+  },
+  "714-6": {
+    "snomed_code": "14799000",
+    "snomed_term": "Eosinophils [%]"
+  },
+  "71426-1": {
+    "snomed_code": "83036002",
+    "snomed_term": "CRP high sensitivity"
+  },
+  "718-7": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "721-1": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "72680-2": {
+    "snomed_code": "271248008",
+    "snomed_term": "Prolactin measurement"
+  },
+  "72695-0": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "731-0": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocyte measurement"
+  },
+  "736-9": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocytes [#/volume]"
+  },
+  "737-7": {
+    "snomed_code": "14611008",
+    "snomed_term": "Lymphocytes [%]"
+  },
+  "73816-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Syphilis testing"
+  },
+  "742-7": {
+    "snomed_code": "67776007",
+    "snomed_term": "Monocyte measurement"
+  },
+  "751-8": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophils [%]"
+  },
+  "75374-9": {
+    "snomed_code": "767002",
+    "snomed_term": "Other cell count"
+  },
+  "75665-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Stool examination"
+  },
+  "76350-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Other cell count"
+  },
+  "76484-0": {
+    "snomed_code": "117010004",
+    "snomed_term": "Wound culture"
+  },
+  "76686-5": {
+    "snomed_code": "104491001",
+    "snomed_term": "Hemoglobin measurement"
+  },
+  "770-8": {
+    "snomed_code": "30630007",
+    "snomed_term": "Neutrophils auto [#/volume]"
+  },
+  "771-6": {
+    "snomed_code": "14089001",
+    "snomed_term": "Nucleated RBC count"
+  },
+  "77360-6": {
+    "snomed_code": "271248008",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "774-0": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "77496-8": {
+    "snomed_code": "117010004",
+    "snomed_term": "Clostridium testing"
+  },
+  "77621-1": {
+    "snomed_code": "271252008",
+    "snomed_term": "BNP measurement"
+  },
+  "777-3": {
+    "snomed_code": "61928009",
+    "snomed_term": "Platelet count"
+  },
+  "7789-1": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "7791-7": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "7793-3": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "7795-8": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "7797-4": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "7799-0": {
+    "snomed_code": "250307005",
+    "snomed_term": "Fibrinogen functional"
+  },
+  "783-1": {
+    "snomed_code": "767002",
+    "snomed_term": "Immature cell count"
+  },
+  "785-6": {
+    "snomed_code": "104132008",
+    "snomed_term": "Mean corpuscular hemoglobin"
+  },
+  "786-4": {
+    "snomed_code": "104131001",
+    "snomed_term": "MCHC measurement"
+  },
+  "787-2": {
+    "snomed_code": "104133003",
+    "snomed_term": "Mean corpuscular volume"
+  },
+  "788-0": {
+    "snomed_code": "271257001",
+    "snomed_term": "Red cell distribution width"
+  },
+  "7883-2": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "7885-7": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "7886-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgM measurement"
+  },
+  "789-8": {
+    "snomed_code": "14089001",
+    "snomed_term": "Red blood cell count"
+  },
+  "7905-3": {
+    "snomed_code": "117010004",
+    "snomed_term": "HIV-1 RNA"
+  },
+  "7966-5": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "801-1": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "80146-4": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "802-9": {
+    "snomed_code": "14089001",
+    "snomed_term": "Blood cell morphology"
+  },
+  "80383-3": {
+    "snomed_code": "117010004",
+    "snomed_term": "Influenza testing"
+  },
+  "8047-3": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "8077-0": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "8093-7": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "8094-5": {
+    "snomed_code": "271243009",
+    "snomed_term": "Anti-SSA/SSB antibody"
+  },
+  "8098-6": {
+    "snomed_code": "271248008",
+    "snomed_term": "Thyroglobulin measurement"
+  },
+  "8099-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Special stain"
+  },
+  "8101-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8102-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8107-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8109-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8110-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8111-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8115-8": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8116-6": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "8117-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8118-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8119-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8121-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8122-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8123-2": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8124-0": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8125-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8126-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8130-7": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8132-3": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8133-1": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8134-9": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8135-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "8136-4": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "81423-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Stain examination"
+  },
+  "8302-2": {
+    "snomed_code": "50373000",
+    "snomed_term": "Body height"
+  },
+  "882-1": {
+    "snomed_code": "371154000",
+    "snomed_term": "ABO group"
+  },
+  "890-4": {
+    "snomed_code": "371154000",
+    "snomed_term": "Blood type ABO/Rh"
+  },
+  "89579-7": {
+    "snomed_code": "105000003",
+    "snomed_term": "Troponin T high sensitivity"
+  },
+  "91900-1": {
+    "snomed_code": "117010004",
+    "snomed_term": "Smear examination"
+  },
+  "9317-9": {
+    "snomed_code": "61928009",
+    "snomed_term": "Platelet count"
+  },
+  "94562-6": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgA measurement"
+  },
+  "94563-4": {
+    "snomed_code": "271244005",
+    "snomed_term": "IgG measurement"
+  },
+  "9558-8": {
+    "snomed_code": "767002",
+    "snomed_term": "Cell count"
+  },
+  "9559-6": {
+    "snomed_code": "127785005",
+    "snomed_term": "Flow cytometry"
+  },
+  "9619-8": {
+    "snomed_code": "271248008",
+    "snomed_term": "Triglycerides measurement"
+  },
+  "9642-0": {
+    "snomed_code": "88878007",
+    "snomed_term": "Creatine kinase measurement"
+  },
+  "9643-8": {
+    "snomed_code": "88878007",
+    "snomed_term": "Creatine kinase measurement"
+  },
+  "96559-0": {
+    "snomed_code": "271248008",
+    "snomed_term": "Testosterone measurement"
+  },
+  "97614-2": {
+    "snomed_code": "117010004",
+    "snomed_term": "Clostridium testing"
+  },
+  "97642-3": {
+    "snomed_code": "250307005",
+    "snomed_term": "Lupus anticoagulant testing"
+  },
+  "9786-5": {
+    "snomed_code": "127785005",
+    "snomed_term": "Stain examination"
+  },
+  "9830-1": {
+    "snomed_code": "271247003",
+    "snomed_term": "Total cholesterol measurement"
+  },
+  "9842-6": {
+    "snomed_code": "271340003",
+    "snomed_term": "Urine cast"
+  },
+  "99603-3": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  },
+  "99604-1": {
+    "snomed_code": "30630007",
+    "snomed_term": "Band neutrophil"
+  }
+}
