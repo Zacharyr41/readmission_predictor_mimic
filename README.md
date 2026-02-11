@@ -127,6 +127,7 @@ Core dependencies:
 - `pydantic>=2.0` - Configuration validation
 - `google-cloud-bigquery[pandas]>=3.10` - BigQuery data source
 - `db-dtypes>=1.0` - BigQuery pandas type support
+- `requests>=2.28` - HTTP client for UMLS API crosswalk
 
 Optional:
 - `networkx>=3.0` - Graph algorithms
@@ -147,6 +148,7 @@ Create a `.env` file with the following variables:
 | `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j username | `neo4j` |
 | `NEO4J_PASSWORD` | Neo4j password | `password` |
+| `UMLS_API_KEY` | UMLS API key for LOINC→SNOMED crosswalk ([free signup](https://uts.nlm.nih.gov/uts/profile)) | `None` (optional) |
 
 ### Pipeline Settings
 
@@ -163,6 +165,7 @@ Settings can be configured via environment variables or CLI arguments:
 | Vitals limit | `VITALS_LIMIT` | `--vitals-limit` | `0` (unlimited) | Max vital events per ICU stay |
 | Diagnoses limit | `DIAGNOSES_LIMIT` | `--diagnoses-limit` | `0` (unlimited) | Max diagnoses per admission |
 | Skip Allen relations | `SKIP_ALLEN_RELATIONS` | `--skip-allen` | `false` | Skip expensive temporal relation computation |
+| UMLS API key | `UMLS_API_KEY` | - | `None` | Enables LOINC→SNOMED crosswalk via UMLS REST API (results cached to disk) |
 
 ## Usage
 
@@ -252,8 +255,12 @@ readmission_predictor_mimic/
 │   │   ├── ontology.py          # Namespace definitions
 │   │   ├── patient_writer.py    # Patient/admission RDF
 │   │   ├── event_writers.py     # Clinical event RDF
-│   │   └── temporal/
-│   │       └── allen_relations.py  # Allen interval algebra
+│   │   ├── temporal/
+│   │   │   └── allen_relations.py  # Allen interval algebra
+│   │   └── terminology/
+│   │       ├── snomed_mapper.py    # SNOMED-CT concept resolution
+│   │       ├── mapping_sources.py  # Static + UMLS crosswalk sources
+│   │       └── mapping_chain.py    # Waterfall source resolution
 │   ├── graph_analysis/          # Layer 3: Analysis
 │   │   ├── analysis.py          # Graph metrics
 │   │   └── rdf_to_networkx.py   # RDF to NetworkX conversion

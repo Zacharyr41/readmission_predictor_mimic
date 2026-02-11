@@ -192,6 +192,8 @@ def build_graph(
     prescriptions_limit: int = 0,
     diagnoses_limit: int = 0,
     skip_allen_relations: bool = False,
+    snomed_mappings_dir: Path | None = None,
+    umls_api_key: str | None = None,
 ) -> Graph
 ```
 
@@ -209,6 +211,8 @@ Build RDF graph from MIMIC-IV DuckDB database.
 - `prescriptions_limit`: Maximum prescriptions per admission (0 = no limit)
 - `diagnoses_limit`: Maximum diagnoses per admission (0 = no limit)
 - `skip_allen_relations`: If True, skip Allen relation computation
+- `snomed_mappings_dir`: Path to directory containing SNOMED mapping JSON files
+- `umls_api_key`: Optional UMLS API key for LOINC→SNOMED crosswalk. When set, unmapped LOINC codes are resolved via the UMLS REST API on first build and cached to `loinc_crosswalk_cache.json`; subsequent builds load from cache (zero API calls).
 
 **Returns:**
 The constructed RDF graph.
@@ -434,6 +438,86 @@ Compute Allen relations for all ICU stays of a patient.
 
 **Returns:**
 Total count of relation triples added across all ICU stays.
+
+---
+
+### `src.graph_construction.terminology.snomed_mapper`
+
+SNOMED-CT concept mapper.
+
+#### `SnomedMapper`
+
+```python
+class SnomedMapper:
+    def __init__(
+        self,
+        mappings_dir: Path,
+        umls_api_key: str | None = None,
+    ) -> None: ...
+```
+
+Resolve MIMIC-IV identifiers to SNOMED-CT concepts. Loads JSON mapping files lazily.
+
+**Args:**
+- `mappings_dir`: Path to directory containing `*_to_snomed.json` files
+- `umls_api_key`: Optional UMLS API key. When set, `ensure_loinc_coverage()` can query unmapped LOINC codes via the UMLS crosswalk API.
+
+#### `ensure_loinc_coverage()`
+
+```python
+def ensure_loinc_coverage(self, loinc_codes: list[str]) -> int
+```
+
+Query the UMLS crosswalk for any LOINC codes not already in the static mapping or cache. Results are merged into the in-memory map and persisted to `loinc_crosswalk_cache.json`.
+
+**Args:**
+- `loinc_codes`: List of LOINC codes to check
+
+**Returns:**
+Number of newly resolved codes (0 if no API key or all codes already mapped).
+
+---
+
+### `src.graph_construction.terminology.mapping_sources`
+
+Pluggable LOINC→SNOMED mapping sources.
+
+#### `StaticMappingSource`
+
+```python
+class StaticMappingSource:
+    def __init__(self, json_path: Path) -> None: ...
+    def lookup(self, loinc_code: str) -> dict | None: ...
+    def lookup_batch(self, codes: list[str]) -> dict[str, dict]: ...
+```
+
+Reads from a pre-generated JSON file. Entries whose `snomed_code` does not match the 5-18 digit SCTID pattern are rejected.
+
+#### `UMLSCrosswalkSource`
+
+```python
+class UMLSCrosswalkSource:
+    def __init__(self, api_key: str, cache_path: Path) -> None: ...
+    def lookup(self, loinc_code: str) -> dict | None: ...
+    def lookup_batch(self, codes: list[str]) -> dict[str, dict]: ...
+```
+
+Queries the NLM UMLS REST crosswalk endpoint (LNC→SNOMEDCT_US) with a lazy disk cache. Cache hits skip the API; after `lookup_batch()` the cache is persisted to disk.
+
+---
+
+### `src.graph_construction.terminology.mapping_chain`
+
+#### `MappingChain`
+
+```python
+class MappingChain:
+    def __init__(self, sources: list[MappingSource]) -> None: ...
+    def resolve(self, loinc_code: str) -> dict | None: ...
+    def resolve_batch(self, codes: list[str]) -> dict[str, dict]: ...
+```
+
+Ordered waterfall of mapping sources. Tries each source in order; first hit wins. For batch resolution, each successive source only receives codes still unresolved.
 
 ---
 
@@ -797,6 +881,16 @@ class Settings(BaseSettings):
     neo4j_uri: str
     neo4j_user: str
     neo4j_password: str
+
+    # Data source
+    data_source: Literal["local", "bigquery"]
+    bigquery_project: str | None
+
+    # SNOMED-CT mappings
+    snomed_mappings_dir: Path | None
+
+    # UMLS API
+    umls_api_key: str | None  # Optional: enables LOINC→SNOMED crosswalk
 
     # Cohort configuration
     cohort_icd_codes: list[str]

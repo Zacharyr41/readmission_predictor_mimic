@@ -117,6 +117,11 @@ flowchart TB
 - `src/graph_construction/patient_writer.py` - Creates Patient and HospitalAdmission nodes
 - `src/graph_construction/event_writers.py` - Creates clinical event nodes
 - `src/graph_construction/temporal/allen_relations.py` - Computes Allen interval relations
+- `src/graph_construction/terminology/snomed_mapper.py` - SNOMED-CT concept resolution from MIMIC identifiers
+- `src/graph_construction/terminology/mapping_sources.py` - Pluggable mapping sources (static JSON, UMLS crosswalk with disk cache)
+- `src/graph_construction/terminology/mapping_chain.py` - Waterfall resolution across multiple mapping sources
+
+**LOINC→SNOMED Coverage**: When `UMLS_API_KEY` is set, the pipeline uses a lazy disk-cache pattern. On first build, unmapped LOINC codes are resolved via the UMLS REST crosswalk API and saved to `data/mappings/loinc_crosswalk_cache.json`. Subsequent builds load from cache with zero API calls.
 
 **Input**: DuckDB database + ontology files
 **Output**: `data/processed/knowledge_graph.rdf`

@@ -20,6 +20,7 @@ dependencies = [
     "pydantic-settings",
     "google-cloud-bigquery[pandas]>=3.10",
     "db-dtypes>=1.0",
+    "requests>=2.28",
 ]
 
 [project.optional-dependencies]

@@ -69,3 +69,26 @@ class TestDataSourceConfig:
                 clinical_tkg_repo=tmp_path,
                 data_source="foo",
             )
+
+
+class TestUMLSApiKeyConfig:
+    """Tests for umls_api_key setting."""
+
+    def test_umls_api_key_defaults_to_none(self, tmp_path):
+        s = Settings(
+            mimic_iv_path=tmp_path,
+            duckdb_path=tmp_path / "test.duckdb",
+            clinical_tkg_repo=tmp_path,
+            data_source="local",
+        )
+        assert s.umls_api_key is None
+
+    def test_umls_api_key_accepts_string(self, tmp_path):
+        s = Settings(
+            mimic_iv_path=tmp_path,
+            duckdb_path=tmp_path / "test.duckdb",
+            clinical_tkg_repo=tmp_path,
+            data_source="local",
+            umls_api_key="test-key-123",
+        )
+        assert s.umls_api_key == "test-key-123"

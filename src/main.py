@@ -109,6 +109,8 @@ def run_pipeline(
         vitals_limit=settings.vitals_limit,
         diagnoses_limit=settings.diagnoses_limit,
         skip_allen_relations=settings.skip_allen_relations,
+        snomed_mappings_dir=settings.snomed_mappings_dir,
+        umls_api_key=settings.umls_api_key,
     )
 
     result["graph_triples"] = len(graph)

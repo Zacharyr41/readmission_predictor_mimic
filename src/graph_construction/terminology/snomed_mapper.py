@@ -34,8 +34,9 @@ class SnomedMapper:
         mappings_dir: Path to directory containing ``*_to_snomed.json`` files.
     """
 
-    def __init__(self, mappings_dir: Path) -> None:
+    def __init__(self, mappings_dir: Path, umls_api_key: str | None = None) -> None:
         self._dir = mappings_dir
+        self._umls_api_key = umls_api_key
         self._icd: dict | None = None
         self._labitem: dict | None = None
         self._chartitem: dict | None = None
@@ -96,7 +97,24 @@ class SnomedMapper:
     @property
     def _loinc_map(self) -> dict:
         if self._loinc is None:
-            self._loinc = self._load("loinc_to_snomed.json")
+            static = self._load("loinc_to_snomed.json")
+            # Merge crosswalk cache (cache entries don't overwrite static)
+            cache_path = self._dir / "loinc_crosswalk_cache.json"
+            if cache_path.exists():
+                try:
+                    with open(cache_path) as f:
+                        cache = json.load(f)
+                    merged = {**cache, **static}  # static takes precedence
+                    logger.info(
+                        "Merged %d cache + %d static LOINC entries (%d total)",
+                        len(cache), len(static), len(merged),
+                    )
+                    self._loinc = merged
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning("Failed to load LOINC cache: %s", e)
+                    self._loinc = static
+            else:
+                self._loinc = static
         return self._loinc
 
     # ---- helpers ----
@@ -202,3 +220,31 @@ class SnomedMapper:
             "comorbidity": len(self._comorbidity_map),
             "loinc": len(self._loinc_map),
         }
+
+    def ensure_loinc_coverage(self, loinc_codes: list[str]) -> int:
+        """Query UMLS crosswalk for any unmapped LOINC codes and merge results.
+
+        Results are saved to ``loinc_crosswalk_cache.json`` so that subsequent
+        builds incur zero API calls for these codes.
+
+        Returns the number of newly resolved codes.
+        """
+        if not self._umls_api_key:
+            return 0
+
+        unmapped = [c for c in loinc_codes if c not in self._loinc_map]
+        if not unmapped:
+            return 0
+
+        from src.graph_construction.terminology.mapping_sources import UMLSCrosswalkSource
+
+        cache_path = self._dir / "loinc_crosswalk_cache.json"
+        source = UMLSCrosswalkSource(api_key=self._umls_api_key, cache_path=cache_path)
+        hits = source.lookup_batch(unmapped)
+
+        # Merge into _loinc_map
+        for code, entry in hits.items():
+            self._loinc_map[code] = entry
+
+        logger.info("ensure_loinc_coverage: %d/%d unmapped resolved", len(hits), len(unmapped))
+        return len(hits)

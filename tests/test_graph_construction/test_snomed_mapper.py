@@ -1,6 +1,8 @@
 """Tests for SNOMED-CT terminology mapper."""
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 from pathlib import Path
 
@@ -277,3 +279,79 @@ class TestLoincLookup:
         result = loinc_mapper.get_snomed_for_loinc("2160-0")
         assert result is not None
         assert result.term and len(result.term) > 0
+
+
+class TestLoincCacheMerge:
+    """Verify _loinc_map merges static JSON + crosswalk cache."""
+
+    def test_loinc_map_merges_cache_file(self, mappings_dir: Path) -> None:
+        # mappings_dir already has loinc_to_snomed.json with 2160-0, 2951-2
+        cache = {"3094-0": {"snomed_code": "88878007", "snomed_term": "Protein measurement"}}
+        (mappings_dir / "loinc_crosswalk_cache.json").write_text(json.dumps(cache))
+        mapper = SnomedMapper(mappings_dir)
+        # 2160-0 from static, 3094-0 from cache
+        assert mapper.get_snomed_for_loinc("2160-0") is not None
+        assert mapper.get_snomed_for_loinc("3094-0") is not None
+        assert mapper.get_snomed_for_loinc("3094-0").code == "88878007"
+
+    def test_static_takes_precedence(self, mappings_dir: Path) -> None:
+        """If same LOINC is in both static and cache, static wins."""
+        cache = {"2160-0": {"snomed_code": "99999999", "snomed_term": "WRONG"}}
+        (mappings_dir / "loinc_crosswalk_cache.json").write_text(json.dumps(cache))
+        mapper = SnomedMapper(mappings_dir)
+        result = mapper.get_snomed_for_loinc("2160-0")
+        assert result is not None
+        assert result.code == "70901006"  # from static, not cache
+
+    def test_missing_cache_file_ok(self, mappings_dir: Path) -> None:
+        """No crash when cache file doesn't exist."""
+        mapper = SnomedMapper(mappings_dir)
+        assert mapper.get_snomed_for_loinc("2160-0") is not None
+
+
+class TestEnsureLoincCoverage:
+    """Tests for ensure_loinc_coverage() method."""
+
+    def test_no_api_key_returns_zero(self, mappings_dir: Path) -> None:
+        mapper = SnomedMapper(mappings_dir)
+        count = mapper.ensure_loinc_coverage(["2160-0", "3094-0"])
+        assert count == 0
+
+    def test_all_mapped_returns_zero(self, mappings_dir: Path) -> None:
+        mapper = SnomedMapper(mappings_dir, umls_api_key="fake")
+        # 2160-0 and 2951-2 are already in static
+        count = mapper.ensure_loinc_coverage(["2160-0", "2951-2"])
+        assert count == 0
+
+    def test_queries_unmapped_and_merges(self, mappings_dir: Path) -> None:
+        mapper = SnomedMapper(mappings_dir, umls_api_key="fake")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "result": [{"ui": "88878007", "name": "Protein measurement", "obsolete": False}]
+        }
+        with patch("src.graph_construction.terminology.mapping_sources.requests") as mock_req:
+            session = MagicMock()
+            session.get.return_value = mock_resp
+            mock_req.Session.return_value = session
+            count = mapper.ensure_loinc_coverage(["2160-0", "3094-0"])
+        assert count == 1
+        # New code should be in _loinc_map now
+        assert mapper.get_snomed_for_loinc("3094-0") is not None
+
+    def test_cache_persisted_to_disk(self, mappings_dir: Path) -> None:
+        mapper = SnomedMapper(mappings_dir, umls_api_key="fake")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "result": [{"ui": "88878007", "name": "Protein measurement", "obsolete": False}]
+        }
+        with patch("src.graph_construction.terminology.mapping_sources.requests") as mock_req:
+            session = MagicMock()
+            session.get.return_value = mock_resp
+            mock_req.Session.return_value = session
+            mapper.ensure_loinc_coverage(["3094-0"])
+        cache_path = mappings_dir / "loinc_crosswalk_cache.json"
+        assert cache_path.exists()
+        data = json.loads(cache_path.read_text())
+        assert "3094-0" in data

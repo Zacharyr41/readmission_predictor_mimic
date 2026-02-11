@@ -50,6 +50,7 @@ def build_graph(
     diagnoses_limit: int = 0,
     skip_allen_relations: bool = False,
     snomed_mappings_dir: Path | None = None,
+    umls_api_key: str | None = None,
 ) -> Graph:
     """Build RDF graph from MIMIC-IV DuckDB database.
 
@@ -103,9 +104,16 @@ def build_graph(
     # Initialize SNOMED mapper (optional)
     snomed_mapper = None
     if snomed_mappings_dir is not None and snomed_mappings_dir.exists():
-        snomed_mapper = SnomedMapper(snomed_mappings_dir)
+        snomed_mapper = SnomedMapper(snomed_mappings_dir, umls_api_key=umls_api_key)
         stats_info = snomed_mapper.coverage_stats()
         logger.info(f"SNOMED mapper loaded: {stats_info}")
+
+        # Ensure LOINC coverage via UMLS crosswalk (lazy-cached)
+        if umls_api_key:
+            all_loinc = _collect_loinc_codes(conn)
+            if all_loinc:
+                newly_resolved = snomed_mapper.ensure_loinc_coverage(all_loinc)
+                logger.info(f"LOINC crosswalk: {newly_resolved} codes newly resolved")
     elif snomed_mappings_dir is not None:
         logger.warning(f"SNOMED mappings directory not found: {snomed_mappings_dir}")
 
@@ -186,6 +194,29 @@ def _ensure_derived_tables(conn: duckdb.DuckDBPyConnection) -> None:
     ).fetchone()
     if result[0] == 0:
         create_readmission_labels(conn)
+
+
+def _collect_loinc_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
+    """Collect unique LOINC codes from d_labitems via the labitem mapping."""
+    try:
+        import json
+        from pathlib import Path
+
+        # Try to get LOINC codes from the labitem mapping file
+        # This avoids needing a LOINC column in d_labitems (MIMIC doesn't have one)
+        mapping_path = Path("data/mappings/labitem_to_snomed.json")
+        if mapping_path.exists():
+            with open(mapping_path) as f:
+                data = json.load(f)
+            data.pop("_metadata", None)
+            codes = sorted({
+                v["loinc"] for v in data.values()
+                if isinstance(v, dict) and v.get("loinc")
+            })
+            return codes
+    except Exception as e:
+        logger.debug("Could not collect LOINC codes: %s", e)
+    return []
 
 
 def _process_patient(

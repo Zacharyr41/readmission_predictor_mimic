@@ -234,43 +234,6 @@ def generate_icd_to_snomed(api_key: str, output_path: Path, comprehensive: bool 
     logger.info(f"  Wrote {len(mapping)} ICD->SNOMED mappings to {output_path}")
 
 
-def _umls_term_to_snomed(session: requests.Session, term: str, api_key: str):
-    """Search UMLS for a clinical term and return the best SNOMED concept."""
-    for search_term in [f"{term} measurement", term]:
-        try:
-            resp = session.get(f"{UMLS_BASE}/search/current", params={
-                "string": search_term, "sab": "SNOMEDCT_US",
-                "searchType": "words", "apiKey": api_key,
-            }, timeout=15)
-            if resp.status_code != 200:
-                continue
-            results = resp.json().get("result", {}).get("results", [])
-            if not results or results[0].get("ui") == "NONE":
-                continue
-            cui = results[0]["ui"]
-            # Get SNOMEDCT_US atoms for this CUI
-            resp2 = session.get(f"{UMLS_BASE}/content/current/CUI/{cui}/atoms", params={
-                "sab": "SNOMEDCT_US", "apiKey": api_key, "pageSize": 5,
-            }, timeout=15)
-            if resp2.status_code != 200:
-                continue
-            atoms = resp2.json().get("result", [])
-            for atom in atoms:
-                if atom.get("rootSource") == "SNOMEDCT_US":
-                    # Extract SCTID from sourceConcept URI
-                    sc_uri = atom.get("sourceConcept", "")
-                    if "/" in sc_uri:
-                        sctid = sc_uri.rstrip("/").rsplit("/", 1)[-1]
-                    else:
-                        sctid = sc_uri
-                    return {"snomed_code": sctid, "snomed_term": atom.get("name", "")}
-            # No SNOMEDCT_US atom found — do NOT store the CUI as a SNOMED code
-            return None
-        except Exception:
-            pass
-    return None
-
-
 def _load_loinc_snomed_map(mappings_dir: Path) -> dict:
     """Load loinc_to_snomed.json if available, return {loinc_code: {snomed_code, snomed_term}}."""
     path = mappings_dir / "loinc_to_snomed.json"
@@ -342,30 +305,36 @@ def generate_labitem_to_snomed(api_key: str, output_path: Path):
     loinc_mapped = sum(1 for v in mapping.values() if "snomed_code" in v)
     logger.info(f"  Phase 1 (LOINC-first): {loinc_mapped}/{len(mapping)} mapped via LOINC->SNOMED")
 
-    # --- Phase 2: UMLS term search fallback for remaining items ---
+    # --- Phase 2: UMLS crosswalk fallback for remaining LOINC codes ---
     if unmapped_labels and api_key:
-        logger.info(f"  Phase 2: UMLS term search for {len(unmapped_labels)} unique unmapped labels...")
-        session = requests.Session()
-        label_to_snomed = {}
-        for i, label in enumerate(unmapped_labels):
-            result = _umls_term_to_snomed(session, label, api_key)
-            if result and _is_valid_sctid(result.get("snomed_code", "")):
-                label_to_snomed[label] = result
-            if (i + 1) % 100 == 0:
-                logger.info(f"    UMLS lookup: {i+1}/{len(unmapped_labels)} ({len(label_to_snomed)} mapped)")
+        # Collect the unique LOINC codes that still need resolution
+        unmapped_loinc_to_itemids: dict[str, list[str]] = {}
+        for label, itemids in unmapped_labels.items():
+            for itemid in itemids:
+                loinc = item_loinc[itemid]["loinc"]
+                if loinc not in unmapped_loinc_to_itemids:
+                    unmapped_loinc_to_itemids[loinc] = []
+                unmapped_loinc_to_itemids[loinc].append(itemid)
 
-        logger.info(f"  Phase 2: {len(label_to_snomed)}/{len(unmapped_labels)} labels mapped via UMLS")
+        logger.info(f"  Phase 2: UMLS crosswalk for {len(unmapped_loinc_to_itemids)} unique LOINC codes...")
 
-        # Apply UMLS results
-        for label, snomed in label_to_snomed.items():
-            for itemid in unmapped_labels[label]:
+        from src.graph_construction.terminology.mapping_sources import UMLSCrosswalkSource
+        cache_path = output_path.parent / "loinc_crosswalk_cache.json"
+        crosswalk = UMLSCrosswalkSource(api_key=api_key, cache_path=cache_path)
+        loinc_hits = crosswalk.lookup_batch(list(unmapped_loinc_to_itemids.keys()))
+
+        logger.info(f"  Phase 2: {len(loinc_hits)}/{len(unmapped_loinc_to_itemids)} LOINC codes mapped via crosswalk")
+
+        # Apply crosswalk results to all item IDs that share each LOINC code
+        for loinc, snomed in loinc_hits.items():
+            for itemid in unmapped_loinc_to_itemids[loinc]:
                 mapping[itemid]["snomed_code"] = snomed["snomed_code"]
                 mapping[itemid]["snomed_term"] = snomed["snomed_term"]
 
     mapped_count = sum(1 for v in mapping.values() if "snomed_code" in v)
     output = {
         "_metadata": {
-            "source": "srdc/mimic-iv-to-fhir labitems-to-loinc.csv + LOINC-SNOMED RF2 + UMLS fallback",
+            "source": "srdc/mimic-iv-to-fhir labitems-to-loinc.csv + LOINC-SNOMED RF2 + UMLS crosswalk",
             "generated": time.strftime("%Y-%m-%d"),
             "total_items": len(mapping),
             "snomed_mapped": mapped_count,
