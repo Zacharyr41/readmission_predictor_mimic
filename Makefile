@@ -1,4 +1,4 @@
-.PHONY: setup test test-unit test-integration ingest graph analyze features train pipeline all clean
+.PHONY: setup test test-unit test-integration ingest graph analyze features train pipeline all clean export-graph train-gnn run-experiment
 
 UV := uv
 PYTHON := $(UV) run python
@@ -45,6 +45,18 @@ pipeline:
 
 # Run all stages sequentially
 all: ingest graph analyze features train
+
+# Stage 5b: Export RDF graph to PyG format
+export-graph:
+	$(PYTHON) -m src.gnn.graph_export
+
+# Stage 5b: Train GNN model
+train-gnn:
+	$(PYTHON) -m src.gnn.train
+
+# Stage 5b: Run GNN experiment
+run-experiment:
+	$(PYTHON) -m src.gnn.experiments --run $(EXP)
 
 clean:
 	rm -rf .venv __pycache__ .pytest_cache .coverage

@@ -32,6 +32,11 @@ graph = [
     "neo4j>=5.0",
     "networkx>=3.0",
 ]
+gnn = [
+    "torch>=2.1",
+    "torch_geometric>=2.5",
+    "transformers>=4.35",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
