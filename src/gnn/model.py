@@ -78,6 +78,19 @@ class TD4DDModel(nn.Module):
         # 5. Classifier head
         self.classifier = nn.Linear(config.d_model, 1)
 
+    @staticmethod
+    def _resolve_batch_size(batch_data: HeteroData, fallback: int) -> int:
+        """Get batch_size from global or node stores, with fallback."""
+        try:
+            return batch_data.batch_size
+        except AttributeError:
+            pass
+        for ntype in batch_data.node_types:
+            store = batch_data[ntype]
+            if hasattr(store, "batch_size"):
+                return store.batch_size
+        return fallback
+
     def forward(
         self,
         batch_data: HeteroData,
@@ -115,7 +128,7 @@ class TD4DDModel(nn.Module):
 
         # 2. Extract target admission embeddings
         target_emb = projected["admission"]
-        batch_size = getattr(batch_data, "batch_size", target_emb.shape[0])
+        batch_size = self._resolve_batch_size(batch_data, target_emb.shape[0])
         target_emb = target_emb[:batch_size]
 
         # 3. Transformer branch

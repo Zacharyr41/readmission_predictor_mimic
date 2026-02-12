@@ -12,6 +12,7 @@ import torch
 from torch import Tensor, nn
 from torch_geometric.data import HeteroData
 
+from src.gnn.train import _get_batch_size
 from src.prediction.evaluate import compute_metrics
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def evaluate_gnn(
             kwargs = prepare_batch_fn(batch)
             out = model(**kwargs)
 
-            batch_size = batch.batch_size
+            batch_size = _get_batch_size(batch)
             labels = batch["admission"].y[:batch_size]
             probs = out["probabilities"].squeeze(-1)
 
@@ -144,7 +145,7 @@ def extract_attention_weights(
             kwargs = prepare_batch_fn(batch)
             out = model(**kwargs)
 
-            batch_size = batch.batch_size
+            batch_size = _get_batch_size(batch)
             attention_info = _detach_attention_info(out.get("attention_info"))
 
             # Determine global node IDs

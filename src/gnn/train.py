@@ -17,6 +17,25 @@ from src.gnn.losses import LossConfig, build_classification_loss, compute_total_
 logger = logging.getLogger(__name__)
 
 
+def _get_batch_size(batch: HeteroData) -> int:
+    """Extract batch_size from a HeteroData batch.
+
+    NeighborLoader stores batch_size in the input node store, not the global
+    store.  Fall back through several access patterns.
+    """
+    # Global store (manually constructed batches)
+    try:
+        return batch.batch_size
+    except AttributeError:
+        pass
+    # Node-type store (NeighborLoader output)
+    for ntype in batch.node_types:
+        store = batch[ntype]
+        if hasattr(store, "batch_size"):
+            return store.batch_size
+    raise AttributeError("batch has no batch_size attribute")
+
+
 @dataclass
 class TrainingConfig:
     """Configuration for the GNN training loop."""
@@ -157,7 +176,7 @@ class Trainer:
             kwargs = self._prepare_batch(batch)
             out = self.model(**kwargs)
 
-            labels = batch["admission"].y[:batch.batch_size].to(self.device)
+            labels = batch["admission"].y[:_get_batch_size(batch)].to(self.device)
 
             # Lazy-init classification loss on first batch
             if self._cls_loss_fn is None:
@@ -204,7 +223,7 @@ class Trainer:
             kwargs = self._prepare_batch(batch)
             out = self.model(**kwargs)
 
-            labels = batch["admission"].y[:batch.batch_size].to(self.device)
+            labels = batch["admission"].y[:_get_batch_size(batch)].to(self.device)
             probs = out["probabilities"].squeeze(-1)
 
             if self._cls_loss_fn is not None:
@@ -238,7 +257,7 @@ class Trainer:
     def _prepare_batch(self, batch: HeteroData) -> dict:
         """Convert a HeteroData batch into model.forward() keyword arguments."""
         batch = batch.to(self.device)
-        batch_size = batch.batch_size
+        batch_size = _get_batch_size(batch)
 
         # Remap global aux edges to batch-local indices
         local_aux = None
