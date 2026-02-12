@@ -879,63 +879,76 @@ class TestEarlyTermination:
         # C(10,2) = 45 pairs, all "before"
         assert count == 45, f"Expected 45 'before' relations, got {count}"
 
-    def test_performance_scales_subquadratically(
+    def test_early_termination_reduces_classify_calls(
         self, graph_with_ontology: Graph,
     ) -> None:
-        """Verify early termination gives sub-quadratic scaling.
+        """Verify early termination keeps _classify_allen_relation calls at O(N).
 
-        With pure O(N^2) pair iteration, doubling N should ~4x the time.
-        With early termination on sorted sequential events, the inner loop
-        breaks after the first pair per outer iteration, so doubling N
-        should only ~2x the time. We assert the ratio stays below 3x.
+        For N sequential instants sorted by time, the early-termination
+        optimisation breaks the inner loop after the first "before" hit,
+        so the total number of classify calls should be ≈ N-1 (one per
+        outer iteration).  Without early termination it would be
+        N*(N-1)/2 = O(N²).
+
+        Counting calls is deterministic and avoids wall-clock timing noise.
         """
+        from unittest.mock import patch as mock_patch
+
         from src.graph_construction.patient_writer import write_patient, write_admission
         from src.graph_construction.event_writers import (
             write_icu_stay, write_icu_days, write_biomarker_event,
         )
 
-        def _build_and_time(n: int) -> float:
-            """Build a fresh graph with n sequential events and time compute_allen_relations."""
-            g = initialize_graph(ONTOLOGY_DIR)
-            p = write_patient(g, {"subject_id": 100, "gender": "M", "anchor_age": 65})
-            a = write_admission(g, {
-                "hadm_id": 200, "subject_id": 100,
-                "admittime": datetime(2150, 1, 1, 8, 0, 0),
-                "dischtime": datetime(2150, 1, 20, 14, 0, 0),
-                "admission_type": "EMERGENCY", "discharge_location": "HOME",
-                "readmitted_30d": False, "readmitted_60d": False,
-            }, p)
-            s = write_icu_stay(g, {
-                "stay_id": 300, "hadm_id": 200, "subject_id": 100,
-                "intime": datetime(2150, 1, 1, 8, 0, 0),
-                "outtime": datetime(2150, 1, 20, 14, 0, 0), "los": 19.0,
-            }, a)
-            days = write_icu_days(g, {
-                "stay_id": 300, "hadm_id": 200, "subject_id": 100,
-                "intime": datetime(2150, 1, 1, 8, 0, 0),
-                "outtime": datetime(2150, 1, 20, 14, 0, 0), "los": 19.0,
-            }, s)
-            for i in range(n):
-                write_biomarker_event(g, {
-                    "stay_id": 300, "itemid": 50000 + i,
-                    "charttime": datetime(2150, 1, 1 + i // 24, i % 24, 0, 0),
-                    "label": f"Lab{i}", "fluid": "Blood", "category": "Chemistry",
-                    "valuenum": 1.0, "valueuom": "mg/dL",
-                    "ref_range_lower": 0.5, "ref_range_upper": 2.0,
-                }, s, days)
-            t0 = time.time()
+        N = 100
+        g = initialize_graph(ONTOLOGY_DIR)
+        p = write_patient(g, {"subject_id": 100, "gender": "M", "anchor_age": 65})
+        a = write_admission(g, {
+            "hadm_id": 200, "subject_id": 100,
+            "admittime": datetime(2150, 1, 1, 8, 0, 0),
+            "dischtime": datetime(2150, 1, 20, 14, 0, 0),
+            "admission_type": "EMERGENCY", "discharge_location": "HOME",
+            "readmitted_30d": False, "readmitted_60d": False,
+        }, p)
+        s = write_icu_stay(g, {
+            "stay_id": 300, "hadm_id": 200, "subject_id": 100,
+            "intime": datetime(2150, 1, 1, 8, 0, 0),
+            "outtime": datetime(2150, 1, 20, 14, 0, 0), "los": 19.0,
+        }, a)
+        days = write_icu_days(g, {
+            "stay_id": 300, "hadm_id": 200, "subject_id": 100,
+            "intime": datetime(2150, 1, 1, 8, 0, 0),
+            "outtime": datetime(2150, 1, 20, 14, 0, 0), "los": 19.0,
+        }, s)
+        for i in range(N):
+            write_biomarker_event(g, {
+                "stay_id": 300, "itemid": 50000 + i,
+                "charttime": datetime(2150, 1, 1 + i // 24, i % 24, 0, 0),
+                "label": f"Lab{i}", "fluid": "Blood", "category": "Chemistry",
+                "valuenum": 1.0, "valueuom": "mg/dL",
+                "ref_range_lower": 0.5, "ref_range_upper": 2.0,
+            }, s, days)
+
+        call_count = 0
+        original_fn = _classify_allen_relation
+
+        def counting_classify(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_fn(*args, **kwargs)
+
+        with mock_patch(
+            "src.graph_construction.temporal.allen_relations._classify_allen_relation",
+            side_effect=counting_classify,
+        ):
             compute_allen_relations(g, s)
-            return time.time() - t0
 
-        t_small = _build_and_time(100)
-        t_large = _build_and_time(200)
-
-        # With O(N^2), ratio ≈ 4.0; with early termination, ratio ≈ 2.0
-        ratio = t_large / t_small if t_small > 0 else float("inf")
-        assert ratio < 3.0, (
-            f"Scaling ratio {ratio:.1f}x exceeds 3.0x threshold "
-            f"(100 events: {t_small:.3f}s, 200 events: {t_large:.3f}s). "
-            f"Expected sub-quadratic scaling from early termination."
+        # With early termination: O(N) calls ≈ N-1 = 99
+        # Without early termination: O(N²) calls = N*(N-1)/2 = 4950
+        quadratic = N * (N - 1) // 2
+        assert call_count < quadratic * 0.1, (
+            f"Expected sub-quadratic classify calls: got {call_count}, "
+            f"quadratic would be {quadratic}. "
+            f"Early termination should keep calls near {N - 1}."
         )
 
     def test_mixed_before_and_during_correct(

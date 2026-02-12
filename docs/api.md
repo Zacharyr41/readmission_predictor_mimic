@@ -956,6 +956,123 @@ Dict mapping term string to 768-dim embedding tensor.
 
 ---
 
+### `src.gnn.model`
+
+TD4DD model assembly — combines the dual-track Transformer and cross-view diffusion branches into a single end-to-end model.
+
+#### `ModelConfig`
+
+```python
+@dataclass
+class ModelConfig:
+    feat_dims: dict[str, int]       # node_type → raw feature dim
+    d_model: int = 128
+    num_contextual_paths: int = 2
+    k_hops_contextual: int = 4
+    k_hops_temporal: int = 2
+    nhead: int = 4
+    dropout: float = 0.3
+    use_transformer: bool = True     # ablation toggle
+    use_diffusion: bool = True       # ablation toggle
+    use_temporal_encoding: bool = True
+    diffusion_T: int = 100
+    diffusion_ddim_steps: int = 10
+```
+
+Configuration dataclass for the TD4DD model. `use_transformer` and `use_diffusion` are ablation toggles that disable the respective branches.
+
+#### `TD4DDModel`
+
+```python
+class TD4DDModel(nn.Module):
+    def __init__(self, config: ModelConfig) -> None: ...
+```
+
+Full TD4DD model with five components: per-type linear projections, optional `DualTrackTransformer`, optional `DiffusionModule`, a learnable fusion weight (`lambda_param`), and a binary classifier head.
+
+#### `TD4DDModel.forward()`
+
+```python
+def forward(
+    self,
+    batch_data: HeteroData,
+    aux_edge_indices: list[Tensor] | None = None,
+    *,
+    contextual_hop_neighbors: list[list[Tensor]] | None = None,
+    temporal_hop_neighbors: list[Tensor] | None = None,
+    temporal_hop_deltas: list[Tensor] | None = None,
+) -> dict
+```
+
+Run the full model: project node features, run transformer and/or diffusion branches, fuse with learnable lambda, and classify.
+
+**Args:**
+- `batch_data`: PyG `HeteroData` with node features (must include `"admission"` node type)
+- `aux_edge_indices`: Two auxiliary edge-index tensors for the diffusion branch
+- `contextual_hop_neighbors`: Pre-structured neighbor tensors for the transformer contextual track
+- `temporal_hop_neighbors`: Pre-structured neighbor tensors for the transformer temporal track
+- `temporal_hop_deltas`: Day-gap tensors for temporal encoding
+
+**Returns:**
+Dict with keys: `logits` `(B, 1)`, `probabilities` `(B, 1)`, `h_hhgat`, `h_diff`, `L_diff`, `attention_info`.
+
+---
+
+### `src.gnn.losses`
+
+Modular loss functions for imbalanced binary classification.
+
+#### `LossConfig`
+
+```python
+@dataclass
+class LossConfig:
+    cls_loss_type: str = "bce"          # "bce" | "focal" | "bce_smoothed"
+    pos_weight: float | None = None     # auto-compute from labels if None
+    label_smoothing: float = 0.05
+    focal_alpha: float = 0.25
+    focal_gamma: float = 2.0
+    diff_weight: float = 1.0
+```
+
+#### `sigmoid_focal_loss()`
+
+```python
+def sigmoid_focal_loss(
+    pred: Tensor, target: Tensor,
+    alpha: float = 0.25, gamma: float = 2.0,
+) -> Tensor
+```
+
+Focal loss for imbalanced classification. Uses `torchvision.ops.sigmoid_focal_loss` when available, otherwise a manual implementation.
+
+#### `build_classification_loss()`
+
+```python
+def build_classification_loss(
+    config: LossConfig, labels: Tensor,
+) -> Callable[[Tensor, Tensor], Tensor]
+```
+
+Factory that returns a loss callable based on `config.cls_loss_type`. Auto-computes `pos_weight = n_neg / n_pos` when `config.pos_weight is None`.
+
+#### `compute_total_loss()`
+
+```python
+def compute_total_loss(
+    cls_loss_fn: Callable[[Tensor, Tensor], Tensor],
+    logits: Tensor, labels: Tensor,
+    L_diff: Tensor, config: LossConfig,
+) -> dict[str, Tensor]
+```
+
+Combine classification and diffusion losses: `total = cls + diff_weight * L_diff`.
+
+**Returns:**
+Dict with keys: `total`, `cls`, `diff`.
+
+---
+
 ## Configuration
 
 ### `config.settings`
