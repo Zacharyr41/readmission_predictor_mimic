@@ -803,6 +803,20 @@ Load a trained model from disk.
 
 Model evaluation and reporting.
 
+#### `compute_metrics()`
+
+```python
+def compute_metrics(
+    y_proba: np.ndarray,
+    y_test: np.ndarray,
+) -> dict
+```
+
+Compute classification metrics from predicted probabilities. Uses Youden's J statistic to select the optimal threshold. Shared by both sklearn/XGBoost and GNN evaluation pathways.
+
+**Returns:**
+Dict with `auroc`, `auprc`, `precision`, `recall`, `f1`, `threshold`, `confusion_matrix`.
+
 #### `evaluate_model()`
 
 ```python
@@ -813,7 +827,7 @@ def evaluate_model(
 ) -> dict
 ```
 
-Evaluate a trained model and compute performance metrics.
+Thin wrapper around `compute_metrics` that extracts probabilities from a scikit-learn / XGBoost model.
 
 **Returns:**
 Dict with `auroc`, `auprc`, `precision`, `recall`, `f1`, `threshold`, `confusion_matrix`.
@@ -1070,6 +1084,92 @@ Combine classification and diffusion losses: `total = cls + diff_weight * L_diff
 
 **Returns:**
 Dict with keys: `total`, `cls`, `diff`.
+
+### `src.gnn.train`
+
+GNN training loop with early stopping, gradient clipping, and checkpointing.
+
+#### `TrainingConfig`
+
+```python
+@dataclass
+class TrainingConfig:
+    lr: float = 0.001
+    batch_size: int = 64
+    max_epochs: int = 200
+    patience: int = 20
+    weight_decay: float = 1e-4
+    grad_clip_norm: float = 1.0
+    device: str = "auto"           # "auto" → cuda if available, else cpu
+    checkpoint_dir: Path = Path("outputs/gnn_models/")
+    log_every_n_epochs: int = 5
+```
+
+#### `Trainer`
+
+```python
+class Trainer:
+    def __init__(
+        self, model, train_loader, val_loader,
+        loss_config, training_config=None, aux_edge_indices=None,
+    )
+```
+
+Trains a TD4DD model with early stopping on validation AUROC.
+
+- `train_loader` / `val_loader`: Callables returning fresh batch iterators (e.g. `sampler.get_train_loader`).
+- `aux_edge_indices`: Global auxiliary edges remapped to batch-local indices per batch.
+- Optimizer: `AdamW` with configurable lr and weight_decay.
+- Classification loss built lazily on first batch via `build_classification_loss()`.
+
+**Methods:**
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `train()` | `dict` | Full loop → `{best_val_auroc, best_epoch, training_history, checkpoint_path}` |
+| `_train_epoch()` | `dict` | One training epoch → `{loss, cls_loss, diff_loss}` |
+| `_validate()` | `dict` | Validation pass → `{auroc, auprc, loss}` |
+| `_prepare_batch(batch)` | `dict` | HeteroData → model.forward() kwargs |
+| `_save_checkpoint(epoch, metrics)` | `Path` | Save model + optimizer state |
+| `load_checkpoint(path, model)` | `dict` | Static: load weights, return metadata |
+
+### `src.gnn.evaluate`
+
+GNN evaluation wrapper reusing `compute_metrics` from `src.prediction.evaluate` for apples-to-apples comparison with sklearn/XGBoost baselines.
+
+#### `evaluate_gnn()`
+
+```python
+def evaluate_gnn(
+    model: nn.Module,
+    test_loader: Callable[[], Iterator],
+    prepare_batch_fn: Callable[[HeteroData], dict],
+    output_dir: Path | str | None = None,
+    device: torch.device | str = "cpu",
+) -> dict
+```
+
+Evaluate a trained GNN on a test set. Optionally saves a JSON report to `output_dir`.
+
+**Returns:**
+Dict with `auroc`, `auprc`, `precision`, `recall`, `f1`, `threshold`, `confusion_matrix`.
+
+#### `extract_attention_weights()`
+
+```python
+def extract_attention_weights(
+    model: nn.Module,
+    data_loader: Callable[[], Iterator],
+    prepare_batch_fn: Callable[[HeteroData], dict],
+    top_k: int = 5,
+    device: torch.device | str = "cpu",
+) -> dict
+```
+
+Extract per-admission attention weights and fusion balance for interpretability.
+
+**Returns:**
+Dict keyed by admission index with `hierarchical_weights`, `top_neighbors`, and `track_balance`.
 
 ---
 

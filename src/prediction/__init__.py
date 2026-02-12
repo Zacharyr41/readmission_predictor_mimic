@@ -29,6 +29,7 @@ from src.prediction.model import (
     load_model,
 )
 from src.prediction.evaluate import (
+    compute_metrics,
     evaluate_model,
     get_feature_importance,
     calibration_data,
@@ -43,6 +44,7 @@ __all__ = [
     "save_model",
     "load_model",
     # Evaluation and reporting
+    "compute_metrics",
     "evaluate_model",
     "get_feature_importance",
     "calibration_data",

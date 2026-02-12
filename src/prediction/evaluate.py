@@ -24,19 +24,17 @@ from sklearn.metrics import (
 from xgboost import XGBClassifier
 
 
-def evaluate_model(
-    model: Union[LogisticRegression, XGBClassifier],
-    X_test: Union[pd.DataFrame, np.ndarray],
-    y_test: Union[pd.Series, np.ndarray],
+def compute_metrics(
+    y_proba: np.ndarray,
+    y_test: np.ndarray,
 ) -> dict:
-    """Evaluate a trained model and compute performance metrics.
+    """Compute classification metrics from predicted probabilities.
 
     Uses Youden's J statistic to select optimal classification threshold.
 
     Args:
-        model: Trained classification model
-        X_test: Test features
-        y_test: Test labels
+        y_proba: Predicted probabilities for the positive class
+        y_test: True binary labels
 
     Returns:
         Dictionary containing:
@@ -49,7 +47,7 @@ def evaluate_model(
             - confusion_matrix: Confusion matrix at optimal threshold
     """
     y_test = np.asarray(y_test)
-    y_proba = model.predict_proba(X_test)[:, 1]
+    y_proba = np.asarray(y_proba)
 
     # AUROC
     auroc = roc_auc_score(y_test, y_proba)
@@ -80,6 +78,28 @@ def evaluate_model(
         "threshold": optimal_threshold,
         "confusion_matrix": cm,
     }
+
+
+def evaluate_model(
+    model: Union[LogisticRegression, XGBClassifier],
+    X_test: Union[pd.DataFrame, np.ndarray],
+    y_test: Union[pd.Series, np.ndarray],
+) -> dict:
+    """Evaluate a trained model and compute performance metrics.
+
+    Thin wrapper around ``compute_metrics`` that extracts probabilities
+    from a scikit-learn / XGBoost model.
+
+    Args:
+        model: Trained classification model with ``predict_proba``
+        X_test: Test features
+        y_test: Test labels
+
+    Returns:
+        Dictionary of evaluation metrics (see ``compute_metrics``).
+    """
+    y_proba = model.predict_proba(X_test)[:, 1]
+    return compute_metrics(y_proba, np.asarray(y_test))
 
 
 def get_feature_importance(
