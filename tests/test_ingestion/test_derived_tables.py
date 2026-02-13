@@ -134,6 +134,78 @@ class TestSelectNeurologyCohort:
         # Patient 11 (10h ICU stay) should be excluded - ICU stay < 24h
         assert 11 not in subject_ids, "Patient with 10h ICU stay should be excluded"
 
+    def test_cohort_excludes_secondary_diagnoses(
+        self, synthetic_duckdb: duckdb.DuckDBPyConnection
+    ):
+        """Verify patients with stroke only as secondary diagnosis are excluded."""
+        # Patient 12: primary=pneumonia (J189), secondary=stroke (I639)
+        synthetic_duckdb.execute("""
+            INSERT INTO patients VALUES (12, 'M', 60, 2150, NULL)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO admissions VALUES
+            (112, 12, '2150-01-15 08:00:00', '2150-01-25 14:00:00', 'EMERGENCY', 'HOME', 0)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO icustays VALUES
+            (1012, 12, 112, '2150-01-15 10:00:00', '2150-01-18 08:00:00', 2.9)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO diagnoses_icd VALUES
+            (12, 112, 1, 'J189', 10),
+            (12, 112, 2, 'I639', 10)
+        """)
+
+        create_age_table(synthetic_duckdb)
+        df = select_neurology_cohort(
+            synthetic_duckdb, icd_prefixes=["I63", "I61", "I60"]
+        )
+
+        subject_ids = set(df["subject_id"].tolist())
+        assert 12 not in subject_ids, (
+            "Patient with stroke only as secondary diagnosis should be excluded"
+        )
+
+    def test_cohort_includes_icd9_codes(
+        self, synthetic_duckdb: duckdb.DuckDBPyConnection
+    ):
+        """Verify ICD-9 stroke codes are matched via automatic mapping."""
+        # 3 patients with ICD-9 stroke codes at seq_num=1
+        synthetic_duckdb.execute("""
+            INSERT INTO patients VALUES
+            (13, 'M', 60, 2150, NULL),
+            (14, 'F', 55, 2150, NULL),
+            (15, 'M', 70, 2150, NULL)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO admissions VALUES
+            (113, 13, '2150-01-15 08:00:00', '2150-01-25 14:00:00', 'EMERGENCY', 'HOME', 0),
+            (114, 14, '2150-02-01 08:00:00', '2150-02-10 14:00:00', 'EMERGENCY', 'HOME', 0),
+            (115, 15, '2150-03-01 08:00:00', '2150-03-10 14:00:00', 'EMERGENCY', 'HOME', 0)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO icustays VALUES
+            (1013, 13, 113, '2150-01-15 10:00:00', '2150-01-18 08:00:00', 2.9),
+            (1014, 14, 114, '2150-02-01 10:00:00', '2150-02-04 08:00:00', 2.9),
+            (1015, 15, 115, '2150-03-01 10:00:00', '2150-03-04 08:00:00', 2.9)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO diagnoses_icd VALUES
+            (13, 113, 1, '43391', 9),
+            (14, 114, 1, '430', 9),
+            (15, 115, 1, '431', 9)
+        """)
+
+        create_age_table(synthetic_duckdb)
+        df = select_neurology_cohort(
+            synthetic_duckdb, icd_prefixes=["I63", "I61", "I60"]
+        )
+
+        subject_ids = set(df["subject_id"].tolist())
+        assert 13 in subject_ids, "ICD-9 43391 (ischemic stroke) should be included"
+        assert 14 in subject_ids, "ICD-9 430 (subarachnoid hemorrhage) should be included"
+        assert 15 in subject_ids, "ICD-9 431 (intracerebral hemorrhage) should be included"
+
 
 class TestReadmissionLabels:
     """Tests for create_readmission_labels function."""
@@ -233,6 +305,44 @@ class TestReadmissionLabels:
             "readmitted_60d",
         }
         assert expected_columns.issubset(column_names), f"Missing columns: {expected_columns - column_names}"
+
+    def test_readmission_excludes_hospice_discharge(
+        self, synthetic_duckdb: duckdb.DuckDBPyConnection
+    ):
+        """Verify patients discharged to hospice are excluded from readmission labels."""
+        synthetic_duckdb.execute("""
+            INSERT INTO patients VALUES (16, 'F', 70, 2150, NULL)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO admissions VALUES
+            (116, 16, '2150-01-15 08:00:00', '2150-01-25 14:00:00', 'EMERGENCY', 'HOSPICE', 0)
+        """)
+
+        create_readmission_labels(synthetic_duckdb, windows=[30, 60])
+
+        result = synthetic_duckdb.execute("""
+            SELECT * FROM readmission_labels WHERE hadm_id = 116
+        """).fetchone()
+        assert result is None, "Patient discharged to hospice should be excluded"
+
+    def test_readmission_excludes_ama_discharge(
+        self, synthetic_duckdb: duckdb.DuckDBPyConnection
+    ):
+        """Verify patients discharged against medical advice are excluded."""
+        synthetic_duckdb.execute("""
+            INSERT INTO patients VALUES (17, 'M', 55, 2150, NULL)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO admissions VALUES
+            (117, 17, '2150-02-01 08:00:00', '2150-02-10 14:00:00', 'EMERGENCY', 'AGAINST ADVICE', 0)
+        """)
+
+        create_readmission_labels(synthetic_duckdb, windows=[30, 60])
+
+        result = synthetic_duckdb.execute("""
+            SELECT * FROM readmission_labels WHERE hadm_id = 117
+        """).fetchone()
+        assert result is None, "Patient discharged against medical advice should be excluded"
 
 
 class TestDerivedTablesIntegration:
