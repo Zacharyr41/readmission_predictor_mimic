@@ -16,6 +16,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from src.gnn.evaluate import evaluate_gnn, extract_attention_weights
+from src.gnn.hop_extraction import HopExtractor
 from src.gnn.losses import LossConfig
 from src.gnn.model import ModelConfig, TD4DDModel
 from src.gnn.sampling import DualSamplingConfig, DualTrackSampler, build_auxiliary_subgraphs
@@ -81,6 +82,41 @@ def _convert_paths(d: Any) -> Any:
     if isinstance(d, Path):
         return str(d)
     return d
+
+
+def _build_contextual_edge_sequences(
+    view_data: HeteroData,
+    config: ExperimentConfig,
+) -> list[list[tuple[str, str, str]]]:
+    """Derive alternating edge sequences for the contextual transformer paths.
+
+    One sequence per active entity type (up to ``num_contextual_paths``).
+    Each sequence alternates: ``[target→entity, entity→target, ...]`` for
+    ``k_hops_contextual`` hops.
+    """
+    target = config.view_config.target_node_type
+    sequences: list[list[tuple[str, str, str]]] = []
+
+    # Find forward edges from target to entity types
+    for et in view_data.edge_types:
+        src, rel, dst = et
+        if src == target and dst != target and not rel.startswith("rev_"):
+            rev_rel = f"rev_{rel}"
+            rev_key = (dst, rev_rel, target)
+            if rev_key in view_data.edge_types:
+                # Build alternating sequence for k_hops_contextual hops
+                seq: list[tuple[str, str, str]] = []
+                for k in range(config.k_hops_contextual):
+                    if k % 2 == 0:
+                        seq.append(et)  # target → entity
+                    else:
+                        seq.append(rev_key)  # entity → target
+                sequences.append(seq)
+
+        if len(sequences) >= config.num_contextual_paths:
+            break
+
+    return sequences
 
 
 def _serialize_metrics(metrics: dict) -> dict:
@@ -325,11 +361,16 @@ class ExperimentRunner:
             view_data, sampling_config, config.training_config.batch_size
         )
 
-        # 7. Infer feat_dims
+        # 7. Infer feat_dims and resolve contextual paths
         feat_dims = _infer_feat_dims(view_data)
+        edge_sequences: list[list[tuple[str, str, str]]] = []
+        if config.use_transformer:
+            edge_sequences = _build_contextual_edge_sequences(view_data, config)
 
-        # 8. Create model
+        # 8. Create model (adjust num_contextual_paths to actual count)
         model_config = config.to_model_config(feat_dims)
+        if edge_sequences:
+            model_config.num_contextual_paths = len(edge_sequences)
         model = TD4DDModel(model_config)
 
         # 9. Configure output paths
@@ -346,7 +387,20 @@ class ExperimentRunner:
             log_every_n_epochs=config.training_config.log_every_n_epochs,
         )
 
-        # 10. Create Trainer
+        # 10. Construct HopExtractor if transformer is enabled
+        hop_extractor = None
+        if config.use_transformer and edge_sequences:
+            temporal_types = sampling_config.temporal.edge_types if sampling_config.temporal.edge_types else []
+            hop_extractor = HopExtractor(
+                contextual_edge_sequences=edge_sequences,
+                temporal_edge_types=temporal_types,
+                k_hops_contextual=config.k_hops_contextual,
+                k_hops_temporal=config.k_hops_temporal if config.use_temporal_encoding else 0,
+                neighbors_per_hop_contextual=sampling_config.contextual.neighbors_per_hop,
+                neighbors_per_hop_temporal=sampling_config.temporal.neighbors_per_hop,
+            )
+
+        # 11. Create Trainer
         trainer = Trainer(
             model=model,
             train_loader=sampler.get_train_loader,
@@ -354,12 +408,13 @@ class ExperimentRunner:
             loss_config=config.loss_config,
             training_config=training_config,
             aux_edge_indices=aux_edge_indices,
+            hop_extractor=hop_extractor,
         )
 
-        # 11. Train
+        # 12. Train
         train_result = trainer.train()
 
-        # 12. Evaluate
+        # 13. Evaluate
         eval_metrics = evaluate_gnn(
             model=model,
             test_loader=sampler.get_test_loader,
@@ -368,7 +423,7 @@ class ExperimentRunner:
             device=training_config.device,
         )
 
-        # 13. Save results
+        # 14. Save results
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # metrics.json

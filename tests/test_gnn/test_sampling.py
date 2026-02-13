@@ -423,33 +423,42 @@ class TestDualTrackSampler:
         sampler = DualTrackSampler(view_data, dual_cfg, batch_size=4)
         assert sampler.target_node_type == "admission"
 
-    def test_build_num_neighbors_contextual(self, view_data):
-        """Active contextual edges get non-zero neighbors; temporal get zero."""
+    def test_unified_num_neighbors_contextual_active(self, view_data):
+        """Active contextual edges get non-zero neighbors in early hops."""
         cfg = GraphViewConfig.readmission_default()
         dual_cfg = DualSamplingConfig.from_view_config(cfg, view_data)
         sampler = DualTrackSampler(view_data, dual_cfg, batch_size=4)
 
-        ctx_nn = sampler._ctx_num_neighbors
-        # prescribed should be active
+        nn = sampler._num_neighbors
         prescribed_key = ("admission", "prescribed", "drug")
-        assert all(n > 0 for n in ctx_nn[prescribed_key])
+        # contextual edges should be active (at least some hops > 0)
+        assert any(n > 0 for n in nn[prescribed_key])
 
-        # followed_by should be inactive in contextual track
-        fb_key = ("admission", "followed_by", "admission")
-        assert all(n == 0 for n in ctx_nn[fb_key])
-
-    def test_build_num_neighbors_temporal(self, view_data):
-        """Temporal track: followed_by active, prescription inactive."""
+    def test_unified_num_neighbors_temporal_padded(self, view_data):
+        """Temporal edge types get padded lists: [8, 8, 0, 0] for 2 tmp hops within 4 ctx hops."""
         cfg = GraphViewConfig.readmission_default()
         dual_cfg = DualSamplingConfig.from_view_config(cfg, view_data)
         sampler = DualTrackSampler(view_data, dual_cfg, batch_size=4)
 
-        tmp_nn = sampler._tmp_num_neighbors
+        nn = sampler._num_neighbors
         fb_key = ("admission", "followed_by", "admission")
-        assert all(n > 0 for n in tmp_nn[fb_key])
+        # temporal hops = 2 active, padded to length 4
+        assert len(nn[fb_key]) == 4
+        assert nn[fb_key][0] > 0  # first 2 hops active
+        assert nn[fb_key][1] > 0
+        assert nn[fb_key][2] == 0  # padded zeros
+        assert nn[fb_key][3] == 0
 
-        prescribed_key = ("admission", "prescribed", "drug")
-        assert all(n == 0 for n in tmp_nn[prescribed_key])
+    def test_unified_loader_has_both_edge_types(self, view_data):
+        """A single batch should contain both contextual and temporal edges."""
+        cfg = GraphViewConfig.readmission_default()
+        dual_cfg = DualSamplingConfig.from_view_config(cfg, view_data)
+        sampler = DualTrackSampler(view_data, dual_cfg, batch_size=4)
+
+        batch = next(iter(sampler.get_train_loader()))
+        edge_rels = {r for _, r, _ in batch.edge_types}
+        assert "prescribed" in edge_rels or "rev_prescribed" in edge_rels
+        assert "followed_by" in edge_rels or "rev_followed_by" in edge_rels
 
     def test_len_matches_expected(self, view_data):
         """__len__ should be ceil(n_train / batch_size)."""

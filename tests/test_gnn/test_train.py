@@ -6,6 +6,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from src.gnn.evaluate import evaluate_gnn
+from src.gnn.hop_extraction import HopExtractor
 from src.gnn.losses import LossConfig
 from src.gnn.model import ModelConfig, TD4DDModel
 from src.gnn.train import Trainer, TrainingConfig
@@ -232,3 +233,138 @@ class TestTrainingHistory:
         for entry in history:
             assert "train_loss" in entry
             assert "val_auroc" in entry
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HopExtractor integration tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+TRANSFORMER_FEAT_DIM_ADM = 32
+TRANSFORMER_FEAT_DIM_DRUG = 16
+TRANSFORMER_D = 16
+
+
+def _make_transformer_batch(batch_size: int, n_positive: int = 2) -> HeteroData:
+    """Batch with drug nodes and contextual+temporal edges for transformer."""
+    total_adm = batch_size + 4
+    total_drug = 5
+    data = HeteroData()
+
+    data["admission"].x = torch.randn(total_adm, TRANSFORMER_FEAT_DIM_ADM)
+    data["admission"].y = torch.zeros(total_adm)
+    data["admission"].y[:n_positive] = 1.0
+    data.batch_size = batch_size
+    data["admission"].n_id = torch.arange(total_adm)
+
+    data["drug"].x = torch.randn(total_drug, TRANSFORMER_FEAT_DIM_DRUG)
+
+    # Contextual edges: each admission prescribed to some drug
+    src = list(range(total_adm))
+    dst = [i % total_drug for i in range(total_adm)]
+    data["admission", "prescribed", "drug"].edge_index = torch.tensor(
+        [src, dst], dtype=torch.long
+    )
+    data["drug", "rev_prescribed", "admission"].edge_index = torch.tensor(
+        [dst, src], dtype=torch.long
+    )
+
+    # Temporal edges: chain
+    fb_src = list(range(total_adm - 1))
+    fb_dst = list(range(1, total_adm))
+    data["admission", "followed_by", "admission"].edge_index = torch.tensor(
+        [fb_src, fb_dst], dtype=torch.long
+    )
+    data["admission", "followed_by", "admission"].edge_attr = torch.rand(
+        len(fb_src), 1
+    )
+    data["admission", "rev_followed_by", "admission"].edge_index = torch.tensor(
+        [fb_dst, fb_src], dtype=torch.long
+    )
+    data["admission", "rev_followed_by", "admission"].edge_attr = torch.rand(
+        len(fb_src), 1
+    )
+
+    return data
+
+
+def _make_transformer_trainer(max_epochs=3, patience=10, batch_size=4, n_positive=2):
+    """Build a transformer-enabled model + trainer with HopExtractor."""
+    torch.manual_seed(42)
+    config = ModelConfig(
+        feat_dims={"admission": TRANSFORMER_FEAT_DIM_ADM, "drug": TRANSFORMER_FEAT_DIM_DRUG},
+        d_model=TRANSFORMER_D,
+        num_contextual_paths=1,
+        k_hops_contextual=2,
+        k_hops_temporal=1,
+        nhead=2,
+        dropout=0.0,
+        use_transformer=True,
+        use_diffusion=False,
+    )
+    model = TD4DDModel(config)
+
+    batches = [_make_transformer_batch(batch_size, n_positive) for _ in range(2)]
+
+    hop_extractor = HopExtractor(
+        contextual_edge_sequences=[
+            [("admission", "prescribed", "drug"),
+             ("drug", "rev_prescribed", "admission")],
+        ],
+        temporal_edge_types=[
+            ("admission", "followed_by", "admission"),
+            ("admission", "rev_followed_by", "admission"),
+        ],
+        k_hops_contextual=2,
+        k_hops_temporal=1,
+        neighbors_per_hop_contextual=4,
+        neighbors_per_hop_temporal=4,
+    )
+
+    tc = TrainingConfig(
+        max_epochs=max_epochs,
+        patience=patience,
+        device="cpu",
+        checkpoint_dir="/tmp/test_gnn_ckpt_transformer",
+        log_every_n_epochs=1,
+    )
+    trainer = Trainer(
+        model=model,
+        train_loader=_mock_loader_fn(batches),
+        val_loader=_mock_loader_fn(batches),
+        loss_config=LossConfig(),
+        training_config=tc,
+        hop_extractor=hop_extractor,
+    )
+    return trainer, model, batches
+
+
+class TestPrepareBatchHopIndices:
+    def test_prepare_batch_returns_hop_indices(self):
+        """With HopExtractor, _prepare_batch returns non-None hop_indices."""
+        trainer, _, batches = _make_transformer_trainer()
+        kwargs = trainer._prepare_batch(batches[0])
+        assert "hop_indices" in kwargs
+        assert kwargs["hop_indices"] is not None
+
+    def test_prepare_batch_no_extractor(self):
+        """Without HopExtractor, hop_indices is None (backward compat)."""
+        trainer, _, _ = _make_trainer()
+        batch = _make_batch(8, 2)
+        kwargs = trainer._prepare_batch(batch)
+        assert kwargs.get("hop_indices") is None
+
+
+class TestTrainWithTransformer:
+    def test_train_epoch_with_transformer(self):
+        """Full epoch runs with transformer branch via HopExtractor."""
+        trainer, _, _ = _make_transformer_trainer()
+        metrics = trainer._train_epoch()
+        assert metrics["loss"] > 0
+
+    def test_validate_with_transformer(self):
+        """Validation produces valid auroc/auprc with transformer branch."""
+        trainer, _, _ = _make_transformer_trainer()
+        trainer._train_epoch()  # init cls_loss_fn
+        val_metrics = trainer._validate()
+        assert 0.0 <= val_metrics["auroc"] <= 1.0
+        assert 0.0 <= val_metrics["auprc"] <= 1.0

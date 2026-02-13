@@ -10,6 +10,7 @@ from torch import Tensor, nn
 from torch_geometric.data import HeteroData
 
 from src.gnn.diffusion import DiffusionModule
+from src.gnn.hop_extraction import HopIndices
 from src.gnn.transformer import DualTrackTransformer
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class TD4DDModel(nn.Module):
         contextual_hop_neighbors: list[list[Tensor]] | None = None,
         temporal_hop_neighbors: list[Tensor] | None = None,
         temporal_hop_deltas: list[Tensor] | None = None,
+        hop_indices: HopIndices | None = None,
     ) -> dict:
         """Forward pass through the TD4DD model.
 
@@ -114,6 +116,10 @@ class TD4DDModel(nn.Module):
             Pre-structured neighbor tensors for the transformer temporal track.
         temporal_hop_deltas : list[Tensor] or None
             Day-gap tensors for temporal encoding.
+        hop_indices : HopIndices or None
+            Lightweight index structures produced by ``HopExtractor``.
+            When provided and ``contextual_hop_neighbors`` is None, the model
+            auto-gathers projected features using these indices.
 
         Returns
         -------
@@ -130,6 +136,12 @@ class TD4DDModel(nn.Module):
         target_emb = projected["admission"]
         batch_size = self._resolve_batch_size(batch_data, target_emb.shape[0])
         target_emb = target_emb[:batch_size]
+
+        # Auto-gather from hop_indices if explicit tensors not provided
+        if contextual_hop_neighbors is None and hop_indices is not None:
+            contextual_hop_neighbors, temporal_hop_neighbors, temporal_hop_deltas = (
+                self._gather_hop_neighbors(projected, hop_indices)
+            )
 
         # 3. Transformer branch
         h_hhgat = None
@@ -176,3 +188,83 @@ class TD4DDModel(nn.Module):
             "L_diff": L_diff,
             "attention_info": attention_info,
         }
+
+    def _gather_hop_neighbors(
+        self,
+        projected: dict[str, Tensor],
+        hop_indices: HopIndices,
+    ) -> tuple[
+        list[list[Tensor]] | None,
+        list[Tensor] | None,
+        list[Tensor] | None,
+    ]:
+        """Gather projected features using hop index structures.
+
+        Parameters
+        ----------
+        projected : dict[str, Tensor]
+            Per-node-type projected features ``{ntype: (N_total, d_model)}``.
+        hop_indices : HopIndices
+            Index structures from ``HopExtractor.extract()``.
+
+        Returns
+        -------
+        tuple
+            ``(contextual_hop_neighbors, temporal_hop_neighbors, temporal_hop_deltas)``
+            matching the shapes the transformer expects.
+        """
+        d = self.config.d_model
+
+        # --- Contextual ---
+        contextual: list[list[Tensor]] | None = None
+        if hop_indices.contextual_indices:
+            contextual = []
+            for path_idx in range(len(hop_indices.contextual_indices)):
+                path_tensors: list[Tensor] = []
+                for hop_idx in range(len(hop_indices.contextual_indices[path_idx])):
+                    indices = hop_indices.contextual_indices[path_idx][hop_idx]  # (B, N)
+                    mask = hop_indices.contextual_masks[path_idx][hop_idx]  # (B, N)
+                    ntype = hop_indices.contextual_node_types[path_idx][hop_idx]
+
+                    if ntype in projected:
+                        feats = projected[ntype]  # (total_nodes, d)
+                        gathered = feats[indices]  # (B, N, d)
+                    else:
+                        # Node type not projected — use zeros
+                        gathered = torch.zeros(
+                            *indices.shape, d,
+                            device=indices.device,
+                            dtype=next(iter(projected.values())).dtype,
+                        )
+
+                    # Zero out padded positions
+                    gathered = gathered * mask.unsqueeze(-1).float()
+                    path_tensors.append(gathered)
+                contextual.append(path_tensors)
+
+        # --- Temporal ---
+        temporal_neighbors: list[Tensor] | None = None
+        temporal_deltas: list[Tensor] | None = None
+        if hop_indices.temporal_indices is not None:
+            temporal_neighbors = []
+            for hop_idx in range(len(hop_indices.temporal_indices)):
+                indices = hop_indices.temporal_indices[hop_idx]  # (B, N)
+                mask = hop_indices.temporal_masks[hop_idx]  # (B, N)
+
+                # Temporal nodes are always admissions
+                if "admission" in projected:
+                    feats = projected["admission"]
+                    gathered = feats[indices]
+                else:
+                    gathered = torch.zeros(
+                        *indices.shape, d,
+                        device=indices.device,
+                        dtype=next(iter(projected.values())).dtype,
+                    )
+
+                gathered = gathered * mask.unsqueeze(-1).float()
+                temporal_neighbors.append(gathered)
+
+            temporal_deltas = hop_indices.temporal_deltas
+
+        return contextual, temporal_neighbors, temporal_deltas

@@ -12,6 +12,7 @@ from sklearn.metrics import roc_auc_score
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from src.gnn.hop_extraction import HopExtractor
 from src.gnn.losses import LossConfig, build_classification_loss, compute_total_loss
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class Trainer:
         loss_config: LossConfig,
         training_config: TrainingConfig | None = None,
         aux_edge_indices: list[torch.Tensor] | None = None,
+        hop_extractor: HopExtractor | None = None,
     ) -> None:
         self.config = training_config or TrainingConfig()
         self.device = _resolve_device(self.config.device)
@@ -92,6 +94,7 @@ class Trainer:
         self.val_loader = val_loader
         self.loss_config = loss_config
         self.aux_edge_indices = aux_edge_indices
+        self.hop_extractor = hop_extractor
 
         self.optimizer = torch.optim.AdamW(
             model.parameters(),
@@ -286,12 +289,14 @@ class Trainer:
                     )
                 local_aux.append(local_edge)
 
+        hop_indices = None
+        if self.hop_extractor is not None:
+            hop_indices = self.hop_extractor.extract(batch, batch_size)
+
         return {
             "batch_data": batch,
             "aux_edge_indices": local_aux,
-            "contextual_hop_neighbors": None,
-            "temporal_hop_neighbors": None,
-            "temporal_hop_deltas": None,
+            "hop_indices": hop_indices,
         }
 
     def _save_checkpoint(self, epoch: int, metrics: dict) -> Path:

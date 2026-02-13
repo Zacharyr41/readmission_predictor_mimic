@@ -339,61 +339,6 @@ def _topk_recency_filter(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-class _ZippedLoaderIterator:
-    """Iterator that zips contextual and temporal NeighborLoader batches."""
-
-    def __init__(
-        self,
-        ctx_loader: NeighborLoader | None,
-        tmp_loader: NeighborLoader | None,
-    ) -> None:
-        self._ctx_iter = iter(ctx_loader) if ctx_loader is not None else None
-        self._tmp_iter = iter(tmp_loader) if tmp_loader is not None else None
-
-    def __iter__(self) -> Iterator[HeteroData]:
-        return self
-
-    def __next__(self) -> HeteroData:
-        ctx_batch: HeteroData | None = None
-        tmp_batch: HeteroData | None = None
-
-        if self._ctx_iter is not None:
-            try:
-                ctx_batch = next(self._ctx_iter)
-            except StopIteration:
-                raise StopIteration
-
-        if self._tmp_iter is not None:
-            try:
-                tmp_batch = next(self._tmp_iter)
-            except StopIteration:
-                tmp_batch = None
-
-        if ctx_batch is None and tmp_batch is None:
-            raise StopIteration
-
-        # If only temporal, return it directly
-        if ctx_batch is None:
-            return tmp_batch  # type: ignore[return-value]
-
-        # If no temporal batch, return contextual only
-        if tmp_batch is None:
-            return ctx_batch
-
-        # Merge: overlay temporal edges from tmp_batch onto ctx_batch
-        for src, rel, dst in tmp_batch.edge_types:
-            if "followed_by" in rel:
-                store = tmp_batch[src, rel, dst]
-                ctx_batch[src, rel, dst].edge_index = store.edge_index
-                if (
-                    hasattr(store, "edge_attr")
-                    and store.edge_attr is not None
-                ):
-                    ctx_batch[src, rel, dst].edge_attr = store.edge_attr
-
-        return ctx_batch
-
-
 class DualTrackSampler:
     """Dual-track neighbor sampler for contextual and temporal edges.
 
@@ -420,13 +365,8 @@ class DualTrackSampler:
         # Detect target node type (node type with train_mask)
         self.target_node_type = self._detect_target_node_type()
 
-        # Build num_neighbors dicts
-        self._ctx_num_neighbors = self._build_num_neighbors(
-            config.contextual
-        )
-        self._tmp_num_neighbors = self._build_num_neighbors(
-            config.temporal
-        )
+        # Build unified num_neighbors dict combining both tracks
+        self._num_neighbors = self._build_unified_num_neighbors()
 
         # Pre-filter temporal data if recency weighting is active
         self._temporal_data = self._prepare_temporal_data()
@@ -438,24 +378,34 @@ class DualTrackSampler:
                 return nt
         raise ValueError("No node type with train_mask found in view_data")
 
-    def _build_num_neighbors(
-        self, track: SamplingTrackConfig
+    def _build_unified_num_neighbors(
+        self,
     ) -> dict[tuple[str, str, str], list[int]]:
-        """Build the ``num_neighbors`` dict for a NeighborLoader.
+        """Build a single ``num_neighbors`` dict combining both tracks.
 
-        Active edge types get ``[neighbors_per_hop] * k_hops``.
-        All other edge types get ``[0] * k_hops``.
+        Contextual edge types get ``[neighbors_per_hop_ctx] * k_hops_ctx``
+        (padded to ``max_hops`` with zeros).  Temporal edge types get
+        ``[neighbors_per_hop_tmp] * k_hops_tmp`` padded likewise.
+        All other edge types get ``[0] * max_hops``.
         """
-        active_set = set(
-            tuple(et) for et in track.edge_types
-        )
+        ctx = self.config.contextual
+        tmp = self.config.temporal
+        max_hops = max(ctx.k_hops, tmp.k_hops)
+
+        ctx_active = set(tuple(et) for et in ctx.edge_types)
+        tmp_active = set(tuple(et) for et in tmp.edge_types)
+
         result: dict[tuple[str, str, str], list[int]] = {}
-        k = track.k_hops
         for et in self.view_data.edge_types:
-            if et in active_set:
-                result[et] = [track.neighbors_per_hop] * k
+            if et in ctx_active:
+                ns = [ctx.neighbors_per_hop] * ctx.k_hops
+                ns += [0] * (max_hops - ctx.k_hops)
+            elif et in tmp_active:
+                ns = [tmp.neighbors_per_hop] * tmp.k_hops
+                ns += [0] * (max_hops - tmp.k_hops)
             else:
-                result[et] = [0] * k
+                ns = [0] * max_hops
+            result[et] = ns
         return result
 
     def _prepare_temporal_data(self) -> HeteroData:
@@ -521,26 +471,26 @@ class DualTrackSampler:
 
     def _get_loader(
         self, mask_attr: str, shuffle: bool = False
-    ) -> _ZippedLoaderIterator:
-        ctx_loader = self._make_loader(
-            self.view_data, self._ctx_num_neighbors, mask_attr, shuffle
+    ) -> NeighborLoader | None:
+        """Create a single unified NeighborLoader for both tracks."""
+        return self._make_loader(
+            self._temporal_data, self._num_neighbors, mask_attr, shuffle
         )
-        tmp_loader = self._make_loader(
-            self._temporal_data, self._tmp_num_neighbors, mask_attr, shuffle
-        )
-        return _ZippedLoaderIterator(ctx_loader, tmp_loader)
 
-    def get_train_loader(self) -> _ZippedLoaderIterator:
+    def get_train_loader(self) -> Iterator[HeteroData]:
         """Return an iterator over training batches."""
-        return self._get_loader("train_mask", shuffle=True)
+        loader = self._get_loader("train_mask", shuffle=True)
+        return iter(loader) if loader is not None else iter([])
 
-    def get_val_loader(self) -> _ZippedLoaderIterator:
+    def get_val_loader(self) -> Iterator[HeteroData]:
         """Return an iterator over validation batches."""
-        return self._get_loader("val_mask", shuffle=False)
+        loader = self._get_loader("val_mask", shuffle=False)
+        return iter(loader) if loader is not None else iter([])
 
-    def get_test_loader(self) -> _ZippedLoaderIterator:
+    def get_test_loader(self) -> Iterator[HeteroData]:
         """Return an iterator over test batches."""
-        return self._get_loader("test_mask", shuffle=False)
+        loader = self._get_loader("test_mask", shuffle=False)
+        return iter(loader) if loader is not None else iter([])
 
     def __len__(self) -> int:
         """Number of batches per epoch (based on training set)."""
