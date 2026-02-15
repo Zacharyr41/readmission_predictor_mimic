@@ -4,8 +4,12 @@ This module combines tabular and graph features into a single feature matrix
 for machine learning model training.
 """
 
+from __future__ import annotations
+
+import logging
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 import numpy as np
 from rdflib import Graph
@@ -24,6 +28,18 @@ from src.feature_extraction.graph_features import (
     extract_temporal_features,
     extract_graph_structure_features,
 )
+from src.feature_extraction.sql_features import (
+    extract_demographics_sql,
+    extract_stay_features_sql,
+    extract_lab_summary_sql,
+    extract_vital_summary_sql,
+    extract_medication_features_sql,
+    extract_diagnosis_features_sql,
+    extract_labels_sql,
+    extract_subject_ids_sql,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_subject_ids(graph: Graph) -> pd.DataFrame:
@@ -156,35 +172,65 @@ def _fill_missing_values(df: pd.DataFrame, label_cols: list[str]) -> pd.DataFram
 
 def build_feature_matrix(
     graph: Graph,
-    save_path: Path | None = None
+    conn: duckdb.DuckDBPyConnection | None = None,
+    cohort_df: pd.DataFrame | None = None,
+    save_path: Path | None = None,
 ) -> pd.DataFrame:
-    """Build complete feature matrix from RDF graph.
+    """Build complete feature matrix from RDF graph and/or DuckDB.
 
-    Combines all feature extractors and readmission labels into a single
-    DataFrame suitable for machine learning.
+    When ``conn`` and ``cohort_df`` are provided, the 6 tabular feature
+    extractors run as DuckDB SQL (orders of magnitude faster than SPARQL).
+    The 4 graph-dependent extractors (SNOMED mappings, temporal relations,
+    graph topology) still use SPARQL.
+
+    When ``conn`` is None, all extractors use SPARQL (backward compatible).
 
     Args:
         graph: RDF graph containing the clinical knowledge graph.
+        conn: Optional DuckDB connection with MIMIC tables and derived tables.
+        cohort_df: Optional cohort DataFrame (subject_id, hadm_id, stay_id).
+            Required when ``conn`` is provided.
         save_path: Optional path to save the feature matrix as parquet.
 
     Returns:
         DataFrame with all features and labels, one row per admission.
     """
-    # Extract all feature groups
-    demographics = extract_demographics(graph)
-    stay_features = extract_stay_features(graph)
-    lab_summary = extract_lab_summary(graph)
-    vital_summary = extract_vital_summary(graph)
-    medication_features = extract_medication_features(graph)
-    diagnosis_features = extract_diagnosis_features(graph)
+    use_sql = conn is not None and cohort_df is not None
+
+    if use_sql:
+        # Register cohort as temp table for SQL extractors
+        conn.execute(
+            "CREATE OR REPLACE TEMP TABLE cohort AS SELECT * FROM cohort_df"
+        )
+        logger.info("Using DuckDB SQL for tabular feature extraction")
+
+        # SQL path: 6 tabular extractors + labels + subject IDs
+        demographics = extract_demographics_sql(conn)
+        stay_features = extract_stay_features_sql(conn)
+        lab_summary = extract_lab_summary_sql(conn)
+        vital_summary = extract_vital_summary_sql(conn)
+        medication_features = extract_medication_features_sql(conn)
+        diagnosis_features = extract_diagnosis_features_sql(conn)
+        labels = extract_labels_sql(conn)
+        subject_ids = extract_subject_ids_sql(conn)
+    else:
+        logger.info("Using SPARQL for all feature extraction")
+
+        # SPARQL path: all extractors via RDF graph
+        demographics = extract_demographics(graph)
+        stay_features = extract_stay_features(graph)
+        lab_summary = extract_lab_summary(graph)
+        vital_summary = extract_vital_summary(graph)
+        medication_features = extract_medication_features(graph)
+        diagnosis_features = extract_diagnosis_features(graph)
+        labels = _extract_labels(graph)
+        subject_ids = _extract_subject_ids(graph)
+
+    # Graph-dependent extractors always use SPARQL
     snomed_diagnosis_features = extract_snomed_diagnosis_features(graph)
     snomed_medication_features = extract_snomed_medication_features(graph)
     temporal_features = extract_temporal_features(graph)
     graph_structure_features = extract_graph_structure_features(graph)
-
-    # Extract labels and subject IDs
-    labels = _extract_labels(graph)
-    subject_ids = _extract_subject_ids(graph)
 
     # Merge all features on hadm_id
     # Start with labels as the base (ensures we have all admissions)

@@ -35,15 +35,34 @@ from src.feature_extraction.graph_features import (
 from src.feature_extraction.feature_builder import (
     build_feature_matrix,
 )
+from src.feature_extraction.sql_features import (
+    extract_demographics_sql,
+    extract_stay_features_sql,
+    extract_lab_summary_sql,
+    extract_vital_summary_sql,
+    extract_medication_features_sql,
+    extract_diagnosis_features_sql,
+    extract_labels_sql,
+    extract_subject_ids_sql,
+)
 
 __all__ = [
-    # Tabular feature extractors
+    # Tabular feature extractors (SPARQL)
     "extract_demographics",
     "extract_stay_features",
     "extract_lab_summary",
     "extract_vital_summary",
     "extract_medication_features",
     "extract_diagnosis_features",
+    # Tabular feature extractors (SQL)
+    "extract_demographics_sql",
+    "extract_stay_features_sql",
+    "extract_lab_summary_sql",
+    "extract_vital_summary_sql",
+    "extract_medication_features_sql",
+    "extract_diagnosis_features_sql",
+    "extract_labels_sql",
+    "extract_subject_ids_sql",
     # Graph feature extractors
     "extract_temporal_features",
     "extract_graph_structure_features",

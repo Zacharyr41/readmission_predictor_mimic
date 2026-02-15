@@ -140,7 +140,19 @@ def run_pipeline(
     logger.info("Stage 4: Extracting features...")
     from src.feature_extraction.feature_builder import build_feature_matrix
 
-    feature_df = build_feature_matrix(graph, save_path=paths["features"])
+    import duckdb
+    from src.ingestion.derived_tables import select_neurology_cohort
+
+    feat_conn = duckdb.connect(str(db_path), read_only=True)
+    cohort_df = select_neurology_cohort(feat_conn, settings.cohort_icd_codes)
+    if settings.patients_limit > 0:
+        limited = cohort_df["subject_id"].unique()[: settings.patients_limit]
+        cohort_df = cohort_df[cohort_df["subject_id"].isin(limited)]
+
+    feature_df = build_feature_matrix(
+        graph, conn=feat_conn, cohort_df=cohort_df, save_path=paths["features"]
+    )
+    feat_conn.close()
     result["feature_shape"] = feature_df.shape
     logger.info(f"  Feature matrix shape: {feature_df.shape}")
 
