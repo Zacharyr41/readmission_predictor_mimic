@@ -1,0 +1,23 @@
+workerPoolSpecs:
+  - machineSpec:
+      machineType: MACHINE_TYPE_PLACEHOLDER
+      acceleratorType: NVIDIA_TESLA_T4
+      acceleratorCount: 1
+    replicaCount: 1
+    containerSpec:
+      imageUri: IMAGE_URI_PLACEHOLDER
+      env:
+        - name: GCP_PROJECT
+          value: "GCP_PROJECT_PLACEHOLDER"
+        - name: GCS_OUTPUT_BUCKET
+          value: "GCS_BUCKET_PLACEHOLDER"
+        - name: EXPERIMENT
+          value: "EXPERIMENT_PLACEHOLDER"
+        - name: SEED
+          value: "SEED_PLACEHOLDER"
+        - name: PATIENTS_LIMIT
+          value: "PATIENTS_LIMIT_PLACEHOLDER"
+        - name: SKIP_ALLEN
+          value: "SKIP_ALLEN_PLACEHOLDER"
+        - name: RUN_ALL
+          value: "RUN_ALL_PLACEHOLDER"

@@ -39,6 +39,10 @@ gnn = [
     "torch-scatter>=2.1",
     "transformers>=4.35",
 ]
+cloud = [
+    "google-cloud-storage>=2.14",
+    "google-cloud-secret-manager>=2.18",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

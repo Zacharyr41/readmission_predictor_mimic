@@ -51,6 +51,7 @@ data/features/*.csv
 
 # Generated outputs
 outputs/
+cloud_outputs/
 
 # Ontology outputs
 ontology/output/*.ttl
