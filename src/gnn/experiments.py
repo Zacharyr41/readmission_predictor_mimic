@@ -277,8 +277,13 @@ class ExperimentRunner:
         Path to a saved HeteroData .pt file.
     """
 
-    def __init__(self, graph_path: Path) -> None:
+    def __init__(
+        self,
+        graph_path: Path,
+        base_output_dir: Path | None = None,
+    ) -> None:
         self.graph_path = Path(graph_path)
+        self.base_output_dir = Path(base_output_dir) if base_output_dir else Path("outputs/gnn_experiments")
         self._cached_data: HeteroData | None = None
 
     def _load_data(self) -> HeteroData:
@@ -374,7 +379,7 @@ class ExperimentRunner:
         model = TD4DDModel(model_config)
 
         # 9. Configure output paths
-        output_dir = Path(f"outputs/gnn_experiments/{experiment_name}")
+        output_dir = self.base_output_dir / experiment_name
         training_config = TrainingConfig(
             lr=config.training_config.lr,
             batch_size=config.training_config.batch_size,

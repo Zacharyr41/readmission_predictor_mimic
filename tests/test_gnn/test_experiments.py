@@ -194,7 +194,7 @@ class TestListCLI:
 class TestRunnerSynthetic:
     def test_run_e1_baseline(self, synthetic_graph, tmp_path):
         """E1_mlp_baseline runs end-to-end on synthetic data."""
-        runner = ExperimentRunner(synthetic_graph)
+        runner = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         overrides = _small_overrides(tmp_path)
         result = runner.run("E1_mlp_baseline", seed=42, config_overrides=overrides)
 
@@ -214,10 +214,10 @@ class TestReproducibility:
         """Running E1 twice with seed=42 produces identical AUROC."""
         overrides = _small_overrides(tmp_path)
 
-        runner1 = ExperimentRunner(synthetic_graph)
+        runner1 = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         r1 = runner1.run("E1_mlp_baseline", seed=42, config_overrides=overrides)
 
-        runner2 = ExperimentRunner(synthetic_graph)
+        runner2 = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         r2 = runner2.run("E1_mlp_baseline", seed=42, config_overrides=overrides)
 
         a1 = r1["eval_metrics"]["auroc"]
@@ -248,9 +248,9 @@ class TestCompareTable:
 
 
 class TestUnknownExperiment:
-    def test_unknown_raises_keyerror(self, synthetic_graph):
+    def test_unknown_raises_keyerror(self, synthetic_graph, tmp_path):
         """Running a nonexistent experiment raises KeyError."""
-        runner = ExperimentRunner(synthetic_graph)
+        runner = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         with pytest.raises(KeyError, match="nonexistent"):
             runner.run("nonexistent")
 
@@ -260,7 +260,7 @@ class TestCustomConfigOverride:
         """Config override for d_model=32 is reflected in saved config."""
         overrides = _small_overrides(tmp_path)
         overrides["d_model"] = 32
-        runner = ExperimentRunner(synthetic_graph)
+        runner = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         result = runner.run("E1_mlp_baseline", seed=42, config_overrides=overrides)
 
         # Check saved config reflects override
@@ -282,7 +282,7 @@ class TestCustomConfigOverride:
 class TestTransformerActivation:
     def test_e3_transformer_only_runs(self, synthetic_graph, tmp_path):
         """E3_transformer_only runs end-to-end with transformer branch active."""
-        runner = ExperimentRunner(synthetic_graph)
+        runner = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         overrides = _small_overrides(tmp_path)
         result = runner.run("E3_transformer_only", seed=42, config_overrides=overrides)
 
@@ -292,7 +292,7 @@ class TestTransformerActivation:
 
     def test_e6_full_model_runs(self, synthetic_graph, tmp_path):
         """E6_full_model runs end-to-end with both branches."""
-        runner = ExperimentRunner(synthetic_graph)
+        runner = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         overrides = _small_overrides(tmp_path)
         result = runner.run("E6_full_model", seed=42, config_overrides=overrides)
 
@@ -302,7 +302,7 @@ class TestTransformerActivation:
 
     def test_e1_vs_e3_differ(self, synthetic_graph, tmp_path):
         """E1 (MLP baseline) and E3 (transformer) produce different AUROC."""
-        runner = ExperimentRunner(synthetic_graph)
+        runner = ExperimentRunner(synthetic_graph, base_output_dir=tmp_path / "gnn_out")
         overrides = _small_overrides(tmp_path)
 
         r1 = runner.run("E1_mlp_baseline", seed=42, config_overrides=overrides)
