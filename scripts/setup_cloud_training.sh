@@ -30,6 +30,7 @@ echo ""
 # ── Enable APIs ──
 echo "Enabling APIs..."
 gcloud services enable \
+    compute.googleapis.com \
     aiplatform.googleapis.com \
     artifactregistry.googleapis.com \
     storage.googleapis.com \
