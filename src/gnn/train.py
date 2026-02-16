@@ -212,6 +212,11 @@ class Trainer:
                 self.loss_config,
             )
 
+            # Skip optimizer step if loss is NaN (training instability)
+            if torch.isnan(losses["total"]) or torch.isinf(losses["total"]):
+                logger.warning("NaN/Inf loss detected — skipping batch")
+                continue
+
             self.optimizer.zero_grad()
             losses["total"].backward()
             nn.utils.clip_grad_norm_(
@@ -262,6 +267,18 @@ class Trainer:
 
         y_proba = torch.cat(all_probs).numpy()
         y_true = torch.cat(all_labels).numpy()
+
+        import numpy as np
+
+        nan_mask = np.isnan(y_proba) | np.isinf(y_proba)
+        if nan_mask.any():
+            n_bad = int(nan_mask.sum())
+            logger.warning(
+                "NaN/Inf in %d/%d predictions — replacing with 0.5",
+                n_bad,
+                len(y_proba),
+            )
+            y_proba = np.where(nan_mask, 0.5, y_proba)
 
         auroc = roc_auc_score(y_true, y_proba)
         from sklearn.metrics import average_precision_score

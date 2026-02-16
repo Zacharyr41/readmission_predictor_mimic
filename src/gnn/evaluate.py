@@ -68,6 +68,16 @@ def evaluate_gnn(
     y_proba = torch.cat(all_probs).numpy()
     y_test = torch.cat(all_labels).numpy()
 
+    nan_mask = np.isnan(y_proba) | np.isinf(y_proba)
+    if nan_mask.any():
+        n_bad = int(nan_mask.sum())
+        logger.warning(
+            "NaN/Inf in %d/%d predictions — replacing with 0.5",
+            n_bad,
+            len(y_proba),
+        )
+        y_proba = np.where(nan_mask, 0.5, y_proba)
+
     metrics = compute_metrics(y_proba, y_test)
 
     # Convert numpy types for JSON serialization

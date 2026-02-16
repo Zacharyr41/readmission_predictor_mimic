@@ -178,6 +178,10 @@ class TD4DDModel(nn.Module):
 
         # 6. Classify
         logits = self.classifier(h_fused)
+        # Guard against NaN from upstream (diffusion blow-up, sparse attention)
+        if torch.isnan(logits).any():
+            logger.warning("NaN in logits — replacing with 0.0")
+            logits = torch.where(torch.isnan(logits), torch.zeros_like(logits), logits)
         probabilities = torch.sigmoid(logits)
 
         return {

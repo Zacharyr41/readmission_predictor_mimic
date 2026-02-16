@@ -279,9 +279,11 @@ class DiffusionModule(nn.Module):
             sqrt_ab = ns.sqrt_alpha_bars[t].reshape(1, 1)
             sqrt_1m_ab = ns.sqrt_one_minus_alpha_bars[t].reshape(1, 1)
 
-            # Predict clean signal
-            pred_h0_v1 = (h_t_v1 - sqrt_1m_ab * pred_noise_v1) / sqrt_ab
-            pred_h0_v2 = (h_t_v2 - sqrt_1m_ab * pred_noise_v2) / sqrt_ab
+            # Predict clean signal (clamp to prevent blow-up)
+            pred_h0_v1 = (h_t_v1 - sqrt_1m_ab * pred_noise_v1) / sqrt_ab.clamp(min=1e-6)
+            pred_h0_v2 = (h_t_v2 - sqrt_1m_ab * pred_noise_v2) / sqrt_ab.clamp(min=1e-6)
+            pred_h0_v1 = pred_h0_v1.clamp(-10.0, 10.0)
+            pred_h0_v2 = pred_h0_v2.clamp(-10.0, 10.0)
 
             # DDIM step to previous timestep
             if i < len(timesteps) - 1:
