@@ -12,6 +12,7 @@ from rdflib.namespace import RDF, XSD
 from src.graph_construction.ontology import MIMIC_NS, TIME_NS
 from src.graph_construction.patient_writer import write_patient, write_admission
 from src.graph_construction.event_writers import (
+    _assign_event_to_icu_day,
     write_icu_stay,
     write_icu_days,
     write_biomarker_event,
@@ -20,6 +21,70 @@ from src.graph_construction.event_writers import (
     write_diagnosis_event,
     write_comorbidity,
 )
+
+
+class TestAssignEventToICUDay:
+    """Tests for _assign_event_to_icu_day with None/edge-case inputs."""
+
+    @pytest.fixture()
+    def icu_day_metadata(self):
+        """Standard 2-day ICU stay metadata."""
+        return [
+            (URIRef("urn:day1"), datetime(2150, 1, 1, 8, 0), datetime(2150, 1, 2, 0, 0)),
+            (URIRef("urn:day2"), datetime(2150, 1, 2, 0, 0), datetime(2150, 1, 2, 14, 0)),
+        ]
+
+    def test_normal_assignment(self, icu_day_metadata):
+        """Event within Day 1 boundaries returns Day 1 URI."""
+        result = _assign_event_to_icu_day(datetime(2150, 1, 1, 12, 0), icu_day_metadata)
+        assert result == URIRef("urn:day1")
+
+    def test_none_charttime_returns_none(self, icu_day_metadata):
+        """None charttime (NULL starttime in MIMIC-IV) returns None without crashing."""
+        result = _assign_event_to_icu_day(None, icu_day_metadata)
+        assert result is None
+
+    def test_none_begin_boundary_skipped(self):
+        """ICU day with None begin boundary is skipped."""
+        metadata = [
+            (URIRef("urn:bad"), None, datetime(2150, 1, 2, 0, 0)),
+            (URIRef("urn:good"), datetime(2150, 1, 2, 0, 0), datetime(2150, 1, 3, 0, 0)),
+        ]
+        result = _assign_event_to_icu_day(datetime(2150, 1, 2, 12, 0), metadata)
+        assert result == URIRef("urn:good")
+
+    def test_none_end_boundary_skipped(self):
+        """ICU day with None end boundary is skipped."""
+        metadata = [
+            (URIRef("urn:good"), datetime(2150, 1, 1, 0, 0), datetime(2150, 1, 2, 0, 0)),
+            (URIRef("urn:bad"), datetime(2150, 1, 2, 0, 0), None),
+        ]
+        result = _assign_event_to_icu_day(datetime(2150, 1, 1, 12, 0), metadata)
+        assert result == URIRef("urn:good")
+
+    def test_all_none_boundaries_returns_none(self):
+        """All ICU days with None boundaries returns None."""
+        metadata = [
+            (URIRef("urn:bad1"), None, None),
+            (URIRef("urn:bad2"), None, datetime(2150, 1, 2, 0, 0)),
+        ]
+        result = _assign_event_to_icu_day(datetime(2150, 1, 1, 12, 0), metadata)
+        assert result is None
+
+    def test_event_outside_icu_stay(self, icu_day_metadata):
+        """Event outside all ICU day boundaries returns None."""
+        result = _assign_event_to_icu_day(datetime(2150, 6, 1, 0, 0), icu_day_metadata)
+        assert result is None
+
+    def test_event_at_exact_outtime(self, icu_day_metadata):
+        """Event at exact outtime is assigned to the last day."""
+        result = _assign_event_to_icu_day(datetime(2150, 1, 2, 14, 0), icu_day_metadata)
+        assert result == URIRef("urn:day2")
+
+    def test_empty_metadata_returns_none(self):
+        """Empty ICU day metadata returns None."""
+        result = _assign_event_to_icu_day(datetime(2150, 1, 1, 12, 0), [])
+        assert result is None
 
 
 class TestWriteICUStay:
