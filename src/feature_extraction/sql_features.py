@@ -275,6 +275,86 @@ def extract_medication_features_sql(
     return df
 
 
+def extract_temporal_features_sql(
+    conn: duckdb.DuckDBPyConnection,
+) -> pd.DataFrame:
+    """Extract temporal relation features via DuckDB SQL self-joins.
+
+    Replaces the SPARQL-based Allen relation counting with fast SQL.
+    Computes the same 3 temporal count features plus events_per_icu_day.
+
+    Point events are classified into unordered pairs:
+    - ``before``: one event's charttime strictly precedes the other's
+    - ``meets``: both events share the same charttime
+
+    ``num_during_relations`` is always 0 for point events (no intervals).
+
+    Returns:
+        DataFrame with columns: hadm_id, events_per_icu_day,
+            num_before_relations, num_during_relations, total_temporal_edges
+    """
+    df = conn.execute("""
+        WITH all_events AS (
+            SELECT i.hadm_id, l.charttime
+            FROM labevents l
+            JOIN icustays i ON l.hadm_id = i.hadm_id
+            WHERE l.valuenum IS NOT NULL
+              AND l.charttime >= i.intime
+              AND l.charttime <= i.outtime
+              AND i.hadm_id IN (SELECT hadm_id FROM cohort)
+            UNION ALL
+            SELECT i.hadm_id, c.charttime
+            FROM chartevents c
+            JOIN icustays i ON c.stay_id = i.stay_id
+            WHERE c.valuenum IS NOT NULL
+              AND i.hadm_id IN (SELECT hadm_id FROM cohort)
+        ),
+        numbered AS (
+            SELECT hadm_id, charttime,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY hadm_id ORDER BY charttime
+                   ) AS rn
+            FROM all_events
+        ),
+        event_counts AS (
+            SELECT hadm_id, COUNT(*) AS n_events
+            FROM all_events
+            GROUP BY hadm_id
+        ),
+        icu_days AS (
+            SELECT hadm_id,
+                   DATE_DIFF('day', CAST(intime AS DATE),
+                             CAST(outtime AS DATE)) + 1 AS n_days
+            FROM icustays
+            WHERE hadm_id IN (SELECT hadm_id FROM cohort)
+        ),
+        relation_counts AS (
+            SELECT a.hadm_id,
+                   SUM(CASE WHEN a.charttime <> b.charttime
+                            THEN 1 ELSE 0 END) AS n_before,
+                   SUM(CASE WHEN a.charttime = b.charttime
+                            THEN 1 ELSE 0 END) AS n_meets
+            FROM numbered a
+            JOIN numbered b
+              ON a.hadm_id = b.hadm_id AND a.rn < b.rn
+            GROUP BY a.hadm_id
+        )
+        SELECT
+            c.hadm_id,
+            COALESCE(ec.n_events, 0) * 1.0
+                / GREATEST(COALESCE(id.n_days, 1), 1) AS events_per_icu_day,
+            COALESCE(rc.n_before, 0) AS num_before_relations,
+            0 AS num_during_relations,
+            COALESCE(rc.n_before, 0)
+                + COALESCE(rc.n_meets, 0) AS total_temporal_edges
+        FROM cohort c
+        LEFT JOIN event_counts ec ON c.hadm_id = ec.hadm_id
+        LEFT JOIN icu_days id ON c.hadm_id = id.hadm_id
+        LEFT JOIN relation_counts rc ON c.hadm_id = rc.hadm_id
+    """).fetchdf()
+    return df
+
+
 def extract_diagnosis_features_sql(
     conn: duckdb.DuckDBPyConnection,
 ) -> pd.DataFrame:

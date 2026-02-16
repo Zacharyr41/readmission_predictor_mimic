@@ -22,6 +22,7 @@ from src.feature_extraction.sql_features import (
     extract_diagnosis_features_sql,
     extract_labels_sql,
     extract_subject_ids_sql,
+    extract_temporal_features_sql,
 )
 
 
@@ -260,3 +261,76 @@ class TestExtractSubjectIdsSql:
 
         row_103 = df[df["hadm_id"] == 103].iloc[0]
         assert row_103["subject_id"] == 2
+
+
+# ---------------------------------------------------------------------------
+# TestExtractTemporalFeaturesSql
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTemporalFeaturesSql:
+    """Test SQL-based temporal feature extraction.
+
+    Fixture data for hadm 101 (stay 1001, ICU 2150-01-15 10:00 → 2150-01-18 08:00):
+        Events within ICU window:
+        - Lab Creatinine @ 2150-01-16 06:00
+        - Lab Sodium     @ 2150-01-16 06:00
+        - Chart HR       @ 2150-01-16 08:00
+        - Chart BP       @ 2150-01-16 08:00
+
+    ICU days: DATE_DIFF('day', '2150-01-15', '2150-01-18') + 1 = 4
+    Unordered pairs (C(4,2) = 6):
+        Before (a.time < b.time): Creat→HR, Creat→BP, Sod→HR, Sod→BP = 4
+        Meets  (a.time = b.time): Creat&Sod, HR&BP = 2
+    """
+
+    def test_columns(self, sql_feature_db):
+        df = extract_temporal_features_sql(sql_feature_db)
+        assert set(df.columns) >= {
+            "hadm_id",
+            "events_per_icu_day",
+            "num_before_relations",
+            "num_during_relations",
+            "total_temporal_edges",
+        }
+
+    def test_events_per_icu_day(self, sql_feature_db):
+        df = extract_temporal_features_sql(sql_feature_db)
+        row_101 = df[df["hadm_id"] == 101].iloc[0]
+        # 4 events / 4 ICU days = 1.0
+        assert row_101["events_per_icu_day"] == pytest.approx(1.0)
+
+    def test_before_relations(self, sql_feature_db):
+        df = extract_temporal_features_sql(sql_feature_db)
+        row_101 = df[df["hadm_id"] == 101].iloc[0]
+        # 2 events at 06:00 × 2 events at 08:00 = 4 before pairs
+        assert row_101["num_before_relations"] == 4
+
+    def test_during_relations_zero_for_points(self, sql_feature_db):
+        df = extract_temporal_features_sql(sql_feature_db)
+        # All events are point events → num_during_relations = 0
+        for hadm_id in [101, 103, 106]:
+            row = df[df["hadm_id"] == hadm_id].iloc[0]
+            assert row["num_during_relations"] == 0
+
+    def test_total_temporal_edges(self, sql_feature_db):
+        df = extract_temporal_features_sql(sql_feature_db)
+        row_101 = df[df["hadm_id"] == 101].iloc[0]
+        # 4 before + 2 meets = 6 total
+        assert row_101["total_temporal_edges"] == 6
+
+    def test_no_events_admission(self, sql_feature_db):
+        """Admission with no events returns zeros for all temporal columns."""
+        # Add a dummy admission to the cohort that has no events
+        sql_feature_db.execute(
+            "CREATE OR REPLACE TEMP TABLE cohort AS "
+            "SELECT * FROM cohort "
+            "UNION ALL "
+            "SELECT 999 AS subject_id, 999 AS hadm_id, 999 AS stay_id"
+        )
+        df = extract_temporal_features_sql(sql_feature_db)
+        row_999 = df[df["hadm_id"] == 999].iloc[0]
+        assert row_999["events_per_icu_day"] == 0.0
+        assert row_999["num_before_relations"] == 0
+        assert row_999["num_during_relations"] == 0
+        assert row_999["total_temporal_edges"] == 0

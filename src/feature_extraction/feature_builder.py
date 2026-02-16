@@ -38,6 +38,7 @@ from src.feature_extraction.sql_features import (
     extract_diagnosis_features_sql,
     extract_labels_sql,
     extract_subject_ids_sql,
+    extract_temporal_features_sql,
 )
 
 logger = logging.getLogger(__name__)
@@ -233,7 +234,13 @@ def build_feature_matrix(
     # Graph-dependent extractors always use SPARQL
     snomed_diagnosis_features = extract_snomed_diagnosis_features(graph)
     snomed_medication_features = extract_snomed_medication_features(graph)
-    temporal_features = extract_temporal_features(graph)
+
+    # Temporal features: SQL path when available, SPARQL fallback
+    if use_sql:
+        temporal_features = extract_temporal_features_sql(conn)
+    else:
+        temporal_features = extract_temporal_features(graph)
+
     graph_structure_features = extract_graph_structure_features(graph, nx_graph=nx_graph)
 
     # Merge all features on hadm_id
