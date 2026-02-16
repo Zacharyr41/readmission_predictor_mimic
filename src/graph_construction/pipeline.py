@@ -5,6 +5,8 @@ DuckDB → RDF/OWL conversion for the neurology cohort.
 """
 
 import logging
+import os
+from multiprocessing import Pool
 from pathlib import Path
 
 import duckdb
@@ -51,6 +53,7 @@ def build_graph(
     skip_allen_relations: bool = False,
     snomed_mappings_dir: Path | None = None,
     umls_api_key: str | None = None,
+    n_workers: int | None = None,
 ) -> Graph:
     """Build RDF graph from MIMIC-IV DuckDB database.
 
@@ -75,6 +78,8 @@ def build_graph(
         prescriptions_limit: Maximum prescriptions per admission (0 = no limit).
         diagnoses_limit: Maximum diagnoses per admission (0 = no limit).
         skip_allen_relations: If True, skip Allen relation computation (faster).
+        n_workers: Number of parallel worker processes. None = auto-detect (min of
+            cpu_count, 4). Set to 1 to force sequential processing.
 
     Returns:
         The constructed RDF graph.
@@ -131,29 +136,66 @@ def build_graph(
         "allen_relations": 0,
     }
 
-    # Process each patient
-    for idx, subject_id in enumerate(unique_patients, 1):
-        logger.info(f"Processing patient {idx}/{total_patients} (subject_id={subject_id})")
+    # Determine number of workers
+    if n_workers is None:
+        n_workers = min(os.cpu_count() or 1, 4)
 
-        patient_stats = _process_patient(
-            conn=conn,
-            graph=graph,
-            subject_id=subject_id,
-            cohort_df=cohort_df,
-            biomarkers_limit=biomarkers_limit,
-            vitals_limit=vitals_limit,
-            microbiology_limit=microbiology_limit,
-            prescriptions_limit=prescriptions_limit,
-            diagnoses_limit=diagnoses_limit,
-            skip_allen_relations=skip_allen_relations,
-            snomed_mapper=snomed_mapper,
+    if n_workers > 1 and total_patients > n_workers:
+        # Parallel processing
+        conn.close()  # Workers open their own connections
+        logger.info(
+            f"Using {n_workers} worker processes for {total_patients} patients"
         )
 
-        # Update statistics
-        for key, value in patient_stats.items():
-            stats[key] = stats.get(key, 0) + value
+        chunks = _chunk_list(unique_patients, n_workers)
+        worker_args = [
+            (
+                db_path, chunk, cohort_df,
+                biomarkers_limit, vitals_limit, microbiology_limit,
+                prescriptions_limit, diagnoses_limit,
+                skip_allen_relations, snomed_mappings_dir, umls_api_key,
+            )
+            for chunk in chunks
+        ]
 
-    conn.close()
+        with Pool(n_workers) as pool:
+            results = pool.map(_process_patient_batch, worker_args)
+
+        # Merge sub-graphs and stats
+        for nt_data, worker_stats in results:
+            graph.parse(data=nt_data, format="nt")
+            for key, value in worker_stats.items():
+                stats[key] = stats.get(key, 0) + value
+
+        logger.info(f"Merged {n_workers} sub-graphs into main graph")
+    else:
+        # Sequential processing (single worker or few patients)
+        if n_workers <= 1:
+            logger.info(f"Sequential processing for {total_patients} patients")
+        for idx, subject_id in enumerate(unique_patients, 1):
+            logger.info(
+                f"Processing patient {idx}/{total_patients} "
+                f"(subject_id={subject_id})"
+            )
+
+            patient_stats = _process_patient(
+                conn=conn,
+                graph=graph,
+                subject_id=subject_id,
+                cohort_df=cohort_df,
+                biomarkers_limit=biomarkers_limit,
+                vitals_limit=vitals_limit,
+                microbiology_limit=microbiology_limit,
+                prescriptions_limit=prescriptions_limit,
+                diagnoses_limit=diagnoses_limit,
+                skip_allen_relations=skip_allen_relations,
+                snomed_mapper=snomed_mapper,
+            )
+
+            for key, value in patient_stats.items():
+                stats[key] = stats.get(key, 0) + value
+
+        conn.close()
 
     # Serialize to output file
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -217,6 +259,87 @@ def _collect_loinc_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
     except Exception as e:
         logger.debug("Could not collect LOINC codes: %s", e)
     return []
+
+
+def _chunk_list(lst: list, n_chunks: int) -> list[list]:
+    """Split a list into n roughly equal chunks."""
+    k, m = divmod(len(lst), n_chunks)
+    return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n_chunks)]
+
+
+def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
+    """Process a batch of patients in a worker process.
+
+    Each worker opens its own DuckDB connection and creates its own rdflib Graph.
+    Returns serialized NTriples string for efficient IPC.
+
+    Args:
+        args: Tuple of (db_path, patient_ids, cohort_df, biomarkers_limit,
+              vitals_limit, microbiology_limit, prescriptions_limit,
+              diagnoses_limit, skip_allen_relations, snomed_mappings_dir,
+              umls_api_key).
+
+    Returns:
+        Tuple of (NTriples string, aggregated statistics dict).
+    """
+    (
+        db_path, patient_ids, cohort_df,
+        biomarkers_limit, vitals_limit, microbiology_limit,
+        prescriptions_limit, diagnoses_limit,
+        skip_allen_relations, snomed_mappings_dir, umls_api_key,
+    ) = args
+
+    conn = duckdb.connect(str(db_path), read_only=True)
+    graph = Graph()
+
+    # Reconstruct SnomedMapper in this process
+    snomed_mapper = None
+    if snomed_mappings_dir is not None and Path(snomed_mappings_dir).exists():
+        snomed_mapper = SnomedMapper(Path(snomed_mappings_dir), umls_api_key=umls_api_key)
+
+    stats = {
+        "patients": 0,
+        "admissions": 0,
+        "icu_stays": 0,
+        "icu_days": 0,
+        "biomarkers": 0,
+        "vitals": 0,
+        "microbiology": 0,
+        "prescriptions": 0,
+        "diagnoses": 0,
+        "allen_relations": 0,
+    }
+
+    batch_size = len(patient_ids)
+    for i, subject_id in enumerate(patient_ids, 1):
+        if i == 1 or i % 50 == 0 or i == batch_size:
+            logger.info(
+                f"Worker {os.getpid()}: patient {i}/{batch_size} "
+                f"(subject_id={subject_id})"
+            )
+
+        patient_stats = _process_patient(
+            conn=conn,
+            graph=graph,
+            subject_id=subject_id,
+            cohort_df=cohort_df,
+            biomarkers_limit=biomarkers_limit,
+            vitals_limit=vitals_limit,
+            microbiology_limit=microbiology_limit,
+            prescriptions_limit=prescriptions_limit,
+            diagnoses_limit=diagnoses_limit,
+            skip_allen_relations=skip_allen_relations,
+            snomed_mapper=snomed_mapper,
+        )
+
+        for key, value in patient_stats.items():
+            stats[key] = stats.get(key, 0) + value
+
+    conn.close()
+
+    # Serialize as NTriples — fastest RDF format to parse
+    nt_data = graph.serialize(format="nt")
+    return nt_data, stats
 
 
 def _process_patient(
