@@ -87,7 +87,9 @@ docker push "$IMAGE_URI"
 # ── Prepare job spec ──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-JOB_SPEC=$(mktemp /tmp/vertex_job_spec.XXXXXX.yaml)
+JOB_SPEC=$(mktemp /tmp/vertex_job_spec_XXXXXX)
+mv "$JOB_SPEC" "${JOB_SPEC}.yaml"
+JOB_SPEC="${JOB_SPEC}.yaml"
 
 sed \
     -e "s|MACHINE_TYPE_PLACEHOLDER|$MACHINE_TYPE|g" \
@@ -101,7 +103,7 @@ sed \
     -e "s|RUN_ALL_PLACEHOLDER|$RUN_ALL|g" \
     "${REPO_DIR}/cloud/vertex_job_spec.yaml" > "$JOB_SPEC"
 
-JOB_NAME="readmission-${EXPERIMENT,,}-${IMAGE_TAG}"
+JOB_NAME="readmission-$(echo "$EXPERIMENT" | tr '[:upper:]' '[:lower:]')-${IMAGE_TAG}"
 
 # ── Submit Vertex AI custom job ──
 echo "Submitting Vertex AI custom job: $JOB_NAME"

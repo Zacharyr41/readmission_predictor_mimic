@@ -15,17 +15,17 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 
 # Copy project metadata first (for layer caching)
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 
 # Install core + graph deps via uv
 RUN uv pip install --system --no-cache ".[graph,cloud]"
 
-# Install PyG packages from CUDA 12.4 wheel index
+# Install torch-geometric from PyPI, sparse/scatter from PyG CUDA wheel index
+RUN uv pip install --system --no-cache torch-geometric
 RUN uv pip install --system --no-cache \
-    torch-geometric \
     torch-sparse \
     torch-scatter \
-    --extra-index-url https://data.pyg.org/whl/torch-2.5.0+cu124.html
+    --find-links https://data.pyg.org/whl/torch-2.5.1+cu124.html
 
 # Install transformers (for SapBERT embeddings)
 RUN uv pip install --system --no-cache "transformers>=4.35"
