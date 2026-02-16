@@ -84,6 +84,10 @@ echo "Pushing to Artifact Registry..."
 gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 docker push "$IMAGE_URI"
 
+# ── Fetch ADC credentials from Secret Manager ──
+echo "Fetching ADC credentials from Secret Manager..."
+ADC_B64=$(gcloud secrets versions access latest --secret=physionet-adc --project="$PROJECT_ID" | base64)
+
 # ── Prepare job spec ──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
@@ -101,6 +105,7 @@ sed \
     -e "s|PATIENTS_LIMIT_PLACEHOLDER|$PATIENTS_LIMIT|g" \
     -e "s|SKIP_ALLEN_PLACEHOLDER|$SKIP_ALLEN|g" \
     -e "s|RUN_ALL_PLACEHOLDER|$RUN_ALL|g" \
+    -e "s|ADC_B64_PLACEHOLDER|$ADC_B64|g" \
     "${REPO_DIR}/cloud/vertex_job_spec.yaml" > "$JOB_SPEC"
 
 JOB_NAME="readmission-$(echo "$EXPERIMENT" | tr '[:upper:]' '[:lower:]')-${IMAGE_TAG}"

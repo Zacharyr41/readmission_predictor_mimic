@@ -4,8 +4,9 @@ Runs the full pipeline: BigQuery ingestion -> RDF graph -> feature extraction
 -> GNN preparation -> experiment training, then uploads outputs to GCS.
 
 Environment variables:
-    GCP_PROJECT (required): GCP project ID for BigQuery billing + Secret Manager
+    GCP_PROJECT (required): GCP project ID for BigQuery billing
     GCS_OUTPUT_BUCKET (required): GCS bucket for saving results
+    ADC_CREDENTIALS_B64 (required): Base64-encoded ADC JSON credentials
     EXPERIMENT (default: E6_full_model): Experiment name from registry
     SEED (default: 42): Random seed
     PATIENTS_LIMIT (default: 0): Limit cohort size (0 = no limit)
@@ -15,6 +16,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -39,16 +41,15 @@ ONTOLOGY_DIR = Path("ontology/definition")
 OUTPUT_DIR = Path("outputs")
 
 
-def _fetch_adc_credentials(project: str) -> Path:
-    """Fetch ADC credentials from Secret Manager and write to a temp file."""
-    from google.cloud import secretmanager
-
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{project}/secrets/physionet-adc/versions/latest"
-    logger.info("Fetching ADC credentials from Secret Manager: %s", name)
-    response = client.access_secret_version(request={"name": name})
-    creds_json = response.payload.data.decode("utf-8")
-
+def _write_adc_credentials() -> Path:
+    """Decode ADC credentials from base64 env var and write to a temp file."""
+    adc_b64 = os.environ.get("ADC_CREDENTIALS_B64")
+    if not adc_b64:
+        raise RuntimeError(
+            "ADC_CREDENTIALS_B64 environment variable is required. "
+            "The submission script should inject this from Secret Manager."
+        )
+    creds_json = base64.b64decode(adc_b64).decode("utf-8")
     creds_path = Path(tempfile.mktemp(suffix=".json", prefix="adc_"))
     creds_path.write_text(creds_json)
     logger.info("ADC credentials written to %s", creds_path)
@@ -102,9 +103,9 @@ def main() -> None:
         gcp_project, gcs_bucket, experiment, patients_limit, seed, skip_allen, run_all,
     )
 
-    # ── Step 1: Fetch ADC credentials from Secret Manager ──
-    logger.info("Step 1/6: Fetching ADC credentials...")
-    creds_path = _fetch_adc_credentials(gcp_project)
+    # ── Step 1: Write ADC credentials from env var ──
+    logger.info("Step 1/6: Setting up ADC credentials...")
+    creds_path = _write_adc_credentials()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
 
     # ── Step 2: BigQuery ingestion ──
@@ -175,7 +176,7 @@ def main() -> None:
 
     # ── Step 5: GNN preparation (SapBERT embeddings + HeteroData) ──
     logger.info("Step 5/6: Preparing GNN data (embeddings + HeteroData export)...")
-    from src.gnn import prepare
+    from src.gnn.__main__ import prepare
 
     prepare(
         rdf_path=RDF_PATH,

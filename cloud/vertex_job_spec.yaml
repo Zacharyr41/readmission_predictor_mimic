@@ -21,3 +21,5 @@ workerPoolSpecs:
           value: "SKIP_ALLEN_PLACEHOLDER"
         - name: RUN_ALL
           value: "RUN_ALL_PLACEHOLDER"
+        - name: ADC_CREDENTIALS_B64
+          value: "ADC_B64_PLACEHOLDER"

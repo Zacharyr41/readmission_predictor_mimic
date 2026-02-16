@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from src.gnn.hop_extraction import HopExtractor
+from src.gnn.hop_extraction import HopExtractor, HopIndices
 from src.gnn.losses import LossConfig, build_classification_loss, compute_total_loss
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,23 @@ def _get_batch_size(batch: HeteroData) -> int:
         if hasattr(store, "batch_size"):
             return store.batch_size
     raise AttributeError("batch has no batch_size attribute")
+
+
+def _move_hop_indices(hop: HopIndices, device: str | torch.device) -> HopIndices:
+    """Move all tensors in a HopIndices to the target device."""
+    hop.contextual_indices = [
+        [t.to(device) for t in path] for path in hop.contextual_indices
+    ]
+    hop.contextual_masks = [
+        [t.to(device) for t in path] for path in hop.contextual_masks
+    ]
+    if hop.temporal_indices is not None:
+        hop.temporal_indices = [t.to(device) for t in hop.temporal_indices]
+    if hop.temporal_masks is not None:
+        hop.temporal_masks = [t.to(device) for t in hop.temporal_masks]
+    if hop.temporal_deltas is not None:
+        hop.temporal_deltas = [t.to(device) for t in hop.temporal_deltas]
+    return hop
 
 
 @dataclass
@@ -292,6 +309,7 @@ class Trainer:
         hop_indices = None
         if self.hop_extractor is not None:
             hop_indices = self.hop_extractor.extract(batch, batch_size)
+            hop_indices = _move_hop_indices(hop_indices, self.device)
 
         return {
             "batch_data": batch,
