@@ -407,10 +407,11 @@ def write_prescription_event(
     graph.add((event_uri, RDF.type, MIMIC_NS.PrescriptionEvent))
     graph.add((event_uri, RDF.type, TIME_NS.ProperInterval))
 
-    # Temporal bounds
-    begin_uri = MIMIC_NS[f"RXEBegin_{hadm_id}_{drug_slug}"]
-    _write_instant(graph, begin_uri, rx_data["starttime"])
-    graph.add((event_uri, TIME_NS.hasBeginning, begin_uri))
+    # Temporal bounds (starttime may be NULL for some prescriptions)
+    if rx_data.get("starttime") is not None:
+        begin_uri = MIMIC_NS[f"RXEBegin_{hadm_id}_{drug_slug}"]
+        _write_instant(graph, begin_uri, rx_data["starttime"])
+        graph.add((event_uri, TIME_NS.hasBeginning, begin_uri))
 
     # End time may be NULL for ongoing prescriptions
     if rx_data.get("stoptime") is not None:
