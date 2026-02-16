@@ -71,7 +71,14 @@ def build_classification_loss(
         pw = (n_neg / n_pos).item() if n_pos > 0 else 1.0
 
     if config.cls_loss_type == "bce":
-        return nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pw]))
+        pw_tensor = torch.tensor([pw])
+
+        def bce_fn(logits: Tensor, targets: Tensor) -> Tensor:
+            return nn.functional.binary_cross_entropy_with_logits(
+                logits, targets, pos_weight=pw_tensor.to(logits.device)
+            )
+
+        return bce_fn
 
     if config.cls_loss_type == "focal":
 
@@ -83,12 +90,14 @@ def build_classification_loss(
         return focal_fn
 
     if config.cls_loss_type == "bce_smoothed":
-        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pw]))
+        pw_tensor = torch.tensor([pw])
         eps = config.label_smoothing
 
         def smoothed_fn(logits: Tensor, targets: Tensor) -> Tensor:
             smoothed = targets * (1 - eps) + 0.5 * eps
-            return criterion(logits, smoothed)
+            return nn.functional.binary_cross_entropy_with_logits(
+                logits, smoothed, pos_weight=pw_tensor.to(logits.device)
+            )
 
         return smoothed_fn
 
