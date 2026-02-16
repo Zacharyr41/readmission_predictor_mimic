@@ -177,7 +177,7 @@ class TestAnalysisReport:
 
     def test_analysis_report_generates_markdown(self, synthetic_analysis_graph: Graph) -> None:
         """Test that generate_analysis_report returns valid markdown."""
-        report = generate_analysis_report(synthetic_analysis_graph)
+        report, nx_graph = generate_analysis_report(synthetic_analysis_graph)
 
         # Should return a string
         assert isinstance(report, str)
@@ -198,7 +198,7 @@ class TestAnalysisReport:
         from pathlib import Path
 
         output_path = tmp_path / "analysis_report.md"
-        report = generate_analysis_report(synthetic_analysis_graph, output_path=output_path)
+        report, _nx = generate_analysis_report(synthetic_analysis_graph, output_path=output_path)
 
         # Should return the report string
         assert isinstance(report, str)
@@ -206,6 +206,22 @@ class TestAnalysisReport:
         # File should exist and contain the report
         assert output_path.exists()
         assert output_path.read_text() == report
+
+    def test_generate_analysis_report_returns_nx_graph(
+        self, synthetic_analysis_graph: Graph
+    ) -> None:
+        """Test that generate_analysis_report returns (str, nx.DiGraph)."""
+        import networkx as nx
+
+        result = generate_analysis_report(synthetic_analysis_graph)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+        report, nx_graph = result
+        assert isinstance(report, str)
+        assert isinstance(nx_graph, nx.DiGraph)
+        assert nx_graph.number_of_nodes() > 0
+        assert nx_graph.number_of_edges() > 0
 
 
 @pytest.mark.integration

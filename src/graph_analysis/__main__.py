@@ -68,7 +68,7 @@ def main():
     # Generate report
     logger.info(f"Generating analysis report...")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    report = generate_analysis_report(graph, output_path=args.output)
+    report, _nx_graph = generate_analysis_report(graph, output_path=args.output)
 
     print(f"\nAnalysis report generated:")
     print(f"  Output: {args.output}")

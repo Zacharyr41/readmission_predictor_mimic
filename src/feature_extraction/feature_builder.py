@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 import duckdb
+import networkx as nx
 import pandas as pd
 import numpy as np
 from rdflib import Graph
@@ -175,6 +176,7 @@ def build_feature_matrix(
     conn: duckdb.DuckDBPyConnection | None = None,
     cohort_df: pd.DataFrame | None = None,
     save_path: Path | None = None,
+    nx_graph: nx.DiGraph | None = None,
 ) -> pd.DataFrame:
     """Build complete feature matrix from RDF graph and/or DuckDB.
 
@@ -191,6 +193,8 @@ def build_feature_matrix(
         cohort_df: Optional cohort DataFrame (subject_id, hadm_id, stay_id).
             Required when ``conn`` is provided.
         save_path: Optional path to save the feature matrix as parquet.
+        nx_graph: Optional pre-built NetworkX graph to avoid redundant conversion
+            in ``extract_graph_structure_features``.
 
     Returns:
         DataFrame with all features and labels, one row per admission.
@@ -230,7 +234,7 @@ def build_feature_matrix(
     snomed_diagnosis_features = extract_snomed_diagnosis_features(graph)
     snomed_medication_features = extract_snomed_medication_features(graph)
     temporal_features = extract_temporal_features(graph)
-    graph_structure_features = extract_graph_structure_features(graph)
+    graph_structure_features = extract_graph_structure_features(graph, nx_graph=nx_graph)
 
     # Merge all features on hadm_id
     # Start with labels as the base (ensures we have all admissions)

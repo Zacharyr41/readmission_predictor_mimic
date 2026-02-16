@@ -133,7 +133,7 @@ def run_pipeline(
     from src.graph_analysis.analysis import generate_analysis_report
 
     paths["analysis_report"].parent.mkdir(parents=True, exist_ok=True)
-    generate_analysis_report(graph, output_path=paths["analysis_report"])
+    _report, nx_graph = generate_analysis_report(graph, output_path=paths["analysis_report"])
     logger.info(f"  Report saved to {paths['analysis_report']}")
 
     # Stage 4: Feature Extraction
@@ -150,7 +150,8 @@ def run_pipeline(
         cohort_df = cohort_df[cohort_df["subject_id"].isin(limited)]
 
     feature_df = build_feature_matrix(
-        graph, conn=feat_conn, cohort_df=cohort_df, save_path=paths["features"]
+        graph, conn=feat_conn, cohort_df=cohort_df, save_path=paths["features"],
+        nx_graph=nx_graph,
     )
     feat_conn.close()
     result["feature_shape"] = feature_df.shape

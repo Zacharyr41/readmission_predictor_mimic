@@ -21,6 +21,7 @@ from src.graph_construction.event_writers import (
     write_prescription_event,
     write_diagnosis_event,
 )
+from src.graph_construction.ontology import TIME_NS
 from src.graph_construction.temporal.allen_relations import compute_allen_relations
 from src.feature_extraction import (
     extract_demographics,
@@ -423,6 +424,29 @@ def synthetic_feature_graph() -> Graph:
     return g
 
 
+@pytest.fixture
+def synthetic_graph_no_allen(synthetic_feature_graph) -> Graph:
+    """Same as synthetic_feature_graph but with Allen temporal relations stripped.
+
+    This simulates the --skip-allen case where no temporal predicates exist.
+    """
+    from rdflib import URIRef
+
+    g = Graph()
+    # Copy all triples except those using TIME_NS predicates
+    temporal_preds = {URIRef(str(TIME_NS[name])) for name in [
+        "before", "inside", "intervalOverlaps",
+        "intervalMeets", "intervalStarts", "intervalFinishes",
+    ]}
+    for s, p, o in synthetic_feature_graph:
+        if p not in temporal_preds:
+            g.add((s, p, o))
+    # Copy namespace bindings
+    for prefix, namespace in synthetic_feature_graph.namespaces():
+        g.bind(prefix, namespace)
+    return g
+
+
 # ==================== Test Cases ====================
 
 
@@ -601,6 +625,30 @@ class TestExtractTemporalFeatures:
         # With 5 biomarkers + 3 vitals + 1 prescription = 9 events, there should be many before relations
         assert row["total_temporal_edges"] > 0
 
+    def test_no_allen_returns_zero_relations(self, synthetic_graph_no_allen):
+        """With no Allen relations, all relation counts should be 0."""
+        df = extract_temporal_features(synthetic_graph_no_allen)
+
+        for _, row in df.iterrows():
+            assert row["num_before_relations"] == 0
+            assert row["num_during_relations"] == 0
+            assert row["total_temporal_edges"] == 0
+
+    def test_no_allen_still_computes_events_per_icu_day(self, synthetic_graph_no_allen):
+        """With no Allen relations, events_per_icu_day should still be > 0."""
+        df = extract_temporal_features(synthetic_graph_no_allen)
+
+        # Admission 101 has 9 events over 3 ICU days
+        row = df[df["hadm_id"] == 101].iloc[0]
+        assert row["events_per_icu_day"] > 0
+
+    def test_with_allen_still_counts_relations(self, synthetic_feature_graph):
+        """With Allen relations present, total_temporal_edges should be > 0."""
+        df = extract_temporal_features(synthetic_feature_graph)
+
+        # At least one admission should have temporal edges
+        assert (df["total_temporal_edges"] > 0).any()
+
 
 class TestExtractGraphStructureFeatures:
     """(g) test_extract_graph_structure_features"""
@@ -624,6 +672,38 @@ class TestExtractGraphStructureFeatures:
         for _, row in df.iterrows():
             assert row["patient_subgraph_nodes"] > 0
             assert row["patient_subgraph_edges"] > 0
+
+    def test_graph_structure_with_cached_nx_graph(self, synthetic_feature_graph):
+        """Passing a pre-built nx_graph should produce the same result."""
+        from src.graph_analysis.rdf_to_networkx import rdf_to_networkx
+
+        nx_graph = rdf_to_networkx(synthetic_feature_graph, include_literals=False)
+        df_cached = extract_graph_structure_features(
+            synthetic_feature_graph, nx_graph=nx_graph
+        )
+        df_fresh = extract_graph_structure_features(synthetic_feature_graph)
+
+        pd.testing.assert_frame_equal(
+            df_cached.sort_values("hadm_id").reset_index(drop=True),
+            df_fresh.sort_values("hadm_id").reset_index(drop=True),
+        )
+
+    def test_graph_structure_skips_conversion_with_cached_nx_graph(
+        self, synthetic_feature_graph
+    ):
+        """When nx_graph is passed, rdf_to_networkx should NOT be called."""
+        from unittest.mock import patch
+        from src.graph_analysis.rdf_to_networkx import rdf_to_networkx
+
+        nx_graph = rdf_to_networkx(synthetic_feature_graph, include_literals=False)
+
+        with patch(
+            "src.feature_extraction.graph_features.rdf_to_networkx"
+        ) as mock_convert:
+            extract_graph_structure_features(
+                synthetic_feature_graph, nx_graph=nx_graph
+            )
+            mock_convert.assert_not_called()
 
 
 class TestBuildFeatureMatrix:

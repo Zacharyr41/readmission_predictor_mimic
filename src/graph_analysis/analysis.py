@@ -85,16 +85,20 @@ def count_edges_by_type(rdf_graph: Graph) -> dict[str, int]:
     return counts
 
 
-def degree_distribution(rdf_graph: Graph) -> dict[str, float]:
+def degree_distribution(
+    rdf_graph: Graph, nx_graph: nx.DiGraph | None = None
+) -> dict[str, float]:
     """Compute degree distribution statistics.
 
     Args:
         rdf_graph: An rdflib Graph to analyze.
+        nx_graph: Optional pre-built NetworkX graph to avoid redundant conversion.
 
     Returns:
         Dictionary with keys: mean, median, max, std.
     """
-    nx_graph = rdf_to_networkx(rdf_graph)
+    if nx_graph is None:
+        nx_graph = rdf_to_networkx(rdf_graph)
 
     if nx_graph.number_of_nodes() == 0:
         return {"mean": 0.0, "median": 0.0, "max": 0, "std": 0.0}
@@ -121,16 +125,20 @@ def degree_distribution(rdf_graph: Graph) -> dict[str, float]:
     }
 
 
-def connected_components(rdf_graph: Graph) -> int:
+def connected_components(
+    rdf_graph: Graph, nx_graph: nx.DiGraph | None = None
+) -> int:
     """Count the number of weakly connected components.
 
     Args:
         rdf_graph: An rdflib Graph to analyze.
+        nx_graph: Optional pre-built NetworkX graph to avoid redundant conversion.
 
     Returns:
         Number of weakly connected components.
     """
-    nx_graph = rdf_to_networkx(rdf_graph)
+    if nx_graph is None:
+        nx_graph = rdf_to_networkx(rdf_graph)
 
     if nx_graph.number_of_nodes() == 0:
         return 0
@@ -178,7 +186,7 @@ def temporal_density(rdf_graph: Graph) -> float:
 
 def generate_analysis_report(
     rdf_graph: Graph, output_path: Path | None = None
-) -> str:
+) -> tuple[str, nx.DiGraph]:
     """Generate a markdown report with graph analysis.
 
     Args:
@@ -186,7 +194,7 @@ def generate_analysis_report(
         output_path: Optional path to write the report. If None, only returns string.
 
     Returns:
-        Markdown formatted analysis report.
+        Tuple of (markdown report string, NetworkX DiGraph built during analysis).
     """
     lines = []
 
@@ -194,7 +202,7 @@ def generate_analysis_report(
     lines.append("# Graph Analysis Report")
     lines.append("")
 
-    # Summary
+    # Summary — build nx_graph once, reuse for degree_distribution & connected_components
     nx_graph = rdf_to_networkx(rdf_graph)
     lines.append("## Summary")
     lines.append("")
@@ -223,20 +231,20 @@ def generate_analysis_report(
         lines.append(f"| {pred_name} | {count} |")
     lines.append("")
 
-    # Degree Distribution
+    # Degree Distribution — pass cached nx_graph
     lines.append("## Degree Distribution")
     lines.append("")
-    deg_stats = degree_distribution(rdf_graph)
+    deg_stats = degree_distribution(rdf_graph, nx_graph=nx_graph)
     lines.append(f"- **Mean**: {deg_stats['mean']:.2f}")
     lines.append(f"- **Median**: {deg_stats['median']:.2f}")
     lines.append(f"- **Max**: {deg_stats['max']}")
     lines.append(f"- **Std Dev**: {deg_stats['std']:.2f}")
     lines.append("")
 
-    # Connected Components
+    # Connected Components — pass cached nx_graph
     lines.append("## Connected Components")
     lines.append("")
-    num_components = connected_components(rdf_graph)
+    num_components = connected_components(rdf_graph, nx_graph=nx_graph)
     lines.append(f"- **Weakly Connected Components**: {num_components}")
     lines.append("")
 
@@ -253,4 +261,4 @@ def generate_analysis_report(
     if output_path:
         output_path.write_text(report)
 
-    return report
+    return report, nx_graph
