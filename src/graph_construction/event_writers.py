@@ -60,6 +60,8 @@ def _assign_event_to_icu_day(
     Returns:
         URIRef of the ICU day containing the event, or None if outside ICU stay.
     """
+    if charttime is None:
+        return None
     for uri, begin, end in icu_day_metadata:
         if begin is None or end is None:
             continue
