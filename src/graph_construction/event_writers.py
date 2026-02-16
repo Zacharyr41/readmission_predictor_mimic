@@ -61,6 +61,8 @@ def _assign_event_to_icu_day(
         URIRef of the ICU day containing the event, or None if outside ICU stay.
     """
     for uri, begin, end in icu_day_metadata:
+        if begin is None or end is None:
+            continue
         if begin <= charttime < end:
             return uri
         # Include events at exact outtime in the last day
