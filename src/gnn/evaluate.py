@@ -12,7 +12,7 @@ import torch
 from torch import Tensor, nn
 from torch_geometric.data import HeteroData
 
-from src.gnn.train import _get_batch_size
+from src.gnn.train import _get_batch_size, _resolve_device
 from src.prediction.evaluate import compute_metrics
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def evaluate_gnn(
         Evaluation metrics including auroc, auprc, precision, recall, f1,
         threshold, and confusion_matrix.
     """
-    device = torch.device(device) if isinstance(device, str) else device
+    device = _resolve_device(device) if isinstance(device, str) else device
     model = model.to(device)
     model.eval()
 
@@ -133,7 +133,7 @@ def extract_attention_weights(
         - top_neighbors: indices with highest attention
         - track_balance: fusion lambda value
     """
-    device = torch.device(device) if isinstance(device, str) else device
+    device = _resolve_device(device) if isinstance(device, str) else device
     model = model.to(device)
     model.eval()
 
