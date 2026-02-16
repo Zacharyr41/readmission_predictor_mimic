@@ -66,7 +66,7 @@ class TrainingConfig:
     grad_clip_norm: float = 1.0
     device: str = "auto"
     checkpoint_dir: Path = Path("outputs/gnn_models/")
-    log_every_n_epochs: int = 5
+    log_every_n_epochs: int = 1
 
 
 def _resolve_device(device: str) -> torch.device:

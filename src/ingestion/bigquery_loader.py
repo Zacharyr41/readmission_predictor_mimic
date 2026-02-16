@@ -7,6 +7,7 @@ into a local DuckDB database. Uses two-phase loading:
 """
 
 import logging
+import time
 from pathlib import Path
 
 import duckdb
@@ -40,14 +41,50 @@ TABLE_REGISTRY = {
 }
 
 
+def _run_query(
+    client: bigquery.Client, sql: str, label: str
+) -> pd.DataFrame:
+    """Run a BigQuery query with progress logging."""
+    t0 = time.time()
+    logger.info("  [%s] Query submitted...", label)
+    job = client.query(sql)
+
+    # Wait for query to finish, log progress
+    while not job.done():
+        time.sleep(5)
+        elapsed = time.time() - t0
+        logger.info("  [%s] Query running... %.0fs elapsed", label, elapsed)
+
+    query_time = time.time() - t0
+    billed = job.total_bytes_billed or 0
+    logger.info(
+        "  [%s] Query complete in %.0fs (%.1f MB billed). Downloading results...",
+        label,
+        query_time,
+        billed / 1e6,
+    )
+
+    # Download results
+    df = job.to_dataframe()
+    total_time = time.time() - t0
+    logger.info(
+        "  [%s] Downloaded %d rows in %.0fs (%.0fs query + %.0fs download)",
+        label,
+        len(df),
+        total_time,
+        query_time,
+        total_time - query_time,
+    )
+    return df
+
+
 def _query_full_table(
     client: bigquery.Client, dataset: str, table_name: str
 ) -> pd.DataFrame:
     """Query an entire BigQuery table."""
     fq_table = f"`{MIMIC_SOURCE}.{dataset}.{table_name}`"
     sql = f"SELECT * FROM {fq_table}"
-    logger.info(f"  Querying {fq_table} (full)")
-    return client.query(sql).to_dataframe()
+    return _run_query(client, sql, table_name)
 
 
 def _query_filtered_table(
@@ -60,8 +97,7 @@ def _query_filtered_table(
     fq_table = f"`{MIMIC_SOURCE}.{dataset}.{table_name}`"
     ids_str = ", ".join(str(sid) for sid in subject_ids)
     sql = f"SELECT * FROM {fq_table} WHERE subject_id IN ({ids_str})"
-    logger.info(f"  Querying {fq_table} (filtered, {len(subject_ids)} subjects)")
-    return client.query(sql).to_dataframe()
+    return _run_query(client, sql, f"{table_name} (filtered, {len(subject_ids)} subj)")
 
 
 def _normalize_dtypes(df: pd.DataFrame) -> pd.DataFrame:

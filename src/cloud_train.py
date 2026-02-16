@@ -109,6 +109,7 @@ def main() -> None:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
 
     # ── Step 2: BigQuery ingestion ──
+    step_start = time.time()
     logger.info("Step 2/6: BigQuery ingestion...")
     from config.settings import Settings
     from src.ingestion import load_mimic_data
@@ -124,9 +125,10 @@ def main() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = load_mimic_data(settings)
     conn.close()
-    logger.info("Ingestion complete: %s", DB_PATH)
+    logger.info("Step 2/6 complete: Ingestion (%.1f min)", (time.time() - step_start) / 60)
 
     # ── Step 3: RDF graph construction ──
+    step_start = time.time()
     logger.info("Step 3/6: Building RDF knowledge graph...")
     from src.graph_construction.pipeline import build_graph
 
@@ -144,9 +146,10 @@ def main() -> None:
         snomed_mappings_dir=settings.snomed_mappings_dir,
         umls_api_key=settings.umls_api_key,
     )
-    logger.info("RDF graph built: %d triples", len(graph))
+    logger.info("Step 3/6 complete: RDF graph — %d triples (%.1f min)", len(graph), (time.time() - step_start) / 60)
 
     # ── Step 4: Feature extraction ──
+    step_start = time.time()
     logger.info("Step 4/6: Extracting features...")
     import duckdb
 
@@ -172,9 +175,10 @@ def main() -> None:
         nx_graph=nx_graph,
     )
     feat_conn.close()
-    logger.info("Feature matrix: %s", feature_df.shape)
+    logger.info("Step 4/6 complete: Features %s (%.1f min)", feature_df.shape, (time.time() - step_start) / 60)
 
     # ── Step 5: GNN preparation (SapBERT embeddings + HeteroData) ──
+    step_start = time.time()
     logger.info("Step 5/6: Preparing GNN data (embeddings + HeteroData export)...")
     from src.gnn.__main__ import prepare
 
@@ -185,9 +189,10 @@ def main() -> None:
         output_path=HETERO_PATH,
         mappings_dir=MAPPINGS_DIR,
     )
-    logger.info("HeteroData exported to %s", HETERO_PATH)
+    logger.info("Step 5/6 complete: HeteroData exported (%.1f min)", (time.time() - step_start) / 60)
 
     # ── Step 6: GNN training ──
+    step_start = time.time()
     logger.info("Step 6/6: Running GNN experiments...")
     from src.gnn.experiments import ExperimentRunner
 
@@ -204,6 +209,7 @@ def main() -> None:
         result = runner.run(experiment, seed=seed)
         auroc = result["eval_metrics"].get("auroc", "N/A")
         logger.info("Experiment %s complete: AUROC=%s", experiment, auroc)
+    logger.info("Step 6/6 complete: Training (%.1f min)", (time.time() - step_start) / 60)
 
     elapsed = time.time() - pipeline_start
     logger.info("Total pipeline time: %.1f seconds (%.1f minutes)", elapsed, elapsed / 60)
