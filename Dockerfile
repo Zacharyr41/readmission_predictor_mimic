@@ -27,8 +27,8 @@ RUN uv pip install --system --no-cache \
     torch-scatter \
     --find-links https://data.pyg.org/whl/torch-2.5.1+cu124.html
 
-# Install transformers (for SapBERT embeddings)
-RUN uv pip install --system --no-cache "transformers>=4.35"
+# Install transformers (for SapBERT embeddings) and BigQuery Storage API (10-20x faster downloads)
+RUN uv pip install --system --no-cache "transformers>=4.35" "google-cloud-bigquery-storage>=2.24"
 
 # Pre-download SapBERT model at build time
 RUN python -c "from transformers import AutoModel, AutoTokenizer; \
