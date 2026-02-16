@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Default paths
 # ──────────────────────────────────────────────────────────────────────────────
 
-DEFAULT_RDF = Path("data/processed/knowledge_graph.rdf")
+DEFAULT_RDF = Path("data/processed/knowledge_graph.nt")
 DEFAULT_FEATURES = Path("data/features/feature_matrix.parquet")
 DEFAULT_EMBEDDINGS = Path("data/processed/concept_embeddings.pt")
 DEFAULT_OUTPUT = Path("data/processed/full_hetero_graph.pt")
@@ -62,13 +62,18 @@ def export_graph(
     output_path: Path = DEFAULT_OUTPUT,
 ) -> None:
     """Convert RDF knowledge graph to PyG HeteroData."""
-    import rdflib
-
     from src.gnn.graph_export import export_rdf_to_heterodata
+    from src.graph_construction.disk_graph import (
+        bind_namespaces,
+        close_disk_graph,
+        open_disk_graph,
+    )
 
     logger.info("Parsing RDF graph from %s", rdf_path)
-    rdf_graph = rdflib.Graph()
-    rdf_graph.parse(str(rdf_path))
+    store_path = rdf_path.parent / "oxigraph_export_store"
+    rdf_graph = open_disk_graph(store_path)
+    bind_namespaces(rdf_graph)
+    rdf_graph.parse(str(rdf_path), format="nt")
     logger.info("RDF graph loaded: %d triples", len(rdf_graph))
 
     split_fn = _make_split_fn()
@@ -82,6 +87,7 @@ def export_graph(
         output_path=output_path,
         embed_unmapped_fn=None,
     )
+    close_disk_graph(rdf_graph)
     logger.info(
         "HeteroData saved: %d node types, %d edge types",
         len(data.node_types),

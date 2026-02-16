@@ -3,6 +3,9 @@ workerPoolSpecs:
       machineType: MACHINE_TYPE_PLACEHOLDER
       acceleratorType: NVIDIA_TESLA_T4
       acceleratorCount: 1
+    diskSpec:
+      bootDiskType: pd-ssd
+      bootDiskSizeGb: BOOT_DISK_GB_PLACEHOLDER
     replicaCount: 1
     containerSpec:
       imageUri: IMAGE_URI_PLACEHOLDER

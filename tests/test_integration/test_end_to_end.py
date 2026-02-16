@@ -11,6 +11,7 @@ from pathlib import Path
 from rdflib import Graph
 
 from config.settings import Settings
+from src.graph_construction.disk_graph import close_disk_graph
 
 
 def export_duckdb_to_file(
@@ -61,7 +62,7 @@ class TestFullPipelineEndToEnd:
         # Setup paths
         paths = {
             "duckdb": tmp_path / "mimiciv.duckdb",
-            "rdf": tmp_path / "knowledge_graph.rdf",
+            "rdf": tmp_path / "knowledge_graph.nt",
             "features": tmp_path / "feature_matrix.parquet",
             "analysis_report": tmp_path / "graph_analysis.md",
             "model_lr": tmp_path / "logistic_regression.pkl",
@@ -110,7 +111,7 @@ class TestFullPipelineEndToEnd:
         # Verify RDF graph was created
         assert paths["rdf"].exists(), "RDF graph file should exist"
         graph = Graph()
-        graph.parse(str(paths["rdf"]), format="xml")
+        graph.parse(str(paths["rdf"]), format="nt")
         assert len(graph) > 100, f"Graph should have >100 triples, got {len(graph)}"
 
         # Verify feature matrix
@@ -146,7 +147,7 @@ class TestFullPipelineEndToEnd:
         # Setup paths
         paths = {
             "duckdb": tmp_path / "mimiciv.duckdb",
-            "rdf": tmp_path / "knowledge_graph.rdf",
+            "rdf": tmp_path / "knowledge_graph.nt",
             "features": tmp_path / "feature_matrix.parquet",
             "analysis_report": tmp_path / "graph_analysis.md",
             "model_lr": tmp_path / "logistic_regression.pkl",
@@ -192,7 +193,7 @@ class TestFullPipelineEndToEnd:
 
         paths = {
             "duckdb": tmp_path / "mimiciv.duckdb",
-            "rdf": tmp_path / "knowledge_graph.rdf",
+            "rdf": tmp_path / "knowledge_graph.nt",
             "features": tmp_path / "feature_matrix.parquet",
             "analysis_report": tmp_path / "graph_analysis.md",
             "model_lr": tmp_path / "logistic_regression.pkl",
@@ -236,7 +237,7 @@ class TestPipelineComponents:
         export_duckdb_to_file(synthetic_duckdb_with_events, db_path)
 
         ontology_dir = Path(__file__).parent.parent.parent / "ontology" / "definition"
-        output_path = tmp_path / "graph.rdf"
+        output_path = tmp_path / "graph.nt"
 
         # Build graph
         graph = build_graph(
@@ -249,12 +250,13 @@ class TestPipelineComponents:
 
         # Verify graph structure
         assert len(graph) > 0, "Graph should have triples"
-        assert output_path.exists(), "RDF file should exist"
+        assert output_path.exists(), "NT file should exist"
 
         # Load and verify the serialized graph
         loaded_graph = Graph()
-        loaded_graph.parse(str(output_path), format="xml")
+        loaded_graph.parse(str(output_path), format="nt")
         assert len(loaded_graph) == len(graph), "Serialized graph should match"
+        close_disk_graph(graph)
 
     def test_feature_extraction_from_graph(
         self, synthetic_duckdb_with_events: duckdb.DuckDBPyConnection, tmp_path: Path
@@ -271,7 +273,7 @@ class TestPipelineComponents:
         graph = build_graph(
             db_path=db_path,
             ontology_dir=ontology_dir,
-            output_path=tmp_path / "graph.rdf",
+            output_path=tmp_path / "graph.nt",
             icd_prefixes=["I63", "I61", "I60"],
             patients_limit=0,
         )
@@ -279,6 +281,7 @@ class TestPipelineComponents:
         # Extract features
         features_path = tmp_path / "features.parquet"
         feature_df = build_feature_matrix(graph, save_path=features_path)
+        close_disk_graph(graph)
 
         # Verify feature DataFrame
         assert len(feature_df) > 0, "Should have at least one admission"
@@ -304,12 +307,13 @@ class TestPipelineComponents:
         graph = build_graph(
             db_path=db_path,
             ontology_dir=ontology_dir,
-            output_path=tmp_path / "graph.rdf",
+            output_path=tmp_path / "graph.nt",
             icd_prefixes=["I63", "I61", "I60"],
             patients_limit=0,
         )
 
         feature_df = build_feature_matrix(graph)
+        close_disk_graph(graph)
 
         # Check if we have enough samples for splitting
         if len(feature_df) < 6:
@@ -360,7 +364,7 @@ class TestPipelineOptimizations:
 
         paths = {
             "duckdb": tmp_path / "mimiciv.duckdb",
-            "rdf": tmp_path / "knowledge_graph.rdf",
+            "rdf": tmp_path / "knowledge_graph.nt",
             "features": tmp_path / "feature_matrix.parquet",
             "analysis_report": tmp_path / "graph_analysis.md",
             "model_lr": tmp_path / "logistic_regression.pkl",
@@ -391,7 +395,7 @@ class TestPipelineOptimizations:
         # Verify RDF was created
         assert paths["rdf"].exists()
         graph = Graph()
-        graph.parse(str(paths["rdf"]), format="xml")
+        graph.parse(str(paths["rdf"]), format="nt")
 
         # Verify NO Allen relations in the graph
         allen_predicates = [
@@ -428,7 +432,7 @@ class TestPipelineOptimizations:
 
         paths = {
             "duckdb": tmp_path / "mimiciv.duckdb",
-            "rdf": tmp_path / "knowledge_graph.rdf",
+            "rdf": tmp_path / "knowledge_graph.nt",
             "features": tmp_path / "feature_matrix.parquet",
             "analysis_report": tmp_path / "graph_analysis.md",
             "model_lr": tmp_path / "logistic_regression.pkl",
@@ -468,7 +472,7 @@ class TestPipelineOptimizations:
         # (We can't easily verify exact counts without knowing the fixture data,
         # but we verify the pipeline completed successfully with limits applied)
         graph = Graph()
-        graph.parse(str(paths["rdf"]), format="xml")
+        graph.parse(str(paths["rdf"]), format="nt")
         assert len(graph) > 0, "Graph should have some triples"
 
         # Features should still be extractable

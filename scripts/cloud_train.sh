@@ -19,6 +19,7 @@ PATIENTS_LIMIT="0"
 SKIP_ALLEN="1"
 RUN_ALL="0"
 MACHINE_TYPE="n1-highmem-4"
+BOOT_DISK_GB="100"
 
 # ── Parse CLI flags ──
 while [[ $# -gt 0 ]]; do
@@ -29,6 +30,8 @@ while [[ $# -gt 0 ]]; do
             EXPERIMENT="$2"; shift 2 ;;
         --machine-type)
             MACHINE_TYPE="$2"; shift 2 ;;
+        --boot-disk-gb)
+            BOOT_DISK_GB="$2"; shift 2 ;;
         --seed)
             SEED="$2"; shift 2 ;;
         --run-all)
@@ -42,6 +45,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --patients-limit N    Limit cohort size (default: 0 = no limit)"
             echo "  --experiment NAME     Experiment to run (default: E6_full_model)"
             echo "  --machine-type TYPE   Vertex AI machine type (default: n1-highmem-4)"
+            echo "  --boot-disk-gb N      Boot disk size in GB (default: 100)"
             echo "  --seed N              Random seed (default: 42)"
             echo "  --run-all             Run all 6 ablation experiments"
             echo "  --no-skip-allen       Compute Allen temporal relations (slower)"
@@ -69,6 +73,7 @@ echo "Project:     $PROJECT_ID"
 echo "Region:      $REGION"
 echo "Image:       $IMAGE_URI"
 echo "Machine:     $MACHINE_TYPE + T4 GPU"
+echo "Boot disk:   ${BOOT_DISK_GB} GB (pd-ssd)"
 echo "Experiment:  $EXPERIMENT"
 echo "Patients:    $PATIENTS_LIMIT (0 = all)"
 echo "Seed:        $SEED"
@@ -103,6 +108,7 @@ sed \
     -e "s|EXPERIMENT_PLACEHOLDER|$EXPERIMENT|g" \
     -e "s|SEED_PLACEHOLDER|$SEED|g" \
     -e "s|PATIENTS_LIMIT_PLACEHOLDER|$PATIENTS_LIMIT|g" \
+    -e "s|BOOT_DISK_GB_PLACEHOLDER|$BOOT_DISK_GB|g" \
     -e "s|SKIP_ALLEN_PLACEHOLDER|$SKIP_ALLEN|g" \
     -e "s|RUN_ALL_PLACEHOLDER|$RUN_ALL|g" \
     -e "s|ADC_B64_PLACEHOLDER|$ADC_B64|g" \

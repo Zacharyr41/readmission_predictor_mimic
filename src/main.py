@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Default artifact paths
 DEFAULT_PATHS = {
     "duckdb": Path("data/processed/mimiciv.duckdb"),
-    "rdf": Path("data/processed/knowledge_graph.rdf"),
+    "rdf": Path("data/processed/knowledge_graph.nt"),
     "features": Path("data/features/feature_matrix.parquet"),
     "analysis_report": Path("outputs/reports/graph_analysis.md"),
     "model_lr": Path("outputs/models/logistic_regression.pkl"),
@@ -154,6 +154,10 @@ def run_pipeline(
         nx_graph=nx_graph,
     )
     feat_conn.close()
+
+    # Release the disk-backed graph after feature extraction
+    from src.graph_construction.disk_graph import close_disk_graph
+    close_disk_graph(graph)
     result["feature_shape"] = feature_df.shape
     logger.info(f"  Feature matrix shape: {feature_df.shape}")
 
@@ -409,7 +413,7 @@ def main():
     if args.output_dir:
         paths = {
             "duckdb": args.output_dir / "mimiciv.duckdb",
-            "rdf": args.output_dir / "knowledge_graph.rdf",
+            "rdf": args.output_dir / "knowledge_graph.nt",
             "features": args.output_dir / "feature_matrix.parquet",
             "analysis_report": args.output_dir / "graph_analysis.md",
             "model_lr": args.output_dir / "logistic_regression.pkl",

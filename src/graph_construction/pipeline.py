@@ -6,12 +6,19 @@ DuckDB → RDF/OWL conversion for the neurology cohort.
 
 import logging
 import os
+import tempfile
 from multiprocessing import Pool
 from pathlib import Path
 
 import duckdb
 from rdflib import Graph
 
+from src.graph_construction.disk_graph import (
+    bind_namespaces,
+    close_disk_graph,
+    disk_graph,
+    open_disk_graph,
+)
 from src.graph_construction.ontology import initialize_graph, MIMIC_NS
 from src.graph_construction.patient_writer import (
     write_patient,
@@ -103,8 +110,15 @@ def build_graph(
     total_patients = len(unique_patients)
     logger.info(f"Processing {total_patients} patients from cohort")
 
-    # Initialize graph with ontologies
-    graph = initialize_graph(ontology_dir)
+    # Initialize disk-backed graph with ontologies
+    store_path = output_path.parent / "oxigraph_store"
+    graph = open_disk_graph(store_path)
+    bind_namespaces(graph)
+
+    # Copy ontology triples from the small in-memory graph
+    ontology_graph = initialize_graph(ontology_dir)
+    for triple in ontology_graph:
+        graph.add(triple)
 
     # Initialize SNOMED mapper (optional)
     snomed_mapper = None
@@ -161,9 +175,11 @@ def build_graph(
         with Pool(n_workers) as pool:
             results = pool.map(_process_patient_batch, worker_args)
 
-        # Merge sub-graphs and stats
-        for nt_data, worker_stats in results:
-            graph.parse(data=nt_data, format="nt")
+        # Merge sub-graphs from temp files and stats
+        for nt_path, worker_stats in results:
+            nt_path = Path(nt_path)
+            graph.parse(str(nt_path), format="nt")
+            nt_path.unlink(missing_ok=True)
             for key, value in worker_stats.items():
                 stats[key] = stats.get(key, 0) + value
 
@@ -197,9 +213,9 @@ def build_graph(
 
         conn.close()
 
-    # Serialize to output file
+    # Serialize to output file (NTriples — fastest, grep-able)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    graph.serialize(destination=str(output_path), format="xml")
+    graph.serialize(destination=str(output_path), format="nt")
 
     # Log summary
     logger.info(f"Graph construction complete: {len(graph)} triples")
@@ -270,8 +286,8 @@ def _chunk_list(lst: list, n_chunks: int) -> list[list]:
 def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
     """Process a batch of patients in a worker process.
 
-    Each worker opens its own DuckDB connection and creates its own rdflib Graph.
-    Returns serialized NTriples string for efficient IPC.
+    Each worker opens its own DuckDB connection and a temp disk-backed graph.
+    Serialises NTriples to a temp file (avoids multi-GB strings in IPC).
 
     Args:
         args: Tuple of (db_path, patient_ids, cohort_df, biomarkers_limit,
@@ -280,7 +296,7 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
               umls_api_key).
 
     Returns:
-        Tuple of (NTriples string, aggregated statistics dict).
+        Tuple of (path to NTriples temp file, aggregated statistics dict).
     """
     (
         db_path, patient_ids, cohort_df,
@@ -290,7 +306,6 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
     ) = args
 
     conn = duckdb.connect(str(db_path), read_only=True)
-    graph = Graph()
 
     # Reconstruct SnomedMapper in this process
     snomed_mapper = None
@@ -310,36 +325,42 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
         "allen_relations": 0,
     }
 
-    batch_size = len(patient_ids)
-    for i, subject_id in enumerate(patient_ids, 1):
-        if i == 1 or i % 50 == 0 or i == batch_size:
-            logger.info(
-                f"Worker {os.getpid()}: patient {i}/{batch_size} "
-                f"(subject_id={subject_id})"
+    with disk_graph() as graph:
+        bind_namespaces(graph)
+
+        batch_size = len(patient_ids)
+        for i, subject_id in enumerate(patient_ids, 1):
+            if i == 1 or i % 50 == 0 or i == batch_size:
+                logger.info(
+                    f"Worker {os.getpid()}: patient {i}/{batch_size} "
+                    f"(subject_id={subject_id})"
+                )
+
+            patient_stats = _process_patient(
+                conn=conn,
+                graph=graph,
+                subject_id=subject_id,
+                cohort_df=cohort_df,
+                biomarkers_limit=biomarkers_limit,
+                vitals_limit=vitals_limit,
+                microbiology_limit=microbiology_limit,
+                prescriptions_limit=prescriptions_limit,
+                diagnoses_limit=diagnoses_limit,
+                skip_allen_relations=skip_allen_relations,
+                snomed_mapper=snomed_mapper,
             )
 
-        patient_stats = _process_patient(
-            conn=conn,
-            graph=graph,
-            subject_id=subject_id,
-            cohort_df=cohort_df,
-            biomarkers_limit=biomarkers_limit,
-            vitals_limit=vitals_limit,
-            microbiology_limit=microbiology_limit,
-            prescriptions_limit=prescriptions_limit,
-            diagnoses_limit=diagnoses_limit,
-            skip_allen_relations=skip_allen_relations,
-            snomed_mapper=snomed_mapper,
-        )
+            for key, value in patient_stats.items():
+                stats[key] = stats.get(key, 0) + value
 
-        for key, value in patient_stats.items():
-            stats[key] = stats.get(key, 0) + value
+        # Serialize to a temp NTriples file (avoids huge string in IPC)
+        fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="worker_")
+        os.close(fd)
+        graph.serialize(destination=nt_path, format="nt")
 
     conn.close()
 
-    # Serialize as NTriples — fastest RDF format to parse
-    nt_data = graph.serialize(format="nt")
-    return nt_data, stats
+    return nt_path, stats
 
 
 def _process_patient(

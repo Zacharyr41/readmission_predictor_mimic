@@ -27,7 +27,7 @@ def main():
         "--input",
         "-i",
         type=Path,
-        default=Path("data/processed/knowledge_graph.rdf"),
+        default=Path("data/processed/knowledge_graph.nt"),
         help="Path to input RDF graph file",
     )
     parser.add_argument(
@@ -59,9 +59,17 @@ def main():
 
     logger.info(f"Loading graph from {args.input}")
 
-    # Load graph
-    graph = Graph()
-    graph.parse(str(args.input), format="xml")
+    # Load graph into disk-backed store
+    from src.graph_construction.disk_graph import (
+        bind_namespaces,
+        close_disk_graph,
+        open_disk_graph,
+    )
+
+    store_path = args.input.parent / "oxigraph_analysis_store"
+    graph = open_disk_graph(store_path)
+    bind_namespaces(graph)
+    graph.parse(str(args.input), format="nt")
 
     logger.info(f"  Loaded {len(graph)} triples")
 
@@ -70,9 +78,10 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report, _nx_graph = generate_analysis_report(graph, output_path=args.output)
 
+    close_disk_graph(graph)
+
     print(f"\nAnalysis report generated:")
     print(f"  Output: {args.output}")
-    print(f"  Triples: {len(graph)}")
 
     return 0
 

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Artifact paths (local to the container)
 DB_PATH = Path("data/processed/mimiciv.duckdb")
-RDF_PATH = Path("data/processed/knowledge_graph.rdf")
+RDF_PATH = Path("data/processed/knowledge_graph.nt")
 FEATURES_PATH = Path("data/features/feature_matrix.parquet")
 EMBEDDINGS_PATH = Path("data/processed/concept_embeddings.pt")
 HETERO_PATH = Path("data/processed/full_hetero_graph.pt")
@@ -148,7 +148,7 @@ def main() -> None:
     )
     logger.info("Step 3/6 complete: RDF graph — %d triples (%.1f min)", len(graph), (time.time() - step_start) / 60)
 
-    # ── Step 4: Feature extraction ──
+    # ── Step 4: Feature extraction (graph must stay open for SPARQL queries) ──
     step_start = time.time()
     logger.info("Step 4/6: Extracting features...")
     import duckdb
@@ -175,6 +175,11 @@ def main() -> None:
         nx_graph=nx_graph,
     )
     feat_conn.close()
+
+    # Release the disk-backed graph (no longer needed after feature extraction)
+    from src.graph_construction.disk_graph import close_disk_graph
+    close_disk_graph(graph)
+
     logger.info("Step 4/6 complete: Features %s (%.1f min)", feature_df.shape, (time.time() - step_start) / 60)
 
     # ── Step 5: GNN preparation (SapBERT embeddings + HeteroData) ──

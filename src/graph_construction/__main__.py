@@ -35,7 +35,7 @@ def main():
         "--output",
         "-o",
         type=Path,
-        default=Path("data/processed/knowledge_graph.rdf"),
+        default=Path("data/processed/knowledge_graph.nt"),
         help="Path to output RDF file",
     )
     parser.add_argument(
@@ -86,6 +86,8 @@ def main():
     logger.info(f"ICD codes: {args.icd_codes}")
 
     # Build graph
+    from src.graph_construction.disk_graph import close_disk_graph
+
     graph = build_graph(
         db_path=db_path,
         ontology_dir=args.ontology_dir,
@@ -95,8 +97,11 @@ def main():
         biomarkers_limit=args.biomarkers_limit,
     )
 
+    triple_count = len(graph)
+    close_disk_graph(graph)
+
     print(f"\nGraph built successfully:")
-    print(f"  Triples: {len(graph)}")
+    print(f"  Triples: {triple_count}")
     print(f"  Output: {args.output}")
 
 

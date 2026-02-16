@@ -92,14 +92,19 @@ class TestBuildEmbeddings:
 
 
 class TestExportGraph:
-    """Verify export_graph wires rdflib → export_rdf_to_heterodata."""
+    """Verify export_graph wires disk-backed graph → export_rdf_to_heterodata."""
 
+    @patch("src.graph_construction.disk_graph.close_disk_graph")
+    @patch("src.graph_construction.disk_graph.open_disk_graph")
+    @patch("src.graph_construction.disk_graph.bind_namespaces")
     @patch("src.gnn.graph_export.export_rdf_to_heterodata")
-    @patch("rdflib.Graph")
-    def test_calls_export(self, MockGraph, mock_export):
+    def test_calls_export(self, mock_export, mock_bind, mock_open, mock_close):
         from pathlib import Path
 
         from src.gnn.__main__ import export_graph
+
+        mock_graph = MagicMock()
+        mock_open.return_value = mock_graph
 
         mock_data = MagicMock()
         mock_data.node_types = ["patient"]
@@ -107,13 +112,13 @@ class TestExportGraph:
         mock_export.return_value = mock_data
 
         export_graph(
-            rdf_path=Path("/fake/kg.rdf"),
+            rdf_path=Path("/fake/kg.nt"),
             features_path=Path("/fake/feat.parquet"),
             embeddings_path=Path("/fake/emb.pt"),
             output_path=Path("/fake/out.pt"),
         )
 
-        MockGraph.return_value.parse.assert_called_once_with("/fake/kg.rdf")
+        mock_graph.parse.assert_called_once_with("/fake/kg.nt", format="nt")
 
         mock_export.assert_called_once()
         _, kw = mock_export.call_args
@@ -121,13 +126,19 @@ class TestExportGraph:
         assert callable(kw["split_fn"])
         # embed_unmapped_fn should be None (triggers built-in fallback)
         assert kw["embed_unmapped_fn"] is None
+        mock_close.assert_called_once_with(mock_graph)
 
+    @patch("src.graph_construction.disk_graph.close_disk_graph")
+    @patch("src.graph_construction.disk_graph.open_disk_graph")
+    @patch("src.graph_construction.disk_graph.bind_namespaces")
     @patch("src.gnn.graph_export.export_rdf_to_heterodata")
-    @patch("rdflib.Graph")
-    def test_split_fn_is_callable(self, MockGraph, mock_export):
+    def test_split_fn_is_callable(self, mock_export, mock_bind, mock_open, mock_close):
         from pathlib import Path
 
         from src.gnn.__main__ import export_graph
+
+        mock_graph = MagicMock()
+        mock_open.return_value = mock_graph
 
         mock_data = MagicMock()
         mock_data.node_types = []
@@ -135,7 +146,7 @@ class TestExportGraph:
         mock_export.return_value = mock_data
 
         export_graph(
-            rdf_path=Path("/fake/kg.rdf"),
+            rdf_path=Path("/fake/kg.nt"),
             features_path=Path("/fake/feat.parquet"),
             embeddings_path=Path("/fake/emb.pt"),
             output_path=Path("/fake/out.pt"),

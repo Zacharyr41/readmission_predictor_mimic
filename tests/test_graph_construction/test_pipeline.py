@@ -7,6 +7,7 @@ import duckdb
 import pytest
 from rdflib import Graph
 
+from src.graph_construction.disk_graph import close_disk_graph
 from src.graph_construction.pipeline import build_graph
 from src.graph_construction.ontology import MIMIC_NS, TIME_NS
 
@@ -17,8 +18,8 @@ ONTOLOGY_DIR = Path(__file__).parent.parent.parent / "ontology" / "definition"
 
 @pytest.fixture
 def output_path(tmp_path: Path) -> Path:
-    """Temporary output path for RDF files."""
-    return tmp_path / "test_output.rdf"
+    """Temporary output path for NTriples files."""
+    return tmp_path / "test_output.nt"
 
 
 @pytest.fixture
@@ -240,12 +241,12 @@ def pipeline_db_path(tmp_path: Path) -> Path:
 class TestBuildGraph:
     """Tests for the build_graph pipeline orchestrator."""
 
-    def test_pipeline_produces_rdf_file(
+    def test_pipeline_produces_nt_file(
         self,
         pipeline_db_path: Path,
         output_path: Path,
     ):
-        """build_graph() creates an .rdf file at output_path."""
+        """build_graph() creates an .nt file at output_path."""
         graph = build_graph(
             db_path=pipeline_db_path,
             ontology_dir=ONTOLOGY_DIR,
@@ -253,9 +254,12 @@ class TestBuildGraph:
             icd_prefixes=["I63"],
         )
 
-        assert output_path.exists(), "RDF file should be created"
-        assert output_path.stat().st_size > 0, "RDF file should not be empty"
-        assert len(graph) > 0, "Graph should contain triples"
+        try:
+            assert output_path.exists(), "NT file should be created"
+            assert output_path.stat().st_size > 0, "NT file should not be empty"
+            assert len(graph) > 0, "Graph should contain triples"
+        finally:
+            close_disk_graph(graph)
 
     def test_pipeline_filters_to_cohort(
         self,
@@ -270,23 +274,26 @@ class TestBuildGraph:
             icd_prefixes=["I63"],
         )
 
-        # Query for all patients in the graph
-        query = """
-        SELECT ?patient ?subject_id
-        WHERE {
-            ?patient rdf:type mimic:Patient ;
-                     mimic:hasSubjectId ?subject_id .
-        }
-        """
-        results = list(graph.query(query))
-        subject_ids = {int(row[1]) for row in results}
+        try:
+            # Query for all patients in the graph
+            query = """
+            SELECT ?patient ?subject_id
+            WHERE {
+                ?patient rdf:type mimic:Patient ;
+                         mimic:hasSubjectId ?subject_id .
+            }
+            """
+            results = list(graph.query(query))
+            subject_ids = {int(row[1]) for row in results}
 
-        # Patients 1, 2 have stroke (I63x) diagnoses with ICU stays meeting criteria
-        # Patient 3 has epilepsy (G40), Patient 4 has cardiac (I25) - should be excluded
-        # Patient 5 has stroke but died in hospital (excluded from readmission labels)
-        assert 1 in subject_ids or 2 in subject_ids, "At least one stroke patient should be included"
-        assert 3 not in subject_ids, "Epilepsy patient should be excluded"
-        assert 4 not in subject_ids, "Cardiac patient should be excluded"
+            # Patients 1, 2 have stroke (I63x) diagnoses with ICU stays meeting criteria
+            # Patient 3 has epilepsy (G40), Patient 4 has cardiac (I25) - should be excluded
+            # Patient 5 has stroke but died in hospital (excluded from readmission labels)
+            assert 1 in subject_ids or 2 in subject_ids, "At least one stroke patient should be included"
+            assert 3 not in subject_ids, "Epilepsy patient should be excluded"
+            assert 4 not in subject_ids, "Cardiac patient should be excluded"
+        finally:
+            close_disk_graph(graph)
 
     def test_pipeline_creates_all_entity_types(
         self,
@@ -301,27 +308,30 @@ class TestBuildGraph:
             icd_prefixes=["I63"],
         )
 
-        # Check for required entity types
-        entity_types = [
-            ("Patient", MIMIC_NS.Patient),
-            ("HospitalAdmission", MIMIC_NS.HospitalAdmission),
-            ("ICUStay", MIMIC_NS.ICUStay),
-            ("ICUDay", MIMIC_NS.ICUDay),
-            ("BioMarkerEvent", MIMIC_NS.BioMarkerEvent),
-            ("ClinicalSignEvent", MIMIC_NS.ClinicalSignEvent),
-            ("DiagnosisEvent", MIMIC_NS.DiagnosisEvent),
-        ]
+        try:
+            # Check for required entity types
+            entity_types = [
+                ("Patient", MIMIC_NS.Patient),
+                ("HospitalAdmission", MIMIC_NS.HospitalAdmission),
+                ("ICUStay", MIMIC_NS.ICUStay),
+                ("ICUDay", MIMIC_NS.ICUDay),
+                ("BioMarkerEvent", MIMIC_NS.BioMarkerEvent),
+                ("ClinicalSignEvent", MIMIC_NS.ClinicalSignEvent),
+                ("DiagnosisEvent", MIMIC_NS.DiagnosisEvent),
+            ]
 
-        for name, entity_type in entity_types:
-            query = f"""
-            SELECT (COUNT(?entity) AS ?count)
-            WHERE {{
-                ?entity rdf:type <{entity_type}> .
-            }}
-            """
-            results = list(graph.query(query))
-            count = int(results[0][0])
-            assert count > 0, f"Graph should contain at least one {name}"
+            for name, entity_type in entity_types:
+                query = f"""
+                SELECT (COUNT(?entity) AS ?count)
+                WHERE {{
+                    ?entity rdf:type <{entity_type}> .
+                }}
+                """
+                results = list(graph.query(query))
+                count = int(results[0][0])
+                assert count > 0, f"Graph should contain at least one {name}"
+        finally:
+            close_disk_graph(graph)
 
     def test_pipeline_includes_readmission_labels(
         self,
@@ -336,16 +346,19 @@ class TestBuildGraph:
             icd_prefixes=["I63"],
         )
 
-        # Check for readmission labels
-        query = """
-        SELECT ?admission ?readmitted30
-        WHERE {
-            ?admission rdf:type mimic:HospitalAdmission ;
-                       mimic:readmittedWithin30Days ?readmitted30 .
-        }
-        """
-        results = list(graph.query(query))
-        assert len(results) > 0, "Admissions should have readmittedWithin30Days property"
+        try:
+            # Check for readmission labels
+            query = """
+            SELECT ?admission ?readmitted30
+            WHERE {
+                ?admission rdf:type mimic:HospitalAdmission ;
+                           mimic:readmittedWithin30Days ?readmitted30 .
+            }
+            """
+            results = list(graph.query(query))
+            assert len(results) > 0, "Admissions should have readmittedWithin30Days property"
+        finally:
+            close_disk_graph(graph)
 
     def test_pipeline_includes_temporal_relations(
         self,
@@ -360,16 +373,19 @@ class TestBuildGraph:
             icd_prefixes=["I63"],
         )
 
-        # Check for Allen temporal relations
-        query = f"""
-        SELECT (COUNT(*) AS ?count)
-        WHERE {{
-            ?a <{TIME_NS.before}> ?b .
-        }}
-        """
-        results = list(graph.query(query))
-        count = int(results[0][0])
-        assert count > 0, "Graph should contain time:before relations"
+        try:
+            # Check for Allen temporal relations
+            query = f"""
+            SELECT (COUNT(*) AS ?count)
+            WHERE {{
+                ?a <{TIME_NS.before}> ?b .
+            }}
+            """
+            results = list(graph.query(query))
+            count = int(results[0][0])
+            assert count > 0, "Graph should contain time:before relations"
+        finally:
+            close_disk_graph(graph)
 
     def test_pipeline_serialization_roundtrip(
         self,
@@ -384,10 +400,11 @@ class TestBuildGraph:
             icd_prefixes=["I63"],
         )
         original_count = len(original_graph)
+        close_disk_graph(original_graph)
 
-        # Parse the serialized file
+        # Parse the serialized NTriples file
         parsed_graph = Graph()
-        parsed_graph.parse(output_path)
+        parsed_graph.parse(output_path, format="nt")
         parsed_count = len(parsed_graph)
 
         assert parsed_count == original_count, (
@@ -408,16 +425,19 @@ class TestBuildGraph:
             patients_limit=1,
         )
 
-        # Count patients
-        query = """
-        SELECT (COUNT(?patient) AS ?count)
-        WHERE {
-            ?patient rdf:type mimic:Patient .
-        }
-        """
-        results = list(graph.query(query))
-        count = int(results[0][0])
-        assert count == 1, f"Should have exactly 1 patient, got {count}"
+        try:
+            # Count patients
+            query = """
+            SELECT (COUNT(?patient) AS ?count)
+            WHERE {
+                ?patient rdf:type mimic:Patient .
+            }
+            """
+            results = list(graph.query(query))
+            count = int(results[0][0])
+            assert count == 1, f"Should have exactly 1 patient, got {count}"
+        finally:
+            close_disk_graph(graph)
 
     def test_pipeline_logs_progress(
         self,
@@ -427,12 +447,13 @@ class TestBuildGraph:
     ):
         """Captures 'Processing patient X/Y' log messages."""
         with caplog.at_level(logging.INFO):
-            build_graph(
+            graph = build_graph(
                 db_path=pipeline_db_path,
                 ontology_dir=ONTOLOGY_DIR,
                 output_path=output_path,
                 icd_prefixes=["I63"],
             )
+        close_disk_graph(graph)
 
         # Check for progress log messages
         log_messages = [record.message for record in caplog.records]
