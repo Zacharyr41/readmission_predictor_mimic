@@ -6,7 +6,6 @@ DuckDB → RDF/OWL conversion for the neurology cohort.
 
 import logging
 import os
-import sys
 import tempfile
 import time
 from multiprocessing import Pool
@@ -157,46 +156,50 @@ def build_graph(
         n_workers = min(os.cpu_count() or 1, 4)
 
     if n_workers > 1 and total_patients > n_workers:
-        # Parallel processing
+        # Parallel processing — per-patient tasks with main-process logging
         conn.close()  # Workers open their own connections
         logger.info(
             f"Using {n_workers} worker processes for {total_patients} patients"
         )
 
-        chunks = _chunk_list(unique_patients, n_workers)
         worker_args = [
             (
-                db_path, chunk, cohort_df,
+                db_path, subject_id, cohort_df,
                 biomarkers_limit, vitals_limit, microbiology_limit,
                 prescriptions_limit, diagnoses_limit,
                 skip_allen_relations, snomed_mappings_dir, umls_api_key,
             )
-            for chunk in chunks
+            for subject_id in unique_patients
         ]
 
+        nt_paths: list[Path] = []
         with Pool(n_workers) as pool:
-            results = pool.map(_process_patient_batch, worker_args)
+            for idx, (nt_path, patient_stats) in enumerate(
+                pool.imap_unordered(_process_single_patient, worker_args), 1
+            ):
+                elapsed_entities = sum(patient_stats.values())
+                logger.info(
+                    f"Patient {idx}/{total_patients} complete "
+                    f"(+{elapsed_entities} entities, "
+                    f"nt={Path(nt_path).stat().st_size / 1024:.0f} KB)"
+                )
+                nt_paths.append(Path(nt_path))
+                for key, value in patient_stats.items():
+                    stats[key] = stats.get(key, 0) + value
 
-        # Merge sub-graphs from temp files and stats
-        for idx, (nt_path, worker_stats) in enumerate(results, 1):
-            nt_path = Path(nt_path)
-            file_mb = nt_path.stat().st_size / (1024 * 1024)
-            logger.info(
-                f"Merging sub-graph {idx}/{len(results)} "
-                f"({file_mb:.1f} MB NTriples)..."
-            )
-            t0 = time.monotonic()
+        # Merge all per-patient NTriples files into the main graph
+        logger.info(f"Merging {len(nt_paths)} patient sub-graphs...")
+        merge_start = time.monotonic()
+        for idx, nt_path in enumerate(nt_paths, 1):
             graph.parse(str(nt_path), format="nt")
-            elapsed = time.monotonic() - t0
-            logger.info(
-                f"  Merged sub-graph {idx}/{len(results)} in {elapsed:.1f}s "
-                f"(graph now has {len(graph)} triples)"
-            )
             nt_path.unlink(missing_ok=True)
-            for key, value in worker_stats.items():
-                stats[key] = stats.get(key, 0) + value
-
-        logger.info(f"All {n_workers} sub-graphs merged into main graph")
+            if idx % 25 == 0 or idx == len(nt_paths):
+                logger.info(
+                    f"  Merged {idx}/{len(nt_paths)} files "
+                    f"({len(graph)} triples, "
+                    f"{time.monotonic() - merge_start:.1f}s)"
+                )
+        logger.info(f"All sub-graphs merged into main graph")
     else:
         # Sequential processing (single worker or few patients)
         if n_workers <= 1:
@@ -295,29 +298,18 @@ def _collect_loinc_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
     return []
 
 
-def _chunk_list(lst: list, n_chunks: int) -> list[list]:
-    """Split a list into n roughly equal chunks."""
-    k, m = divmod(len(lst), n_chunks)
-    return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n_chunks)]
 
+def _process_single_patient(args: tuple) -> tuple[str, dict[str, int]]:
+    """Process one patient in a worker process.
 
-def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
-    """Process a batch of patients in a worker process.
-
-    Each worker opens its own DuckDB connection and a temp disk-backed graph.
-    Serialises NTriples to a temp file (avoids multi-GB strings in IPC).
-
-    Args:
-        args: Tuple of (db_path, patient_ids, cohort_df, biomarkers_limit,
-              vitals_limit, microbiology_limit, prescriptions_limit,
-              diagnoses_limit, skip_allen_relations, snomed_mappings_dir,
-              umls_api_key).
+    Opens its own DuckDB connection and disk-backed graph, processes the
+    patient, serializes to a temp NTriples file, and returns the path + stats.
 
     Returns:
-        Tuple of (path to NTriples temp file, aggregated statistics dict).
+        Tuple of (path to NTriples temp file, patient statistics dict).
     """
     (
-        db_path, patient_ids, cohort_df,
+        db_path, subject_id, cohort_df,
         biomarkers_limit, vitals_limit, microbiology_limit,
         prescriptions_limit, diagnoses_limit,
         skip_allen_relations, snomed_mappings_dir, umls_api_key,
@@ -325,83 +317,33 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
 
     conn = duckdb.connect(str(db_path), read_only=True)
 
-    # Reconstruct SnomedMapper in this process
     snomed_mapper = None
     if snomed_mappings_dir is not None and Path(snomed_mappings_dir).exists():
         snomed_mapper = SnomedMapper(Path(snomed_mappings_dir), umls_api_key=umls_api_key)
 
-    stats = {
-        "patients": 0,
-        "admissions": 0,
-        "icu_stays": 0,
-        "icu_days": 0,
-        "biomarkers": 0,
-        "vitals": 0,
-        "microbiology": 0,
-        "prescriptions": 0,
-        "diagnoses": 0,
-        "allen_relations": 0,
-    }
-
-    # Reconfigure logging in child process so messages reach stderr
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)-6s %(message)s",
-        stream=sys.stderr,
-        force=True,
-    )
-    child_logger = logging.getLogger("graph.worker")
-
-    pid = os.getpid()
-    batch_start = time.monotonic()
-
     with disk_graph() as graph:
         bind_namespaces(graph)
 
-        batch_size = len(patient_ids)
-        for i, subject_id in enumerate(patient_ids, 1):
-            t0 = time.monotonic()
-
-            patient_stats = _process_patient(
-                conn=conn,
-                graph=graph,
-                subject_id=subject_id,
-                cohort_df=cohort_df,
-                biomarkers_limit=biomarkers_limit,
-                vitals_limit=vitals_limit,
-                microbiology_limit=microbiology_limit,
-                prescriptions_limit=prescriptions_limit,
-                diagnoses_limit=diagnoses_limit,
-                skip_allen_relations=skip_allen_relations,
-                snomed_mapper=snomed_mapper,
-            )
-
-            elapsed = time.monotonic() - t0
-            triples = sum(patient_stats.values())
-            child_logger.info(
-                f"[worker-{pid}] patient {i}/{batch_size} "
-                f"(subj={subject_id}) {elapsed:.1f}s  "
-                f"+{triples} entities"
-            )
-
-            for key, value in patient_stats.items():
-                stats[key] = stats.get(key, 0) + value
-
-        # Serialize to a temp NTriples file (avoids huge string in IPC)
-        ser_start = time.monotonic()
-        fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="worker_")
-        os.close(fd)
-        graph.serialize(destination=nt_path, format="nt")
-        ser_elapsed = time.monotonic() - ser_start
-        total_elapsed = time.monotonic() - batch_start
-        child_logger.info(
-            f"[worker-{pid}] done — serialized {len(graph)} triples "
-            f"in {ser_elapsed:.1f}s  (total {total_elapsed:.1f}s)"
+        patient_stats = _process_patient(
+            conn=conn,
+            graph=graph,
+            subject_id=subject_id,
+            cohort_df=cohort_df,
+            biomarkers_limit=biomarkers_limit,
+            vitals_limit=vitals_limit,
+            microbiology_limit=microbiology_limit,
+            prescriptions_limit=prescriptions_limit,
+            diagnoses_limit=diagnoses_limit,
+            skip_allen_relations=skip_allen_relations,
+            snomed_mapper=snomed_mapper,
         )
 
-    conn.close()
+        fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="patient_")
+        os.close(fd)
+        graph.serialize(destination=nt_path, format="nt")
 
-    return nt_path, stats
+    conn.close()
+    return nt_path, patient_stats
 
 
 def _process_patient(
