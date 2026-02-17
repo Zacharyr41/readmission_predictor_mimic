@@ -6,7 +6,9 @@ DuckDB → RDF/OWL conversion for the neurology cohort.
 
 import logging
 import os
+import sys
 import tempfile
+import time
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -176,14 +178,25 @@ def build_graph(
             results = pool.map(_process_patient_batch, worker_args)
 
         # Merge sub-graphs from temp files and stats
-        for nt_path, worker_stats in results:
+        for idx, (nt_path, worker_stats) in enumerate(results, 1):
             nt_path = Path(nt_path)
+            file_mb = nt_path.stat().st_size / (1024 * 1024)
+            logger.info(
+                f"Merging sub-graph {idx}/{len(results)} "
+                f"({file_mb:.1f} MB NTriples)..."
+            )
+            t0 = time.monotonic()
             graph.parse(str(nt_path), format="nt")
+            elapsed = time.monotonic() - t0
+            logger.info(
+                f"  Merged sub-graph {idx}/{len(results)} in {elapsed:.1f}s "
+                f"(graph now has {len(graph)} triples)"
+            )
             nt_path.unlink(missing_ok=True)
             for key, value in worker_stats.items():
                 stats[key] = stats.get(key, 0) + value
 
-        logger.info(f"Merged {n_workers} sub-graphs into main graph")
+        logger.info(f"All {n_workers} sub-graphs merged into main graph")
     else:
         # Sequential processing (single worker or few patients)
         if n_workers <= 1:
@@ -215,7 +228,12 @@ def build_graph(
 
     # Serialize to output file (NTriples — fastest, grep-able)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Serializing {len(graph)} triples to {output_path}...")
+    t0 = time.monotonic()
     graph.serialize(destination=str(output_path), format="nt")
+    ser_elapsed = time.monotonic() - t0
+    output_mb = output_path.stat().st_size / (1024 * 1024)
+    logger.info(f"Serialized in {ser_elapsed:.1f}s ({output_mb:.1f} MB)")
 
     # Log summary
     logger.info(f"Graph construction complete: {len(graph)} triples")
@@ -325,16 +343,15 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
         "allen_relations": 0,
     }
 
+    pid = os.getpid()
+    batch_start = time.monotonic()
+
     with disk_graph() as graph:
         bind_namespaces(graph)
 
         batch_size = len(patient_ids)
         for i, subject_id in enumerate(patient_ids, 1):
-            if i == 1 or i % 50 == 0 or i == batch_size:
-                logger.info(
-                    f"Worker {os.getpid()}: patient {i}/{batch_size} "
-                    f"(subject_id={subject_id})"
-                )
+            t0 = time.monotonic()
 
             patient_stats = _process_patient(
                 conn=conn,
@@ -350,13 +367,31 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
                 snomed_mapper=snomed_mapper,
             )
 
+            elapsed = time.monotonic() - t0
+            triples = sum(patient_stats.values())
+            # print+flush so child-process output reaches Cloud Logging
+            print(
+                f"[worker-{pid}] patient {i}/{batch_size} "
+                f"(subj={subject_id}) {elapsed:.1f}s  "
+                f"+{triples} entities",
+                flush=True,
+            )
+
             for key, value in patient_stats.items():
                 stats[key] = stats.get(key, 0) + value
 
         # Serialize to a temp NTriples file (avoids huge string in IPC)
+        ser_start = time.monotonic()
         fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="worker_")
         os.close(fd)
         graph.serialize(destination=nt_path, format="nt")
+        ser_elapsed = time.monotonic() - ser_start
+        total_elapsed = time.monotonic() - batch_start
+        print(
+            f"[worker-{pid}] done — serialized {len(graph)} triples "
+            f"in {ser_elapsed:.1f}s  (total {total_elapsed:.1f}s)",
+            flush=True,
+        )
 
     conn.close()
 
