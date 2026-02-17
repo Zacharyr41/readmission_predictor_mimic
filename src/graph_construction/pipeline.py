@@ -343,6 +343,15 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
         "allen_relations": 0,
     }
 
+    # Reconfigure logging in child process so messages reach stderr
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)-6s %(message)s",
+        stream=sys.stderr,
+        force=True,
+    )
+    child_logger = logging.getLogger("graph.worker")
+
     pid = os.getpid()
     batch_start = time.monotonic()
 
@@ -369,12 +378,10 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
 
             elapsed = time.monotonic() - t0
             triples = sum(patient_stats.values())
-            # print+flush so child-process output reaches Cloud Logging
-            print(
+            child_logger.info(
                 f"[worker-{pid}] patient {i}/{batch_size} "
                 f"(subj={subject_id}) {elapsed:.1f}s  "
-                f"+{triples} entities",
-                flush=True,
+                f"+{triples} entities"
             )
 
             for key, value in patient_stats.items():
@@ -387,10 +394,9 @@ def _process_patient_batch(args: tuple) -> tuple[str, dict[str, int]]:
         graph.serialize(destination=nt_path, format="nt")
         ser_elapsed = time.monotonic() - ser_start
         total_elapsed = time.monotonic() - batch_start
-        print(
+        child_logger.info(
             f"[worker-{pid}] done — serialized {len(graph)} triples "
-            f"in {ser_elapsed:.1f}s  (total {total_elapsed:.1f}s)",
-            flush=True,
+            f"in {ser_elapsed:.1f}s  (total {total_elapsed:.1f}s)"
         )
 
     conn.close()
