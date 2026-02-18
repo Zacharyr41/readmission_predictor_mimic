@@ -17,7 +17,6 @@ from rdflib import Graph
 from src.graph_construction.disk_graph import (
     bind_namespaces,
     close_disk_graph,
-    disk_graph,
     open_disk_graph,
 )
 from src.graph_construction.ontology import initialize_graph, MIMIC_NS
@@ -164,16 +163,17 @@ def build_graph(
 
         worker_args = [
             (
-                db_path, subject_id, cohort_df,
+                subject_id, cohort_df,
                 biomarkers_limit, vitals_limit, microbiology_limit,
                 prescriptions_limit, diagnoses_limit,
-                skip_allen_relations, snomed_mappings_dir, umls_api_key,
+                skip_allen_relations,
             )
             for subject_id in unique_patients
         ]
 
+        init_args = (db_path, snomed_mappings_dir, umls_api_key)
         nt_paths: list[Path] = []
-        with Pool(n_workers) as pool:
+        with Pool(n_workers, _worker_init, init_args) as pool:
             for idx, (nt_path, patient_stats) in enumerate(
                 pool.imap_unordered(_process_single_patient, worker_args), 1
             ):
@@ -299,50 +299,56 @@ def _collect_loinc_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
 
 
 
+_worker_conn = None
+_worker_mapper = None
+
+
+def _worker_init(db_path, snomed_mappings_dir, umls_api_key):
+    """Pool initializer: open DuckDB + SnomedMapper once per worker process."""
+    global _worker_conn, _worker_mapper  # noqa: PLW0603
+    _worker_conn = duckdb.connect(str(db_path), read_only=True)
+    if snomed_mappings_dir is not None and Path(snomed_mappings_dir).exists():
+        _worker_mapper = SnomedMapper(
+            Path(snomed_mappings_dir), umls_api_key=umls_api_key
+        )
+
+
 def _process_single_patient(args: tuple) -> tuple[str, dict[str, int]]:
     """Process one patient in a worker process.
 
-    Opens its own DuckDB connection and disk-backed graph, processes the
-    patient, serializes to a temp NTriples file, and returns the path + stats.
+    Uses the per-worker DuckDB connection and SnomedMapper (set by _worker_init).
+    Uses an in-memory rdflib Graph for the per-patient subgraph (small enough).
 
     Returns:
         Tuple of (path to NTriples temp file, patient statistics dict).
     """
     (
-        db_path, subject_id, cohort_df,
+        subject_id, cohort_df,
         biomarkers_limit, vitals_limit, microbiology_limit,
         prescriptions_limit, diagnoses_limit,
-        skip_allen_relations, snomed_mappings_dir, umls_api_key,
+        skip_allen_relations,
     ) = args
 
-    conn = duckdb.connect(str(db_path), read_only=True)
+    graph = Graph()
 
-    snomed_mapper = None
-    if snomed_mappings_dir is not None and Path(snomed_mappings_dir).exists():
-        snomed_mapper = SnomedMapper(Path(snomed_mappings_dir), umls_api_key=umls_api_key)
+    patient_stats = _process_patient(
+        conn=_worker_conn,
+        graph=graph,
+        subject_id=subject_id,
+        cohort_df=cohort_df,
+        biomarkers_limit=biomarkers_limit,
+        vitals_limit=vitals_limit,
+        microbiology_limit=microbiology_limit,
+        prescriptions_limit=prescriptions_limit,
+        diagnoses_limit=diagnoses_limit,
+        skip_allen_relations=skip_allen_relations,
+        snomed_mapper=_worker_mapper,
+    )
 
-    with disk_graph() as graph:
-        bind_namespaces(graph)
+    fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="patient_")
+    os.close(fd)
+    graph.serialize(destination=nt_path, format="nt")
 
-        patient_stats = _process_patient(
-            conn=conn,
-            graph=graph,
-            subject_id=subject_id,
-            cohort_df=cohort_df,
-            biomarkers_limit=biomarkers_limit,
-            vitals_limit=vitals_limit,
-            microbiology_limit=microbiology_limit,
-            prescriptions_limit=prescriptions_limit,
-            diagnoses_limit=diagnoses_limit,
-            skip_allen_relations=skip_allen_relations,
-            snomed_mapper=snomed_mapper,
-        )
-
-        fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="patient_")
-        os.close(fd)
-        graph.serialize(destination=nt_path, format="nt")
-
-    conn.close()
     return nt_path, patient_stats
 
 
