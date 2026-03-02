@@ -61,3 +61,9 @@ class Settings(BaseSettings):
                 "Set DATA_SOURCE=local to use local CSV files instead."
             )
         return self
+
+    @model_validator(mode="after")
+    def _sync_wlst_cohort_codes(self) -> "Settings":
+        if self.wlst_mode:
+            self.cohort_icd_codes = list(self.wlst_icd_prefixes)
+        return self

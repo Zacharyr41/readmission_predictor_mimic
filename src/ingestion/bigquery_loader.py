@@ -188,6 +188,13 @@ def load_mimic_from_bigquery(
 
     logger.info(f"  Cohort: {len(subject_ids)} unique subjects")
 
+    if not subject_ids:
+        logger.warning(
+            "Empty cohort — no patients matched ICD prefixes %s. "
+            "Large tables will be created empty.",
+            cohort_icd_codes,
+        )
+
     # Phase 2: Load large tables filtered by cohort
     logger.info("Phase 2: Loading large tables filtered by cohort...")
     large_tables = {t: (ds, lg) for t, (ds, lg) in TABLE_REGISTRY.items() if lg}

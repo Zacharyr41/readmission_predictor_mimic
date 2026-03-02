@@ -71,6 +71,44 @@ class TestDataSourceConfig:
             )
 
 
+class TestWLSTCohortCodes:
+    """Tests for WLST mode overriding cohort_icd_codes."""
+
+    def test_wlst_mode_overrides_cohort_codes(self, tmp_path):
+        """wlst_mode=True should set cohort_icd_codes to wlst_icd_prefixes."""
+        s = Settings(
+            mimic_iv_path=tmp_path,
+            duckdb_path=tmp_path / "test.duckdb",
+            clinical_tkg_repo=tmp_path,
+            data_source="local",
+            wlst_mode=True,
+        )
+        assert s.cohort_icd_codes == ["S06"]
+
+    def test_non_wlst_mode_keeps_default_codes(self, tmp_path):
+        """wlst_mode=False should keep the default stroke ICD codes."""
+        s = Settings(
+            mimic_iv_path=tmp_path,
+            duckdb_path=tmp_path / "test.duckdb",
+            clinical_tkg_repo=tmp_path,
+            data_source="local",
+            wlst_mode=False,
+        )
+        assert s.cohort_icd_codes == ["I63", "I61", "I60"]
+
+    def test_custom_wlst_icd_prefixes_respected(self, tmp_path):
+        """Custom wlst_icd_prefixes should be used when wlst_mode=True."""
+        s = Settings(
+            mimic_iv_path=tmp_path,
+            duckdb_path=tmp_path / "test.duckdb",
+            clinical_tkg_repo=tmp_path,
+            data_source="local",
+            wlst_mode=True,
+            wlst_icd_prefixes=["S06", "S02"],
+        )
+        assert s.cohort_icd_codes == ["S06", "S02"]
+
+
 class TestUMLSApiKeyConfig:
     """Tests for umls_api_key setting."""
 

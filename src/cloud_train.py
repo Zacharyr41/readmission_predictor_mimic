@@ -125,6 +125,7 @@ def main() -> None:
         _run_wlst_pipeline(
             gcp_project, gcs_bucket, run_id, seed, patients_limit,
             skip_allen, wlst_stage, pipeline_start,
+            run_all=run_all, experiment=experiment,
         )
     else:
         _run_readmission_pipeline(
@@ -142,6 +143,9 @@ def _run_wlst_pipeline(
     skip_allen: bool,
     wlst_stage: str,
     pipeline_start: float,
+    *,
+    run_all: bool = False,
+    experiment: str = "",
 ) -> None:
     """Run the WLST prediction pipeline."""
     import duckdb
@@ -163,7 +167,19 @@ def _run_wlst_pipeline(
     )
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = load_mimic_data(settings)
+
+    # Fail-fast: verify TBI diagnoses were actually loaded
+    tbi_count = conn.execute(
+        "SELECT COUNT(DISTINCT hadm_id) FROM diagnoses_icd "
+        "WHERE icd_version = 10 AND icd_code LIKE 'S06%'"
+    ).fetchone()[0]
     conn.close()
+    if tbi_count == 0:
+        raise RuntimeError(
+            "No TBI diagnoses (S06.x) found after ingestion. "
+            "Verify cohort_icd_codes includes 'S06' and BigQuery data is accessible."
+        )
+    logger.info("  TBI diagnoses found: %d admissions", tbi_count)
     logger.info("Step 2 complete: Ingestion (%.1f min)", (time.time() - step_start) / 60)
 
     # ── Step 3: WLST graph construction ──
@@ -182,6 +198,11 @@ def _run_wlst_pipeline(
         stage=wlst_stage,
     )
     logger.info("Step 3 complete: WLST graph — %d triples (%.1f min)", len(graph), (time.time() - step_start) / 60)
+
+    if len(labels_df) == 0:
+        raise RuntimeError(
+            "WLST graph produced 0 patients. Check GCS threshold/ICU types."
+        )
 
     # Release disk-backed graph
     from src.graph_construction.disk_graph import close_disk_graph
@@ -253,7 +274,7 @@ def _run_wlst_pipeline(
     step_start = time.time()
     logger.info("Step 8: Running WLST GNN experiments...")
     from src.gnn.experiments import ExperimentRunner
-    from src.wlst.experiments import get_wlst_gnn_registry
+    from src.wlst.experiments import WLST_EXPERIMENT_REGISTRY, get_wlst_gnn_registry
 
     wlst_gnn_registry = get_wlst_gnn_registry()
     runner = ExperimentRunner(
@@ -262,12 +283,29 @@ def _run_wlst_pipeline(
         registry=wlst_gnn_registry,
     )
 
-    # Run W4 (Stage 1 full model) or W6 (Stage 2 full model)
-    wlst_experiment = "W4_full_model" if wlst_stage == "stage1" else "W6_stage2_full_model"
-    if wlst_experiment in wlst_gnn_registry:
-        result = runner.run(wlst_experiment, seed=seed)
+    if run_all:
+        # Run all GNN experiments matching the current stage
+        stage_experiments = [
+            name for name, cfg in WLST_EXPERIMENT_REGISTRY.items()
+            if cfg.stage == wlst_stage and name in wlst_gnn_registry
+        ]
+        results = runner.run_all(experiments=stage_experiments, seed=seed)
+        comparison = ExperimentRunner.compare(results)
+        logger.info("All WLST experiments complete:\n%s", comparison)
+        (report_dir / "comparison.md").write_text(comparison)
+        wlst_experiment = f"all({','.join(stage_experiments)})"
+    elif experiment in wlst_gnn_registry:
+        result = runner.run(experiment, seed=seed)
         auroc = result["eval_metrics"].get("auroc", "N/A")
-        logger.info("Experiment %s complete: AUROC=%s", wlst_experiment, auroc)
+        logger.info("Experiment %s complete: AUROC=%s", experiment, auroc)
+        wlst_experiment = experiment
+    else:
+        # Default: W4 (Stage 1 full model) or W6 (Stage 2 full model)
+        wlst_experiment = "W4_full_model" if wlst_stage == "stage1" else "W6_stage2_full_model"
+        if wlst_experiment in wlst_gnn_registry:
+            result = runner.run(wlst_experiment, seed=seed)
+            auroc = result["eval_metrics"].get("auroc", "N/A")
+            logger.info("Experiment %s complete: AUROC=%s", wlst_experiment, auroc)
 
     logger.info("Step 8 complete: GNN training (%.1f min)", (time.time() - step_start) / 60)
 
@@ -280,6 +318,8 @@ def _run_wlst_pipeline(
         "pipeline_mode": "wlst",
         "wlst_stage": wlst_stage,
         "wlst_experiment": wlst_experiment,
+        "run_all": run_all,
+        "experiment": experiment,
         "gcp_project": gcp_project,
         "seed": seed,
         "patients_limit": patients_limit,

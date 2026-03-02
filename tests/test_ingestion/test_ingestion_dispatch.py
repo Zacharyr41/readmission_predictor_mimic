@@ -63,6 +63,30 @@ class TestLoadMimicDataDispatch:
         )
         assert result is mock_conn
 
+    @patch("src.ingestion.bigquery_loader.load_mimic_from_bigquery")
+    def test_wlst_mode_passes_tbi_codes_to_bigquery(self, mock_loader, tmp_path):
+        """WLST mode should pass S06 codes through to bigquery loader."""
+        mock_conn = MagicMock()
+        mock_loader.return_value = mock_conn
+
+        settings = Settings(
+            mimic_iv_path=tmp_path / "mimic",
+            duckdb_path=tmp_path / "test.duckdb",
+            clinical_tkg_repo=tmp_path / "tkg",
+            data_source="bigquery",
+            bigquery_project="my-proj",
+            wlst_mode=True,
+        )
+        result = load_mimic_data(settings)
+
+        mock_loader.assert_called_once_with(
+            bigquery_project="my-proj",
+            db_path=settings.duckdb_path,
+            cohort_icd_codes=["S06"],
+            patients_limit=settings.patients_limit,
+        )
+        assert result is mock_conn
+
     def test_unknown_data_source_raises(self, tmp_path):
         """Unknown data_source should raise ValueError."""
         settings = Settings(
