@@ -65,7 +65,6 @@ def select_tbi_cohort(
             SELECT DISTINCT hadm_id
             FROM diagnoses_icd d
             WHERE d.icd_version = 10
-              AND d.seq_num = 1
               AND ({icd_filter})
         ),
         ranked_icu_stays AS (

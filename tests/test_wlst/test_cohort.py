@@ -62,6 +62,48 @@ class TestSelectTbiCohort:
             }
             assert set(df["first_careunit"]).issubset(valid_icus)
 
+    def test_includes_secondary_tbi_diagnosis(self, wlst_duckdb):
+        """Patients with TBI as secondary diagnosis should be included."""
+        # Add patient with chest injury primary, TBI secondary
+        wlst_duckdb.execute("""
+            INSERT INTO patients VALUES (50, 'M', 40, 2150, NULL)
+        """)
+        wlst_duckdb.execute("""
+            INSERT INTO admissions VALUES
+            (205, 50, '2150-04-01 08:00:00', '2150-04-20 14:00:00',
+             'EMERGENCY', 'HOME', 0, NULL, 'ENGLISH', 'Medicare', 'WHITE')
+        """)
+        wlst_duckdb.execute("""
+            INSERT INTO icustays VALUES
+            (3005, 50, 205, 'Trauma SICU (TSICU)',
+             '2150-04-01 10:00:00', '2150-04-10 10:00:00', 9.0)
+        """)
+        wlst_duckdb.execute("""
+            INSERT INTO diagnoses_icd VALUES
+            (50, 205, 1, 'S2789XA', 10),
+            (50, 205, 2, 'S065', 10)
+        """)
+        # GCS within 24h: 2+1+3=6
+        wlst_duckdb.execute("""
+            INSERT INTO chartevents VALUES
+            (50, 205, 3005, 220739, '2150-04-01 11:00:00', 2, NULL),
+            (50, 205, 3005, 223900, '2150-04-01 11:00:00', 1, NULL),
+            (50, 205, 3005, 223901, '2150-04-01 11:00:00', 3, NULL)
+        """)
+        # Update age table
+        wlst_duckdb.execute("""
+            INSERT INTO age
+            SELECT p.subject_id, a.hadm_id,
+                   p.anchor_age + (YEAR(a.admittime) - p.anchor_year) AS age
+            FROM patients p JOIN admissions a ON p.subject_id = a.subject_id
+            WHERE p.subject_id = 50
+        """)
+
+        df = select_tbi_cohort(wlst_duckdb)
+        assert 50 in df["subject_id"].values, (
+            "Patient with TBI as secondary diagnosis (seq_num=2) should be included"
+        )
+
 
 class TestCreateWlstLabels:
     def test_returns_dataframe(self, wlst_duckdb):

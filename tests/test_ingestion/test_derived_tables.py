@@ -166,6 +166,39 @@ class TestSelectNeurologyCohort:
             "Patient with stroke only as secondary diagnosis should be excluded"
         )
 
+    def test_principal_dx_only_false_includes_secondary(
+        self, synthetic_duckdb: duckdb.DuckDBPyConnection
+    ):
+        """With principal_dx_only=False, secondary diagnoses should qualify."""
+        # Patient 12: primary=pneumonia (J189), secondary=stroke (I639)
+        synthetic_duckdb.execute("""
+            INSERT INTO patients VALUES (12, 'M', 60, 2150, NULL)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO admissions VALUES
+            (112, 12, '2150-01-15 08:00:00', '2150-01-25 14:00:00', 'EMERGENCY', 'HOME', 0)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO icustays VALUES
+            (1012, 12, 112, '2150-01-15 10:00:00', '2150-01-18 08:00:00', 2.9)
+        """)
+        synthetic_duckdb.execute("""
+            INSERT INTO diagnoses_icd VALUES
+            (12, 112, 1, 'J189', 10),
+            (12, 112, 2, 'I639', 10)
+        """)
+
+        create_age_table(synthetic_duckdb)
+        df = select_neurology_cohort(
+            synthetic_duckdb, icd_prefixes=["I63", "I61", "I60"],
+            principal_dx_only=False,
+        )
+
+        subject_ids = set(df["subject_id"].tolist())
+        assert 12 in subject_ids, (
+            "With principal_dx_only=False, patient with stroke as secondary dx should be included"
+        )
+
     def test_cohort_includes_icd9_codes(
         self, synthetic_duckdb: duckdb.DuckDBPyConnection
     ):

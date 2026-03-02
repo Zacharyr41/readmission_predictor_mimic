@@ -19,6 +19,7 @@ def load_mimic_data(settings: Settings) -> duckdb.DuckDBPyConnection:
             db_path=settings.duckdb_path,
             cohort_icd_codes=settings.cohort_icd_codes,
             patients_limit=settings.patients_limit,
+            principal_dx_only=not settings.wlst_mode,
         )
     else:
         raise ValueError(f"Unknown data_source: {settings.data_source}")

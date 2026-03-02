@@ -20,7 +20,7 @@ SEED="42"
 PATIENTS_LIMIT="0"
 SKIP_ALLEN="1"
 RUN_ALL="0"
-MACHINE_TYPE="n1-highmem-4"
+MACHINE_TYPE="n1-highmem-8"
 BOOT_DISK_GB="100"
 
 # ── Parse CLI flags ──

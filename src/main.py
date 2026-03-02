@@ -144,7 +144,10 @@ def run_pipeline(
     from src.ingestion.derived_tables import select_neurology_cohort
 
     feat_conn = duckdb.connect(str(db_path), read_only=True)
-    cohort_df = select_neurology_cohort(feat_conn, settings.cohort_icd_codes)
+    cohort_df = select_neurology_cohort(
+        feat_conn, settings.cohort_icd_codes,
+        principal_dx_only=not settings.wlst_mode,
+    )
     if settings.patients_limit > 0:
         limited = cohort_df["subject_id"].unique()[: settings.patients_limit]
         cohort_df = cohort_df[cohort_df["subject_id"].isin(limited)]

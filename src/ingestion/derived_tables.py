@@ -45,6 +45,7 @@ def create_age_table(conn: duckdb.DuckDBPyConnection) -> None:
 def select_neurology_cohort(
     conn: duckdb.DuckDBPyConnection,
     icd_prefixes: list[str],
+    principal_dx_only: bool = True,
 ) -> pd.DataFrame:
     """Select cohort based on ICD diagnosis codes and inclusion criteria.
 
@@ -58,6 +59,9 @@ def select_neurology_cohort(
         conn: DuckDB connection with required tables loaded.
         icd_prefixes: List of ICD-10 code prefixes (e.g., ["I63", "I61"]).
             ICD-9 equivalents are matched automatically for known stroke codes.
+        principal_dx_only: If True (default), restrict to principal diagnosis
+            (seq_num=1). Set to False for TBI/WLST cohorts where any diagnosis
+            position should qualify.
 
     Returns:
         DataFrame with columns: subject_id, hadm_id, stay_id
@@ -102,11 +106,10 @@ def select_neurology_cohort(
               AND icu_hours < 2400
         ),
         diagnosis_filter AS (
-            -- Get unique hadm_ids with matching *principal* diagnosis
+            -- Get unique hadm_ids with matching diagnosis
             SELECT DISTINCT hadm_id
             FROM diagnoses_icd d
-            WHERE d.seq_num = 1
-              AND {version_filter}
+            WHERE {"d.seq_num = 1 AND " if principal_dx_only else ""}{version_filter}
         )
         SELECT
             es.subject_id,

@@ -147,6 +147,7 @@ def load_mimic_from_bigquery(
     db_path: Path | str,
     cohort_icd_codes: list[str] | None = None,
     patients_limit: int = 0,
+    principal_dx_only: bool = True,
 ) -> duckdb.DuckDBPyConnection:
     """Load MIMIC-IV data from BigQuery into DuckDB.
 
@@ -159,6 +160,7 @@ def load_mimic_from_bigquery(
         db_path: Path to output DuckDB file.
         cohort_icd_codes: ICD-10 prefixes for cohort selection.
         patients_limit: Max patients (0 = no limit).
+        principal_dx_only: If True, restrict to principal diagnosis (seq_num=1).
 
     Returns:
         Open DuckDB connection with all tables loaded.
@@ -179,7 +181,7 @@ def load_mimic_from_bigquery(
     # Cohort derivation
     logger.info("Deriving cohort...")
     create_age_table(conn)
-    cohort_df = select_neurology_cohort(conn, cohort_icd_codes)
+    cohort_df = select_neurology_cohort(conn, cohort_icd_codes, principal_dx_only=principal_dx_only)
     subject_ids = cohort_df["subject_id"].unique().tolist()
 
     if patients_limit > 0:

@@ -60,12 +60,13 @@ class TestLoadMimicDataDispatch:
             db_path=bigquery_settings.duckdb_path,
             cohort_icd_codes=bigquery_settings.cohort_icd_codes,
             patients_limit=bigquery_settings.patients_limit,
+            principal_dx_only=True,
         )
         assert result is mock_conn
 
     @patch("src.ingestion.bigquery_loader.load_mimic_from_bigquery")
     def test_wlst_mode_passes_tbi_codes_to_bigquery(self, mock_loader, tmp_path):
-        """WLST mode should pass S06 codes through to bigquery loader."""
+        """WLST mode should pass S06 codes and principal_dx_only=False to bigquery loader."""
         mock_conn = MagicMock()
         mock_loader.return_value = mock_conn
 
@@ -84,6 +85,7 @@ class TestLoadMimicDataDispatch:
             db_path=settings.duckdb_path,
             cohort_icd_codes=["S06"],
             patients_limit=settings.patients_limit,
+            principal_dx_only=False,
         )
         assert result is mock_conn
 
