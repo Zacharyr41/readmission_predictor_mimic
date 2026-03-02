@@ -49,6 +49,16 @@ def compute_metrics(
     y_test = np.asarray(y_test)
     y_proba = np.asarray(y_proba)
 
+    # Guard against single-class test sets (common with very small cohorts)
+    if len(np.unique(y_test)) < 2:
+        y_pred = (y_proba >= 0.5).astype(int)
+        return {
+            "auroc": float("nan"), "auprc": float("nan"),
+            "precision": float("nan"), "recall": float("nan"),
+            "f1": float("nan"), "threshold": 0.5,
+            "confusion_matrix": confusion_matrix(y_test, y_pred, labels=[0, 1]),
+        }
+
     # AUROC
     auroc = roc_auc_score(y_test, y_proba)
 
@@ -67,7 +77,7 @@ def compute_metrics(
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
-    cm = confusion_matrix(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
 
     return {
         "auroc": auroc,

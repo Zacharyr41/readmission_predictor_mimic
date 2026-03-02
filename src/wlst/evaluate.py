@@ -41,6 +41,21 @@ def compute_wlst_metrics(
     y_test = np.asarray(y_test)
     y_proba = np.asarray(y_proba)
 
+    # Guard against single-class test sets (common with small cohorts)
+    n_classes = len(np.unique(y_test))
+    if n_classes < 2:
+        logger.warning("Only one class in test set (%d samples) — returning NaN metrics", len(y_test))
+        return {
+            "auroc": float("nan"), "auprc": float("nan"), "brier_score": float("nan"),
+            "sensitivity": float("nan"), "specificity": float("nan"),
+            "optimal_threshold": 0.5,
+            "sensitivity_at_90_specificity": float("nan"),
+            "sensitivity_at_95_specificity": float("nan"),
+            "confusion_matrix": confusion_matrix(y_test, (y_proba >= 0.5).astype(int), labels=[0, 1]),
+            "n_test": len(y_test), "n_positive": int(y_test.sum()),
+            "n_negative": int(len(y_test) - y_test.sum()),
+        }
+
     # Standard metrics
     auroc = roc_auc_score(y_test, y_proba)
 
@@ -56,7 +71,7 @@ def compute_wlst_metrics(
     optimal_threshold = thresholds[optimal_idx]
 
     y_pred = (y_proba >= optimal_threshold).astype(int)
-    cm = confusion_matrix(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
     tn, fp, fn, tp = cm.ravel()
 
     sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
