@@ -198,7 +198,7 @@ def run_classical_baselines(
     id_cols = {"subject_id", "hadm_id", "stay_id", "wlst_label", "outcome_category"}
     non_numeric = set()
     for col in feature_df.columns:
-        if feature_df[col].dtype == "object":
+        if not pd.api.types.is_numeric_dtype(feature_df[col]):
             non_numeric.add(col)
 
     feature_cols = [c for c in feature_df.columns if c not in id_cols and c not in non_numeric]

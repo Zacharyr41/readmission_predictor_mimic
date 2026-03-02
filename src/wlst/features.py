@@ -122,14 +122,10 @@ def _extract_demographics(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         SELECT
             c.stay_id,
             a.age,
-            p.gender,
-            adm.insurance,
-            adm.race,
-            adm.admission_type
+            CASE WHEN p.gender = 'M' THEN 1 ELSE 0 END AS is_male
         FROM feat_cohort c
         JOIN age a ON c.subject_id = a.subject_id AND c.hadm_id = a.hadm_id
         JOIN patients p ON c.subject_id = p.subject_id
-        JOIN admissions adm ON c.hadm_id = adm.hadm_id
     """).fetchdf()
 
     # BMI from OMR table (most recent before admission)
@@ -481,17 +477,18 @@ def _extract_stage2_features(
     """Extract Stage 2 non-clinical confounder features."""
     # Language
     lang_df = conn.execute("""
-        SELECT c.hadm_id, adm.language,
+        SELECT c.hadm_id,
             CASE WHEN adm.language != 'ENGLISH' THEN 1 ELSE 0 END AS language_barrier
         FROM feat_cohort c
         JOIN admissions adm ON c.hadm_id = adm.hadm_id
     """).fetchdf()
 
-    # Hospital service
+    # Hospital service (encode as is_neuro_service)
     try:
         service_df = conn.execute("""
             SELECT DISTINCT ON (c.hadm_id)
-                c.hadm_id, s.curr_service AS hospital_service
+                c.hadm_id,
+                CASE WHEN s.curr_service IN ('NSURG', 'NB', 'NMED') THEN 1 ELSE 0 END AS is_neuro_service
             FROM feat_cohort c
             JOIN services s ON c.hadm_id = s.hadm_id
             ORDER BY c.hadm_id, s.transfertime
