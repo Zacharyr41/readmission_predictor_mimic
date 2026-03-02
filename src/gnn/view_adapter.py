@@ -178,17 +178,23 @@ class GraphViewAdapter:
             ``(edge_index [2, E'], edge_attr [E', F] or None)``
         """
         first_src, first_rel, first_dst = chain[0]
-        ei = full_data[first_src, first_rel, first_dst].edge_index
+        first_store = full_data[first_src, first_rel, first_dst]
+        if not hasattr(first_store, "edge_index") or first_store.edge_index is None:
+            return torch.zeros((2, 0), dtype=torch.long), None
+        ei = first_store.edge_index
         # current_pairs: list of (src, current_dst)
         current_src = ei[0].tolist()
         current_dst = ei[1].tolist()
 
         last_attr = None
-        if hasattr(full_data[first_src, first_rel, first_dst], "edge_attr"):
-            last_attr = full_data[first_src, first_rel, first_dst].edge_attr
+        if hasattr(first_store, "edge_attr"):
+            last_attr = first_store.edge_attr
 
         for hop_src, hop_rel, hop_dst in chain[1:]:
-            hop_ei = full_data[hop_src, hop_rel, hop_dst].edge_index
+            hop_store = full_data[hop_src, hop_rel, hop_dst]
+            if not hasattr(hop_store, "edge_index") or hop_store.edge_index is None:
+                return torch.zeros((2, 0), dtype=torch.long), None
+            hop_ei = hop_store.edge_index
             hop_attr_store = full_data[hop_src, hop_rel, hop_dst]
             hop_attr = None
             if (
