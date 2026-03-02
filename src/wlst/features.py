@@ -281,14 +281,15 @@ def _extract_hemodynamic_features(
             SELECT
                 c.stay_id,
                 1 AS vasopressor_any,
-                COUNT(DISTINCT ie.label) AS vasopressor_drug_count,
+                COUNT(DISTINCT d.label) AS vasopressor_drug_count,
                 SUM(DATE_DIFF('minute', ie.starttime,
                     LEAST(ie.endtime, c.intime + INTERVAL '{window_hours}' HOUR)))
                     / 60.0 AS vasopressor_hours,
                 MAX(ie.rate) AS vasopressor_max_rate
             FROM inputevents ie
+            JOIN d_items d ON ie.itemid = d.itemid
             JOIN feat_cohort c ON ie.stay_id = c.stay_id
-            WHERE LOWER(ie.label) IN ({drug_list})
+            WHERE LOWER(d.label) IN ({drug_list})
               AND ie.starttime BETWEEN c.intime AND c.intime + INTERVAL '{window_hours}' HOUR
             GROUP BY c.stay_id
         """).fetchdf()
@@ -421,20 +422,23 @@ def _extract_icp_medication_features(
         return pd.DataFrame(columns=["stay_id", "icp_med_count"])
 
     like_clauses = " OR ".join(
-        f"LOWER(ie.label) LIKE '%{kw}%'" for kw in ICP_MED_KEYWORDS
+        f"LOWER(d.label) LIKE '%{kw}%'" for kw in ICP_MED_KEYWORDS
     )
     result = conn.execute(f"""
         SELECT
             c.stay_id,
-            COUNT(ie.stay_id) AS icp_med_count,
-            MAX(CASE WHEN LOWER(ie.label) LIKE '%mannitol%' THEN 1 ELSE 0 END) AS mannitol_given,
-            MAX(CASE WHEN LOWER(ie.label) LIKE '%hypertonic saline%' THEN 1 ELSE 0 END) AS hypertonic_saline_given,
-            MAX(CASE WHEN LOWER(ie.label) LIKE '%levetiracetam%' THEN 1 ELSE 0 END) AS levetiracetam_given
+            COUNT(matched.itemid) AS icp_med_count,
+            MAX(CASE WHEN LOWER(matched.label) LIKE '%mannitol%' THEN 1 ELSE 0 END) AS mannitol_given,
+            MAX(CASE WHEN LOWER(matched.label) LIKE '%hypertonic saline%' THEN 1 ELSE 0 END) AS hypertonic_saline_given,
+            MAX(CASE WHEN LOWER(matched.label) LIKE '%levetiracetam%' THEN 1 ELSE 0 END) AS levetiracetam_given
         FROM feat_cohort c
-        LEFT JOIN inputevents ie
-            ON c.stay_id = ie.stay_id
-            AND ({like_clauses})
-            AND ie.starttime BETWEEN c.intime AND c.intime + INTERVAL '{window_hours}' HOUR
+        LEFT JOIN (
+            SELECT ie.stay_id, ie.starttime, d.label, d.itemid
+            FROM inputevents ie
+            JOIN d_items d ON ie.itemid = d.itemid
+            WHERE ({like_clauses})
+        ) matched ON c.stay_id = matched.stay_id
+            AND matched.starttime BETWEEN c.intime AND c.intime + INTERVAL '{window_hours}' HOUR
         GROUP BY c.stay_id
     """).fetchdf()
 
