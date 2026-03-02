@@ -239,7 +239,7 @@ def _build_admission_features(
         uri = MIMIC_NS[f"HA-{hadm_id}"]
         if uri in node_map:
             idx = node_map[uri]
-            feats[idx] = torch.tensor([float(row[c]) for c in feat_cols])
+            feats[idx] = torch.tensor([float(row[c]) if pd.notna(row[c]) else 0.0 for c in feat_cols])
 
     return feats
 
