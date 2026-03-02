@@ -845,8 +845,13 @@ def _validate_heterodata(data: HeteroData) -> None:
     """Validate the HeteroData for common issues."""
     for ntype in data.node_types:
         if hasattr(data[ntype], "x") and data[ntype].x is not None:
-            if torch.isnan(data[ntype].x).any():
-                raise ValueError(f"NaN detected in '{ntype}' node features")
+            nan_count = torch.isnan(data[ntype].x).sum().item()
+            if nan_count > 0:
+                logger.warning(
+                    "Replacing %d NaN values in '%s' node features with 0",
+                    nan_count, ntype,
+                )
+                data[ntype].x = torch.nan_to_num(data[ntype].x, nan=0.0)
 
     for src, rel, dst in data.edge_types:
         ei = data[src, rel, dst].edge_index

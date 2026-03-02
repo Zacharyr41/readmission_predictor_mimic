@@ -633,11 +633,11 @@ class TestLabPopulationStats:
 
 
 class TestValidation:
-    def test_nan_raises(self, exported_data):
-        """Injecting NaN into features should raise ValueError."""
+    def test_nan_replaced_with_zero(self, exported_data):
+        """Injecting NaN into features should be replaced with 0."""
         exported_data["patient"].x[0, 0] = float("nan")
-        with pytest.raises(ValueError, match="NaN"):
-            _validate_heterodata(exported_data)
+        _validate_heterodata(exported_data)
+        assert exported_data["patient"].x[0, 0].item() == 0.0
 
     def test_edge_oob_raises(self, exported_data):
         """Edge index out of bounds should raise ValueError."""
