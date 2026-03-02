@@ -314,14 +314,15 @@ class DualTrackTransformer(nn.Module):
             contextual_infos.append(info)
 
         temporal_info = None
-        if (
-            self.temporal_transformer is not None
-            and temporal_hop_neighbors is not None
-        ):
-            out, temporal_info = self.temporal_transformer(
-                target_emb, temporal_hop_neighbors, temporal_hop_deltas
-            )
-            track_outputs.append(out)
+        if self.temporal_transformer is not None:
+            if temporal_hop_neighbors is not None:
+                out, temporal_info = self.temporal_transformer(
+                    target_emb, temporal_hop_neighbors, temporal_hop_deltas
+                )
+                track_outputs.append(out)
+            else:
+                # Temporal track expected but data unavailable — pad with zeros
+                track_outputs.append(torch.zeros_like(target_emb))
 
         # Concatenate all track outputs and project
         merged = torch.cat(track_outputs, dim=-1)  # (B, d * total_tracks)
