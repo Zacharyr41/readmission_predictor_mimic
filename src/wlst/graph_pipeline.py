@@ -521,12 +521,14 @@ def _write_vasopressor_events(
     drug_list = ", ".join(f"'{d}'" for d in VASOPRESSOR_DRUGS)
     rows = conn.execute(
         f"""
-        SELECT stay_id, starttime, endtime, label, rate, amount, rateuom, amountuom
-        FROM inputevents
-        WHERE stay_id = ?
-          AND LOWER(label) IN ({drug_list})
-          AND starttime >= ? AND starttime <= ?
-        ORDER BY starttime
+        SELECT ie.stay_id, ie.starttime, ie.endtime, d.label,
+               ie.rate, ie.amount, ie.rateuom, ie.amountuom
+        FROM inputevents ie
+        JOIN d_items d ON ie.itemid = d.itemid
+        WHERE ie.stay_id = ?
+          AND LOWER(d.label) IN ({drug_list})
+          AND ie.starttime >= ? AND ie.starttime <= ?
+        ORDER BY ie.starttime
         """,
         [stay_id, intime, window_end],
     ).fetchall()
@@ -555,12 +557,13 @@ def _write_ventilation_events(
 
     rows = conn.execute(
         """
-        SELECT stay_id, starttime, endtime, itemid, label
-        FROM procedureevents
-        WHERE stay_id = ?
-          AND itemid = ?
-          AND starttime >= ? AND starttime <= ?
-        ORDER BY starttime
+        SELECT pe.stay_id, pe.starttime, pe.endtime, pe.itemid, d.label
+        FROM procedureevents pe
+        LEFT JOIN d_items d ON pe.itemid = d.itemid
+        WHERE pe.stay_id = ?
+          AND pe.itemid = ?
+          AND pe.starttime >= ? AND pe.starttime <= ?
+        ORDER BY pe.starttime
         """,
         [stay_id, VENTILATION_ITEMID, intime, window_end],
     ).fetchall()
@@ -589,12 +592,13 @@ def _write_neurosurgery_events(
     itemid_list = ", ".join(str(i) for i in NEUROSURGERY_ITEMIDS)
     rows = conn.execute(
         f"""
-        SELECT stay_id, starttime, endtime, itemid, label
-        FROM procedureevents
-        WHERE stay_id = ?
-          AND itemid IN ({itemid_list})
-          AND starttime >= ? AND starttime <= ?
-        ORDER BY starttime
+        SELECT pe.stay_id, pe.starttime, pe.endtime, pe.itemid, d.label
+        FROM procedureevents pe
+        LEFT JOIN d_items d ON pe.itemid = d.itemid
+        WHERE pe.stay_id = ?
+          AND pe.itemid IN ({itemid_list})
+          AND pe.starttime >= ? AND pe.starttime <= ?
+        ORDER BY pe.starttime
         """,
         [stay_id, intime, window_end],
     ).fetchall()
@@ -622,16 +626,18 @@ def _write_icp_medication_events(
 
     # Build LIKE clauses for ICP medication keywords
     like_clauses = " OR ".join(
-        f"LOWER(label) LIKE '%{kw}%'" for kw in ICP_MED_KEYWORDS
+        f"LOWER(d.label) LIKE '%{kw}%'" for kw in ICP_MED_KEYWORDS
     )
     rows = conn.execute(
         f"""
-        SELECT stay_id, starttime, endtime, label, amount, amountuom, rate, rateuom
-        FROM inputevents
-        WHERE stay_id = ?
+        SELECT ie.stay_id, ie.starttime, ie.endtime, d.label,
+               ie.amount, ie.amountuom, ie.rate, ie.rateuom
+        FROM inputevents ie
+        JOIN d_items d ON ie.itemid = d.itemid
+        WHERE ie.stay_id = ?
           AND ({like_clauses})
-          AND starttime >= ? AND starttime <= ?
-        ORDER BY starttime
+          AND ie.starttime >= ? AND ie.starttime <= ?
+        ORDER BY ie.starttime
         """,
         [stay_id, intime, window_end],
     ).fetchall()
