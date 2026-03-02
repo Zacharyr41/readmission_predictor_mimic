@@ -148,7 +148,11 @@ def _run_wlst_pipeline(
     experiment: str = "",
 ) -> None:
     """Run the WLST prediction pipeline."""
+    import shutil
+
     import duckdb
+
+    step_timings: dict[str, float] = {}
 
     # ── Step 2: BigQuery ingestion ──
     step_start = time.time()
@@ -180,7 +184,8 @@ def _run_wlst_pipeline(
             "Verify cohort_icd_codes includes 'S06' and BigQuery data is accessible."
         )
     logger.info("  TBI diagnoses found: %d admissions", tbi_count)
-    logger.info("Step 2 complete: Ingestion (%.1f min)", (time.time() - step_start) / 60)
+    step_timings["ingestion"] = time.time() - step_start
+    logger.info("Step 2 complete: Ingestion (%.1f min)", step_timings["ingestion"] / 60)
 
     # ── Step 3: WLST graph construction ──
     step_start = time.time()
@@ -204,9 +209,19 @@ def _run_wlst_pipeline(
             "WLST graph produced 0 patients. Check GCS threshold/ICU types."
         )
 
+    # Graph analysis (before closing disk graph)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    report_dir = OUTPUT_DIR / "wlst" / wlst_stage
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    from src.graph_analysis.analysis import generate_analysis_report
+    graph_report_md, _nx_graph = generate_analysis_report(graph)
+    (report_dir / "graph_analysis.md").write_text(graph_report_md)
+
     # Release disk-backed graph
     from src.graph_construction.disk_graph import close_disk_graph
     close_disk_graph(graph)
+    step_timings["graph_construction"] = time.time() - step_start
 
     # ── Step 4: Feature extraction ──
     step_start = time.time()
@@ -222,14 +237,20 @@ def _run_wlst_pipeline(
     )
     feature_df.to_parquet(WLST_FEATURES_PATH)
     feat_conn.close()
-    logger.info("Step 4 complete: Features %s (%.1f min)", feature_df.shape, (time.time() - step_start) / 60)
+    step_timings["feature_extraction"] = time.time() - step_start
+    logger.info("Step 4 complete: Features %s (%.1f min)", feature_df.shape, step_timings["feature_extraction"] / 60)
+
+    # Save patient IDs
+    patient_ids = sorted(labels_df["subject_id"].unique().tolist())
+    (report_dir / "patient_ids.json").write_text(json.dumps(patient_ids))
+
+    # Save feature summary stats
+    feature_stats = feature_df.describe(include="all").to_json()
+    (report_dir / "feature_stats.json").write_text(feature_stats)
 
     # ── Step 5: Cohort summary ──
     from src.wlst.cohort import generate_cohort_summary
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    report_dir = OUTPUT_DIR / "wlst" / wlst_stage
-    report_dir.mkdir(parents=True, exist_ok=True)
     summary = generate_cohort_summary(labels_df)
     (report_dir / "cohort_summary.md").write_text(summary)
 
@@ -250,7 +271,8 @@ def _run_wlst_pipeline(
         )
         (report_dir / f"{model_name}_evaluation.md").write_text(report)
 
-    logger.info("Step 6 complete: Baselines (%.1f min)", (time.time() - step_start) / 60)
+    step_timings["baselines"] = time.time() - step_start
+    logger.info("Step 6 complete: Baselines (%.1f min)", step_timings["baselines"] / 60)
 
     # ── Step 7: GNN preparation (SapBERT embeddings + HeteroData) ──
     wlst_embeddings_path = Path("data/processed/wlst_concept_embeddings.pt")
@@ -268,7 +290,13 @@ def _run_wlst_pipeline(
         mappings_dir=MAPPINGS_DIR,
         label_mode="wlst",
     )
-    logger.info("Step 7 complete: HeteroData exported (%.1f min)", (time.time() - step_start) / 60)
+    step_timings["gnn_preparation"] = time.time() - step_start
+    logger.info("Step 7 complete: HeteroData exported (%.1f min)", step_timings["gnn_preparation"] / 60)
+
+    # Save HeteroData metadata
+    meta_path = wlst_hetero_path.with_suffix(".meta.json")
+    if meta_path.exists():
+        shutil.copy(meta_path, report_dir / "hetero_meta.json")
 
     # ── Step 8: GNN training ──
     step_start = time.time()
@@ -307,7 +335,8 @@ def _run_wlst_pipeline(
             auroc = result["eval_metrics"].get("auroc", "N/A")
             logger.info("Experiment %s complete: AUROC=%s", wlst_experiment, auroc)
 
-    logger.info("Step 8 complete: GNN training (%.1f min)", (time.time() - step_start) / 60)
+    step_timings["gnn_training"] = time.time() - step_start
+    logger.info("Step 8 complete: GNN training (%.1f min)", step_timings["gnn_training"] / 60)
 
     elapsed = time.time() - pipeline_start
     logger.info("Total WLST pipeline time: %.1f seconds (%.1f minutes)", elapsed, elapsed / 60)
@@ -325,6 +354,7 @@ def _run_wlst_pipeline(
         "patients_limit": patients_limit,
         "skip_allen": skip_allen,
         "elapsed_seconds": elapsed,
+        "step_timings_seconds": step_timings,
     }, indent=2))
 
     # Upload to GCS
