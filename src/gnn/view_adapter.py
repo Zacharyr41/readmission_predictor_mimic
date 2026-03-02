@@ -90,6 +90,20 @@ class GraphViewConfig:
         )
 
     @classmethod
+    def wlst_default(cls) -> GraphViewConfig:
+        """View for WLST prediction: all WLST clinical event types."""
+        return cls(
+            target_node_type="admission",
+            label_key="wlst_label",
+            active_entity_types=[
+                "drug", "diagnosis", "gcs", "vasopressor",
+                "ventilation", "neurosurgery", "icp_medication", "map_event",
+            ],
+            collapse_rules={"icu_stay": "collapse", "icu_day": "collapse"},
+            include_temporal_track=True,
+        )
+
+    @classmethod
     def icu_mortality(cls) -> GraphViewConfig:
         """ICU-level view preserving the full stay→day hierarchy."""
         return cls(

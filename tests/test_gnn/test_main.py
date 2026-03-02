@@ -190,6 +190,7 @@ class TestPrepare:
             features_path=Path("/f"),
             embeddings_path=Path("/e"),
             output_path=Path("/o"),
+            label_mode="readmission",
         )
 
         # build_embeddings was called before export_graph

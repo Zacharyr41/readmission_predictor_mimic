@@ -13,6 +13,8 @@
 set -euo pipefail
 
 # ── Defaults ──
+PIPELINE_MODE="readmission"
+WLST_STAGE="stage1"
 EXPERIMENT="E6_full_model"
 SEED="42"
 PATIENTS_LIMIT="0"
@@ -24,6 +26,10 @@ BOOT_DISK_GB="100"
 # ── Parse CLI flags ──
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --pipeline-mode)
+            PIPELINE_MODE="$2"; shift 2 ;;
+        --wlst-stage)
+            WLST_STAGE="$2"; shift 2 ;;
         --patients-limit)
             PATIENTS_LIMIT="$2"; shift 2 ;;
         --experiment)
@@ -42,6 +48,8 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
+            echo "  --pipeline-mode MODE  Pipeline mode: readmission or wlst (default: readmission)"
+            echo "  --wlst-stage STAGE    WLST stage: stage1 or stage2 (default: stage1)"
             echo "  --patients-limit N    Limit cohort size (default: 0 = no limit)"
             echo "  --experiment NAME     Experiment to run (default: E6_full_model)"
             echo "  --machine-type TYPE   Vertex AI machine type (default: n1-highmem-4)"
@@ -74,6 +82,8 @@ echo "Region:      $REGION"
 echo "Image:       $IMAGE_URI"
 echo "Machine:     $MACHINE_TYPE + T4 GPU"
 echo "Boot disk:   ${BOOT_DISK_GB} GB (pd-ssd)"
+echo "Pipeline:    $PIPELINE_MODE"
+echo "WLST stage:  $WLST_STAGE"
 echo "Experiment:  $EXPERIMENT"
 echo "Patients:    $PATIENTS_LIMIT (0 = all)"
 echo "Seed:        $SEED"
@@ -109,12 +119,14 @@ sed \
     -e "s|SEED_PLACEHOLDER|$SEED|g" \
     -e "s|PATIENTS_LIMIT_PLACEHOLDER|$PATIENTS_LIMIT|g" \
     -e "s|BOOT_DISK_GB_PLACEHOLDER|$BOOT_DISK_GB|g" \
+    -e "s|PIPELINE_MODE_PLACEHOLDER|$PIPELINE_MODE|g" \
+    -e "s|WLST_STAGE_PLACEHOLDER|$WLST_STAGE|g" \
     -e "s|SKIP_ALLEN_PLACEHOLDER|$SKIP_ALLEN|g" \
     -e "s|RUN_ALL_PLACEHOLDER|$RUN_ALL|g" \
     -e "s|ADC_B64_PLACEHOLDER|$ADC_B64|g" \
     "${REPO_DIR}/cloud/vertex_job_spec.yaml" > "$JOB_SPEC"
 
-JOB_NAME="readmission-$(echo "$EXPERIMENT" | tr '[:upper:]' '[:lower:]')-${IMAGE_TAG}"
+JOB_NAME="${PIPELINE_MODE}-$(echo "$EXPERIMENT" | tr '[:upper:]' '[:lower:]')-${IMAGE_TAG}"
 
 # ── Submit Vertex AI custom job ──
 echo "Submitting Vertex AI custom job: $JOB_NAME"

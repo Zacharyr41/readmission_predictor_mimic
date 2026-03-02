@@ -34,10 +34,15 @@ TABLE_REGISTRY = {
     "labevents": ("mimiciv_3_1_hosp", True),
     "microbiologyevents": ("mimiciv_3_1_hosp", True),
     "prescriptions": ("mimiciv_3_1_hosp", True),
+    "omr": ("mimiciv_3_1_hosp", False),
+    "services": ("mimiciv_3_1_hosp", False),
+    "transfers": ("mimiciv_3_1_hosp", True),
     # ICU tables
     "icustays": ("mimiciv_3_1_icu", False),
     "chartevents": ("mimiciv_3_1_icu", True),
     "d_items": ("mimiciv_3_1_icu", False),
+    "inputevents": ("mimiciv_3_1_icu", True),
+    "procedureevents": ("mimiciv_3_1_icu", True),
 }
 
 
@@ -123,9 +128,12 @@ def _insert_dataframe(
 ) -> None:
     """Insert a DataFrame into DuckDB, handling empty DataFrames."""
     if df.empty:
-        # Create empty table with correct column names/types
-        cols = ", ".join(f"{col} VARCHAR" for col in df.columns)
-        conn.execute(f"CREATE OR REPLACE TABLE {table_name} ({cols})")
+        if len(df.columns) == 0:
+            # DataFrame has no columns at all — create a placeholder with one column
+            conn.execute(f"CREATE OR REPLACE TABLE {table_name} (_placeholder VARCHAR)")
+        else:
+            cols = ", ".join(f"{col} VARCHAR" for col in df.columns)
+            conn.execute(f"CREATE OR REPLACE TABLE {table_name} ({cols})")
     else:
         df = _normalize_dtypes(df)
         conn.execute(

@@ -3,15 +3,21 @@
 Runs the full pipeline: BigQuery ingestion -> RDF graph -> feature extraction
 -> GNN preparation -> experiment training, then uploads outputs to GCS.
 
+Supports two pipeline modes:
+  - "readmission" (default): Stroke readmission prediction
+  - "wlst": WLST prediction in severe TBI patients
+
 Environment variables:
     GCP_PROJECT (required): GCP project ID for BigQuery billing
     GCS_OUTPUT_BUCKET (required): GCS bucket for saving results
     ADC_CREDENTIALS_B64 (required): Base64-encoded ADC JSON credentials
+    PIPELINE_MODE (default: readmission): Pipeline mode ("readmission" or "wlst")
     EXPERIMENT (default: E6_full_model): Experiment name from registry
     SEED (default: 42): Random seed
     PATIENTS_LIMIT (default: 0): Limit cohort size (0 = no limit)
     SKIP_ALLEN (default: 1): Skip Allen temporal relation computation
-    RUN_ALL (default: 0): Run all 6 ablation experiments
+    RUN_ALL (default: 0): Run all ablation experiments
+    WLST_STAGE (default: stage1): WLST stage ("stage1" or "stage2")
 """
 
 from __future__ import annotations
@@ -40,6 +46,10 @@ MAPPINGS_DIR = Path("data/mappings")
 ONTOLOGY_DIR = Path("ontology/definition")
 OUTPUT_DIR = Path("outputs")
 
+# WLST-specific paths
+WLST_RDF_PATH = Path("data/processed/wlst_knowledge_graph.nt")
+WLST_FEATURES_PATH = Path("data/features/wlst_feature_matrix.parquet")
+
 
 def _write_adc_credentials() -> Path:
     """Decode ADC credentials from base64 env var and write to a temp file."""
@@ -56,11 +66,11 @@ def _write_adc_credentials() -> Path:
     return creds_path
 
 
-def _upload_to_gcs(bucket_name: str, run_id: str) -> None:
+def _upload_to_gcs(bucket_name: str, run_id: str, project: str | None = None) -> None:
     """Upload the outputs/ directory to GCS."""
     from google.cloud import storage
 
-    client = storage.Client()
+    client = storage.Client(project=project)
     bucket = client.bucket(bucket_name)
     output_dir = OUTPUT_DIR
 
@@ -85,28 +95,216 @@ def main() -> None:
     # Read environment
     gcp_project = os.environ.get("GCP_PROJECT")
     gcs_bucket = os.environ.get("GCS_OUTPUT_BUCKET")
+    pipeline_mode = os.environ.get("PIPELINE_MODE", "readmission")
     experiment = os.environ.get("EXPERIMENT", "E6_full_model")
     seed = int(os.environ.get("SEED", "42"))
     patients_limit = int(os.environ.get("PATIENTS_LIMIT", "0"))
     skip_allen = os.environ.get("SKIP_ALLEN", "1") == "1"
     run_all = os.environ.get("RUN_ALL", "0") == "1"
+    wlst_stage = os.environ.get("WLST_STAGE", "stage1")
 
     if not gcp_project:
         raise RuntimeError("GCP_PROJECT environment variable is required")
     if not gcs_bucket:
         raise RuntimeError("GCS_OUTPUT_BUCKET environment variable is required")
 
-    run_id = f"{experiment}_{int(time.time())}"
-    logger.info("=== Cloud Training Run: %s ===", run_id)
+    run_id = f"{pipeline_mode}_{experiment}_{int(time.time())}"
+    logger.info("=== Cloud Training Run: %s (mode=%s) ===", run_id, pipeline_mode)
     logger.info(
         "Config: project=%s bucket=%s experiment=%s patients_limit=%d seed=%d skip_allen=%s run_all=%s",
         gcp_project, gcs_bucket, experiment, patients_limit, seed, skip_allen, run_all,
     )
 
     # ── Step 1: Write ADC credentials from env var ──
-    logger.info("Step 1/6: Setting up ADC credentials...")
+    logger.info("Step 1: Setting up ADC credentials...")
     creds_path = _write_adc_credentials()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+
+    # Dispatch to appropriate pipeline
+    if pipeline_mode == "wlst":
+        _run_wlst_pipeline(
+            gcp_project, gcs_bucket, run_id, seed, patients_limit,
+            skip_allen, wlst_stage, pipeline_start,
+        )
+    else:
+        _run_readmission_pipeline(
+            gcp_project, gcs_bucket, run_id, experiment, seed,
+            patients_limit, skip_allen, run_all, pipeline_start,
+        )
+
+
+def _run_wlst_pipeline(
+    gcp_project: str,
+    gcs_bucket: str,
+    run_id: str,
+    seed: int,
+    patients_limit: int,
+    skip_allen: bool,
+    wlst_stage: str,
+    pipeline_start: float,
+) -> None:
+    """Run the WLST prediction pipeline."""
+    import duckdb
+
+    # ── Step 2: BigQuery ingestion ──
+    step_start = time.time()
+    logger.info("Step 2: BigQuery ingestion...")
+    from config.settings import Settings
+    from src.ingestion import load_mimic_data
+
+    settings = Settings(
+        data_source="bigquery",
+        bigquery_project=gcp_project,
+        duckdb_path=DB_PATH,
+        patients_limit=patients_limit,
+        skip_allen_relations=skip_allen,
+        snomed_mappings_dir=MAPPINGS_DIR,
+        wlst_mode=True,
+    )
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = load_mimic_data(settings)
+    conn.close()
+    logger.info("Step 2 complete: Ingestion (%.1f min)", (time.time() - step_start) / 60)
+
+    # ── Step 3: WLST graph construction ──
+    step_start = time.time()
+    logger.info("Step 3: Building WLST RDF knowledge graph (stage=%s)...", wlst_stage)
+    from src.wlst.graph_pipeline import build_wlst_graph
+
+    WLST_RDF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    graph, labels_df = build_wlst_graph(
+        db_path=DB_PATH,
+        ontology_dir=ONTOLOGY_DIR,
+        output_path=WLST_RDF_PATH,
+        patients_limit=patients_limit,
+        skip_allen_relations=skip_allen,
+        snomed_mappings_dir=MAPPINGS_DIR,
+        stage=wlst_stage,
+    )
+    logger.info("Step 3 complete: WLST graph — %d triples (%.1f min)", len(graph), (time.time() - step_start) / 60)
+
+    # Release disk-backed graph
+    from src.graph_construction.disk_graph import close_disk_graph
+    close_disk_graph(graph)
+
+    # ── Step 4: Feature extraction ──
+    step_start = time.time()
+    logger.info("Step 4: Extracting WLST 48h features...")
+    from src.wlst.features import extract_wlst_features
+
+    feat_conn = duckdb.connect(str(DB_PATH), read_only=True)
+    WLST_FEATURES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    feature_df = extract_wlst_features(
+        feat_conn, labels_df,
+        stage=wlst_stage,
+        mappings_dir=MAPPINGS_DIR,
+    )
+    feature_df.to_parquet(WLST_FEATURES_PATH)
+    feat_conn.close()
+    logger.info("Step 4 complete: Features %s (%.1f min)", feature_df.shape, (time.time() - step_start) / 60)
+
+    # ── Step 5: Cohort summary ──
+    from src.wlst.cohort import generate_cohort_summary
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    report_dir = OUTPUT_DIR / "wlst" / wlst_stage
+    report_dir.mkdir(parents=True, exist_ok=True)
+    summary = generate_cohort_summary(labels_df)
+    (report_dir / "cohort_summary.md").write_text(summary)
+
+    # ── Step 6: Classical ML baselines ──
+    step_start = time.time()
+    logger.info("Step 6: Training classical ML baselines...")
+    from src.wlst.experiments import run_classical_baselines
+
+    baseline_dir = report_dir / "baselines"
+    baseline_results = run_classical_baselines(
+        feature_df, output_dir=baseline_dir, seed=seed,
+    )
+
+    from src.wlst.evaluate import generate_wlst_evaluation_report
+    for model_name, result in baseline_results.items():
+        report = generate_wlst_evaluation_report(
+            result["metrics"], model_name, wlst_stage,
+        )
+        (report_dir / f"{model_name}_evaluation.md").write_text(report)
+
+    logger.info("Step 6 complete: Baselines (%.1f min)", (time.time() - step_start) / 60)
+
+    # ── Step 7: GNN preparation (SapBERT embeddings + HeteroData) ──
+    wlst_embeddings_path = Path("data/processed/wlst_concept_embeddings.pt")
+    wlst_hetero_path = Path("data/processed/wlst_hetero_graph.pt")
+
+    step_start = time.time()
+    logger.info("Step 7: Preparing GNN data (embeddings + HeteroData export)...")
+    from src.gnn.__main__ import prepare as gnn_prepare
+
+    gnn_prepare(
+        rdf_path=WLST_RDF_PATH,
+        features_path=WLST_FEATURES_PATH,
+        embeddings_path=wlst_embeddings_path,
+        output_path=wlst_hetero_path,
+        mappings_dir=MAPPINGS_DIR,
+        label_mode="wlst",
+    )
+    logger.info("Step 7 complete: HeteroData exported (%.1f min)", (time.time() - step_start) / 60)
+
+    # ── Step 8: GNN training ──
+    step_start = time.time()
+    logger.info("Step 8: Running WLST GNN experiments...")
+    from src.gnn.experiments import ExperimentRunner
+    from src.wlst.experiments import get_wlst_gnn_registry
+
+    wlst_gnn_registry = get_wlst_gnn_registry()
+    runner = ExperimentRunner(
+        wlst_hetero_path,
+        base_output_dir=report_dir / "gnn_experiments",
+        registry=wlst_gnn_registry,
+    )
+
+    # Run W4 (Stage 1 full model) or W6 (Stage 2 full model)
+    wlst_experiment = "W4_full_model" if wlst_stage == "stage1" else "W6_stage2_full_model"
+    if wlst_experiment in wlst_gnn_registry:
+        result = runner.run(wlst_experiment, seed=seed)
+        auroc = result["eval_metrics"].get("auroc", "N/A")
+        logger.info("Experiment %s complete: AUROC=%s", wlst_experiment, auroc)
+
+    logger.info("Step 8 complete: GNN training (%.1f min)", (time.time() - step_start) / 60)
+
+    elapsed = time.time() - pipeline_start
+    logger.info("Total WLST pipeline time: %.1f seconds (%.1f minutes)", elapsed, elapsed / 60)
+
+    # Save run metadata
+    (OUTPUT_DIR / "run_info.json").write_text(json.dumps({
+        "run_id": run_id,
+        "pipeline_mode": "wlst",
+        "wlst_stage": wlst_stage,
+        "wlst_experiment": wlst_experiment,
+        "gcp_project": gcp_project,
+        "seed": seed,
+        "patients_limit": patients_limit,
+        "skip_allen": skip_allen,
+        "elapsed_seconds": elapsed,
+    }, indent=2))
+
+    # Upload to GCS
+    logger.info("Uploading outputs to GCS...")
+    _upload_to_gcs(gcs_bucket, run_id, project=gcp_project)
+    logger.info("=== WLST cloud training complete: %s ===", run_id)
+
+
+def _run_readmission_pipeline(
+    gcp_project: str,
+    gcs_bucket: str,
+    run_id: str,
+    experiment: str,
+    seed: int,
+    patients_limit: int,
+    skip_allen: bool,
+    run_all: bool,
+    pipeline_start: float,
+) -> None:
+    """Run the original readmission prediction pipeline."""
 
     # ── Step 2: BigQuery ingestion ──
     step_start = time.time()
@@ -234,7 +432,7 @@ def main() -> None:
 
     # ── Upload outputs to GCS ──
     logger.info("Uploading outputs to GCS...")
-    _upload_to_gcs(gcs_bucket, run_id)
+    _upload_to_gcs(gcs_bucket, run_id, project=gcp_project)
     logger.info("=== Cloud training complete: %s ===", run_id)
 
 

@@ -281,9 +281,11 @@ class ExperimentRunner:
         self,
         graph_path: Path,
         base_output_dir: Path | None = None,
+        registry: dict[str, ExperimentConfig] | None = None,
     ) -> None:
         self.graph_path = Path(graph_path)
         self.base_output_dir = Path(base_output_dir) if base_output_dir else Path("outputs/gnn_experiments")
+        self._registry = registry if registry is not None else EXPERIMENT_REGISTRY
         self._cached_data: HeteroData | None = None
 
     def _load_data(self) -> HeteroData:
@@ -321,12 +323,12 @@ class ExperimentRunner:
         start = time.time()
 
         # 1. Config resolution
-        if experiment_name not in EXPERIMENT_REGISTRY:
+        if experiment_name not in self._registry:
             raise KeyError(
                 f"Unknown experiment: {experiment_name!r}. "
-                f"Available: {list(EXPERIMENT_REGISTRY.keys())}"
+                f"Available: {list(self._registry.keys())}"
             )
-        config = EXPERIMENT_REGISTRY[experiment_name]
+        config = self._registry[experiment_name]
         if config_overrides:
             d = config.to_dict()
             d.update(config_overrides)
@@ -499,7 +501,7 @@ class ExperimentRunner:
         dict
             Mapping from experiment name to result dict.
         """
-        names = experiments or list(EXPERIMENT_REGISTRY.keys())
+        names = experiments or list(self._registry.keys())
         results: dict[str, dict] = {}
         for name in names:
             logger.info("Starting experiment: %s", name)

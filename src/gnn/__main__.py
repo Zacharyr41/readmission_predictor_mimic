@@ -60,6 +60,7 @@ def export_graph(
     features_path: Path = DEFAULT_FEATURES,
     embeddings_path: Path = DEFAULT_EMBEDDINGS,
     output_path: Path = DEFAULT_OUTPUT,
+    label_mode: str = "readmission",
 ) -> None:
     """Convert RDF knowledge graph to PyG HeteroData."""
     from src.gnn.graph_export import export_rdf_to_heterodata
@@ -78,7 +79,7 @@ def export_graph(
 
     split_fn = _make_split_fn()
 
-    logger.info("Exporting HeteroData → %s", output_path)
+    logger.info("Exporting HeteroData → %s (label_mode=%s)", output_path, label_mode)
     data = export_rdf_to_heterodata(
         rdf_graph,
         features_path,
@@ -86,6 +87,7 @@ def export_graph(
         split_fn=split_fn,
         output_path=output_path,
         embed_unmapped_fn=None,
+        label_mode=label_mode,
     )
     close_disk_graph(rdf_graph)
     logger.info(
@@ -101,6 +103,7 @@ def prepare(
     embeddings_path: Path = DEFAULT_EMBEDDINGS,
     output_path: Path = DEFAULT_OUTPUT,
     mappings_dir: Path = DEFAULT_MAPPINGS,
+    label_mode: str = "readmission",
 ) -> None:
     """Run both build_embeddings and export_graph in sequence."""
     build_embeddings(mappings_dir=mappings_dir, embeddings_path=embeddings_path)
@@ -109,6 +112,7 @@ def prepare(
         features_path=features_path,
         embeddings_path=embeddings_path,
         output_path=output_path,
+        label_mode=label_mode,
     )
 
 

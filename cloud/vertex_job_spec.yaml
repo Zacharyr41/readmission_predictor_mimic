@@ -24,5 +24,9 @@ workerPoolSpecs:
           value: "SKIP_ALLEN_PLACEHOLDER"
         - name: RUN_ALL
           value: "RUN_ALL_PLACEHOLDER"
+        - name: PIPELINE_MODE
+          value: "PIPELINE_MODE_PLACEHOLDER"
+        - name: WLST_STAGE
+          value: "WLST_STAGE_PLACEHOLDER"
         - name: ADC_CREDENTIALS_B64
           value: "ADC_B64_PLACEHOLDER"

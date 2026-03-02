@@ -31,6 +31,12 @@ NODE_TYPES = [
     "patient", "admission", "icu_stay", "icu_day",
     "drug", "diagnosis", "lab", "vital", "microbiology",
 ]
+
+# Additional node types for WLST pipeline
+WLST_NODE_TYPES = [
+    "gcs", "vasopressor", "ventilation", "neurosurgery",
+    "icp_medication", "map_event",
+]
 EMBEDDING_DIM = 768
 
 # Gender encoding: Male → 1.0, Female → 0.0
@@ -43,6 +49,16 @@ _CLINICAL_TYPE_CONFIG = {
     "drug": (MIMIC_NS.PrescriptionEvent, MIMIC_NS.hasDrugName, MIMIC_NS.hasDrugName),
     "microbiology": (MIMIC_NS.MicrobiologyEvent, MIMIC_NS.hasOrganismName, MIMIC_NS.hasOrganismName),
     "diagnosis": (MIMIC_NS.DiagnosisEvent, MIMIC_NS.hasIcdCode, MIMIC_NS.hasLongTitle),
+}
+
+# WLST-specific event types
+_WLST_CLINICAL_TYPE_CONFIG = {
+    "gcs": (MIMIC_NS.GCSEvent, MIMIC_NS.hasGCSTotal, MIMIC_NS.hasGCSTotal),
+    "vasopressor": (MIMIC_NS.VasopressorEvent, MIMIC_NS.hasDrugName, MIMIC_NS.hasDrugName),
+    "ventilation": (MIMIC_NS.VentilationEvent, MIMIC_NS.hasItemId, MIMIC_NS.hasProcedureName),
+    "neurosurgery": (MIMIC_NS.NeurosurgeryEvent, MIMIC_NS.hasItemId, MIMIC_NS.hasProcedureName),
+    "icp_medication": (MIMIC_NS.ICPMedicationEvent, MIMIC_NS.hasDrugName, MIMIC_NS.hasDrugName),
+    "map_event": (MIMIC_NS.MAPEvent, MIMIC_NS.hasMeasurementMethod, MIMIC_NS.hasMeasurementMethod),
 }
 
 
@@ -103,6 +119,7 @@ class ClinicalNodeMaps(NamedTuple):
 
 def _build_clinical_node_maps(
     g: rdflib.Graph,
+    clinical_config: dict | None = None,
 ) -> ClinicalNodeMaps:
     """Build deduplicated concept-level maps for clinical event types.
 
@@ -110,11 +127,14 @@ def _build_clinical_node_maps(
     node.  Events without a SNOMED mapping get a synthetic key of the form
     ``"unmapped:{type}:{fallback_id}"``.
     """
+    if clinical_config is None:
+        clinical_config = _CLINICAL_TYPE_CONFIG
+
     concept_id_map: dict[str, dict[str, int]] = {}
     event_to_concept: dict[str, dict[URIRef, str]] = {}
     concept_labels: dict[str, dict[str, str]] = {}
 
-    for ntype, (rdf_class, fallback_pred, label_pred) in _CLINICAL_TYPE_CONFIG.items():
+    for ntype, (rdf_class, fallback_pred, label_pred) in clinical_config.items():
         query = f"""
         SELECT ?event ?snomed ?fallback ?label WHERE {{
             ?event rdf:type <{rdf_class}> .
@@ -203,8 +223,12 @@ def _build_admission_features(
     """Load parquet feature matrix aligned to admission node ordering."""
     df = pd.read_parquet(feature_matrix_path)
 
-    drop_cols = {"hadm_id", "subject_id", "readmitted_30d", "readmitted_60d"}
-    feat_cols = sorted(c for c in df.columns if c not in drop_cols)
+    drop_cols = {
+        "hadm_id", "subject_id", "stay_id",
+        "readmitted_30d", "readmitted_60d",
+        "wlst_label", "outcome_category",
+    }
+    feat_cols = sorted(c for c in df.columns if c not in drop_cols and df[c].dtype != "object")
 
     n = len(node_map)
     feat_dim = len(feat_cols)
@@ -415,13 +439,20 @@ def _build_admission_start_lookup(
 
 def _build_event_timestamp_lookup(
     g: rdflib.Graph,
+    clinical_config: dict | None = None,
 ) -> dict[URIRef, datetime]:
     """Map event URI → timestamp for instant and interval events."""
+    if clinical_config is None:
+        clinical_config = _CLINICAL_TYPE_CONFIG
+
     lookup: dict[URIRef, datetime] = {}
 
-    # Instant events
-    for ntype in ("lab", "vital", "microbiology"):
-        rdf_class = _CLINICAL_TYPE_CONFIG[ntype][0]
+    # Instant events (have time:inXSDDateTimeStamp directly)
+    instant_types = ["lab", "vital", "microbiology", "gcs", "map_event"]
+    for ntype in instant_types:
+        if ntype not in clinical_config:
+            continue
+        rdf_class = clinical_config[ntype][0]
         query = f"""
         SELECT ?event ?ts WHERE {{
             ?event a <{rdf_class}> ;
@@ -431,16 +462,21 @@ def _build_event_timestamp_lookup(
         for row in g.query(query):
             lookup[row[0]] = _parse_timestamp(row[1])
 
-    # Interval events (prescriptions) — use beginning timestamp
-    query = f"""
-    SELECT ?event ?ts WHERE {{
-        ?event a <{MIMIC_NS.PrescriptionEvent}> ;
-               <{TIME_NS.hasBeginning}> ?begin .
-        ?begin <{TIME_NS.inXSDDateTimeStamp}> ?ts .
-    }}
-    """
-    for row in g.query(query):
-        lookup[row[0]] = _parse_timestamp(row[1])
+    # Interval events (have time:hasBeginning) — use beginning timestamp
+    interval_types = ["drug", "vasopressor", "ventilation", "neurosurgery", "icp_medication"]
+    for ntype in interval_types:
+        if ntype not in clinical_config:
+            continue
+        rdf_class = clinical_config[ntype][0]
+        query = f"""
+        SELECT ?event ?ts WHERE {{
+            ?event a <{rdf_class}> ;
+                   <{TIME_NS.hasBeginning}> ?begin .
+            ?begin <{TIME_NS.inXSDDateTimeStamp}> ?ts .
+        }}
+        """
+        for row in g.query(query):
+            lookup[row[0]] = _parse_timestamp(row[1])
 
     return lookup
 
@@ -553,8 +589,15 @@ def _extract_clinical_event_edges(
     """Extract icu_day→event edges with temporal delta attributes."""
     edges: dict[tuple[str, str, str], tuple[torch.Tensor, torch.Tensor | None]] = {}
 
-    for ntype in ("lab", "vital", "drug", "microbiology"):
-        rdf_class = _CLINICAL_TYPE_CONFIG[ntype][0]
+    # All clinical types except diagnosis (diagnosis has its own edge extraction)
+    event_ntypes = [n for n in concept_id_map if n != "diagnosis"]
+    for ntype in event_ntypes:
+        if ntype not in concept_id_map or ntype not in event_to_concept:
+            continue
+        # Need the RDF class — get it from whichever config has this type
+        rdf_class = _CLINICAL_TYPE_CONFIG.get(ntype, _WLST_CLINICAL_TYPE_CONFIG.get(ntype, (None,)))[0]
+        if rdf_class is None:
+            continue
         query = f"""
         SELECT ?day ?event WHERE {{
             ?day <{MIMIC_NS.hasICUDayEvent}> ?event .
@@ -703,10 +746,34 @@ def _build_labels(
     return y_30d, y_60d
 
 
+def _build_wlst_labels(
+    g: rdflib.Graph,
+    admission_map: dict[URIRef, int],
+) -> torch.Tensor:
+    """Build WLST label tensor aligned to admission node ordering."""
+    n = len(admission_map)
+    y = torch.zeros(n, dtype=torch.float)
+
+    query = """
+    SELECT ?adm ?label WHERE {
+        ?adm a mimic:HospitalAdmission ;
+             mimic:hasWLSTLabel ?label .
+    }
+    """
+    for row in g.query(query):
+        uri = row[0]
+        if uri in admission_map:
+            idx = admission_map[uri]
+            y[idx] = float(row[1])
+
+    return y
+
+
 def _build_masks(
     g: rdflib.Graph,
     admission_map: dict[URIRef, int],
     split_fn: Callable | None,
+    label_mode: str = "readmission",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build train/val/test boolean masks over admission nodes."""
     n = len(admission_map)
@@ -714,30 +781,41 @@ def _build_masks(
     if split_fn is None:
         return torch.ones(n, dtype=torch.bool), torch.zeros(n, dtype=torch.bool), torch.zeros(n, dtype=torch.bool)
 
-    # Build a DataFrame with subject_id, hadm_id, readmitted_30d
-    query = """
-    SELECT ?adm ?sid ?hadm ?r30 WHERE {
+    # Choose label predicate and column name based on mode
+    if label_mode == "wlst":
+        label_pred = "mimic:hasWLSTLabel"
+        target_col = "wlst_label"
+    else:
+        label_pred = "mimic:readmittedWithin30Days"
+        target_col = "readmitted_30d"
+
+    query = f"""
+    SELECT ?adm ?sid ?hadm ?label WHERE {{
         ?adm a mimic:HospitalAdmission ;
              mimic:hasAdmissionId ?hadm .
         ?patient mimic:hasAdmission ?adm ;
                  mimic:hasSubjectId ?sid .
-        ?adm mimic:readmittedWithin30Days ?r30 .
-    }
+        ?adm {label_pred} ?label .
+    }}
     """
     rows = []
     for row in g.query(query):
         adm_uri = row[0]
         if adm_uri not in admission_map:
             continue
+        if label_mode == "wlst":
+            label_val = int(float(str(row[3])))
+        else:
+            label_val = 1 if str(row[3]).lower() == "true" else 0
         rows.append({
             "adm_uri": str(adm_uri),
             "subject_id": int(row[1]),
             "hadm_id": int(row[2]),
-            "readmitted_30d": 1 if str(row[3]).lower() == "true" else 0,
+            target_col: label_val,
         })
 
     df = pd.DataFrame(rows)
-    train_df, val_df, test_df = split_fn(df, "readmitted_30d")
+    train_df, val_df, test_df = split_fn(df, target_col)
 
     # Map back to boolean masks
     uri_to_idx = {str(uri): idx for uri, idx in admission_map.items()}
@@ -786,7 +864,7 @@ def _validate_heterodata(data: HeteroData) -> None:
                     f"max dst {ei[1].max()} >= {n_dst}"
                 )
 
-    if hasattr(data["admission"], "y"):
+    if hasattr(data["admission"], "y") and data["admission"].y is not None:
         if data["admission"].y.sum() == 0:
             logger.warning("All labels are zero — check label extraction")
 
@@ -841,6 +919,7 @@ def export_rdf_to_heterodata(
     split_fn: Callable | None = None,
     output_path: Path = Path("data/processed/full_hetero_graph.pt"),
     embed_unmapped_fn: Callable | None = None,
+    label_mode: str = "readmission",
 ) -> HeteroData:
     """Convert an RDF knowledge graph to a PyG HeteroData object.
 
@@ -892,10 +971,17 @@ def export_rdf_to_heterodata(
     """
     data = HeteroData()
 
+    # Merge clinical configs: always include base types; add WLST types if present
+    clinical_config = dict(_CLINICAL_TYPE_CONFIG)
+    if label_mode == "wlst":
+        clinical_config.update(_WLST_CLINICAL_TYPE_CONFIG)
+
     # ── A. Node maps ──────────────────────────────────────────────────────
     logger.info("Building node ID maps...")
     structural_maps = _build_structural_node_maps(rdf_graph)
-    concept_id_map, event_to_concept, concept_labels = _build_clinical_node_maps(rdf_graph)
+    concept_id_map, event_to_concept, concept_labels = _build_clinical_node_maps(
+        rdf_graph, clinical_config=clinical_config,
+    )
 
     _save_node_mappings(
         structural_maps, concept_id_map,
@@ -915,7 +1001,7 @@ def export_rdf_to_heterodata(
     data["icu_stay"].x = _build_icu_stay_features(rdf_graph, structural_maps["icu_stay"])
     data["icu_day"].x = _build_icu_day_features(rdf_graph, structural_maps["icu_day"])
 
-    for ntype in ("lab", "vital", "drug", "diagnosis", "microbiology"):
+    for ntype in concept_id_map:
         data[ntype].x = _build_clinical_node_features(
             rdf_graph,
             concept_id_map[ntype],
@@ -929,7 +1015,7 @@ def export_rdf_to_heterodata(
     # ── C. Edges ──────────────────────────────────────────────────────────
     logger.info("Extracting edges...")
     adm_start_lookup = _build_admission_start_lookup(rdf_graph)
-    event_ts_lookup = _build_event_timestamp_lookup(rdf_graph)
+    event_ts_lookup = _build_event_timestamp_lookup(rdf_graph, clinical_config=clinical_config)
     event_adm_lookup = _build_event_admission_lookup(rdf_graph)
 
     # Structural edges
@@ -967,13 +1053,18 @@ def export_rdf_to_heterodata(
     _add_reverse_edges(data)
 
     # ── D. Labels & masks ─────────────────────────────────────────────────
-    logger.info("Building labels and masks...")
-    y_30d, y_60d = _build_labels(rdf_graph, structural_maps["admission"])
-    data["admission"].y = y_30d
-    data["admission"].y_60d = y_60d
+    logger.info("Building labels and masks (mode=%s)...", label_mode)
+    if label_mode == "wlst":
+        y_wlst = _build_wlst_labels(rdf_graph, structural_maps["admission"])
+        data["admission"].y = y_wlst
+    else:
+        y_30d, y_60d = _build_labels(rdf_graph, structural_maps["admission"])
+        data["admission"].y = y_30d
+        data["admission"].y_60d = y_60d
 
     train_mask, val_mask, test_mask = _build_masks(
         rdf_graph, structural_maps["admission"], split_fn,
+        label_mode=label_mode,
     )
     data["admission"].train_mask = train_mask
     data["admission"].val_mask = val_mask

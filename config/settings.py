@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     diagnoses_limit: int = Field(default=0)  # 0 = no limit
     skip_allen_relations: bool = Field(default=False)  # Skip Allen relation computation
 
+    # WLST pipeline configuration
+    wlst_mode: bool = Field(default=False)
+    wlst_icd_prefixes: list[str] = Field(default=["S06"])
+    wlst_gcs_threshold: int = Field(default=8)
+    wlst_observation_window_hours: int = Field(default=48)
+    wlst_icu_types: list[str] = Field(default=[
+        "Neuro Stepdown",
+        "Neuro Surgical Intensive Care Unit (Neuro SICU)",
+        "Trauma SICU (TSICU)",
+    ])
+    wlst_stage: Literal["stage1", "stage2"] = Field(default="stage1")
+
     @model_validator(mode="after")
     def _validate_bigquery_config(self) -> "Settings":
         if self.data_source == "bigquery" and not self.bigquery_project:
