@@ -1,0 +1,49 @@
+{
+  "node_counts": {
+    "patient": 342,
+    "admission": 344,
+    "icu_stay": 344,
+    "icu_day": 3065,
+    "lab": 5,
+    "vital": 0,
+    "drug": 0,
+    "microbiology": 0,
+    "diagnosis": 1209,
+    "gcs": 15,
+    "vasopressor": 5,
+    "ventilation": 1,
+    "neurosurgery": 1,
+    "icp_medication": 3,
+    "map_event": 2
+  },
+  "edge_counts": {
+    "(patient,has_admission,admission)": 344,
+    "(admission,contains_icu_stay,icu_stay)": 344,
+    "(icu_stay,has_icu_day,icu_day)": 3065,
+    "(icu_day,has_event,lab)": 6378,
+    "(icu_day,has_event,gcs)": 9422,
+    "(icu_day,has_event,vasopressor)": 2346,
+    "(icu_day,has_event,ventilation)": 225,
+    "(icu_day,has_event,neurosurgery)": 168,
+    "(icu_day,has_event,icp_medication)": 659,
+    "(icu_day,has_event,map_event)": 17597,
+    "(admission,has_diagnosis,diagnosis)": 8477,
+    "(admission,rev_has_admission,patient)": 344,
+    "(icu_stay,rev_contains_icu_stay,admission)": 344,
+    "(icu_day,rev_has_icu_day,icu_stay)": 3065,
+    "(lab,rev_has_event,icu_day)": 6378,
+    "(gcs,rev_has_event,icu_day)": 9422,
+    "(vasopressor,rev_has_event,icu_day)": 2346,
+    "(ventilation,rev_has_event,icu_day)": 225,
+    "(neurosurgery,rev_has_event,icu_day)": 168,
+    "(icp_medication,rev_has_event,icu_day)": 659,
+    "(map_event,rev_has_event,icu_day)": 17597,
+    "(diagnosis,rev_has_diagnosis,admission)": 8477
+  },
+  "label_distribution": {
+    "positive": 31,
+    "negative": 313,
+    "total": 344
+  },
+  "timestamp": "2026-03-02T23:04:13.114117"
+}

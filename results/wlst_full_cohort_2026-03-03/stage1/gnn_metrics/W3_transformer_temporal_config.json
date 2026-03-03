@@ -1,0 +1,53 @@
+{
+  "name": "W3_transformer_temporal",
+  "description": "Temporal encoding contribution (48h trajectory)",
+  "use_transformer": true,
+  "use_diffusion": false,
+  "use_temporal_encoding": true,
+  "d_model": 128,
+  "num_contextual_paths": 2,
+  "k_hops_contextual": 4,
+  "k_hops_temporal": 2,
+  "nhead": 4,
+  "dropout": 0.3,
+  "view_config": {
+    "target_node_type": "admission",
+    "label_key": "wlst_label",
+    "active_entity_types": [
+      "drug",
+      "diagnosis",
+      "gcs",
+      "vasopressor",
+      "ventilation",
+      "neurosurgery",
+      "icp_medication",
+      "map_event"
+    ],
+    "collapse_rules": {
+      "icu_stay": "collapse",
+      "icu_day": "collapse"
+    },
+    "meta_paths": [],
+    "include_temporal_track": true
+  },
+  "loss_config": {
+    "cls_loss_type": "bce",
+    "pos_weight": null,
+    "label_smoothing": 0.05,
+    "focal_alpha": 0.25,
+    "focal_gamma": 2.0,
+    "diff_weight": 1.0
+  },
+  "training_config": {
+    "lr": 0.001,
+    "batch_size": 64,
+    "max_epochs": 200,
+    "patience": 20,
+    "weight_decay": 0.0001,
+    "grad_clip_norm": 1.0,
+    "device": "auto",
+    "checkpoint_dir": "outputs/gnn_models",
+    "log_every_n_epochs": 1
+  },
+  "sampling_config": null
+}

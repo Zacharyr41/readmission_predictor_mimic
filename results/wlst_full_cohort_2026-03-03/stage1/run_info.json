@@ -1,0 +1,21 @@
+{
+  "run_id": "wlst_E6_full_model_1772490868",
+  "pipeline_mode": "wlst",
+  "wlst_stage": "stage1",
+  "wlst_experiment": "all(W1_mlp_baseline,W2_transformer_only,W3_transformer_temporal,W4_full_model)",
+  "run_all": true,
+  "experiment": "E6_full_model",
+  "gcp_project": "mimic-485500",
+  "seed": 42,
+  "patients_limit": 0,
+  "skip_allen": true,
+  "elapsed_seconds": 1301.588190317154,
+  "step_timings_seconds": {
+    "ingestion": 158.2993381023407,
+    "graph_construction": 162.8370008468628,
+    "feature_extraction": 0.7868967056274414,
+    "baselines": 3.269078493118286,
+    "gnn_preparation": 155.89919805526733,
+    "gnn_training": 819.3063733577728
+  }
+}
