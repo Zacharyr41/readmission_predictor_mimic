@@ -49,16 +49,12 @@ In the sidebar:
 
 ## Example Queries
 
-### Biomarkers
+### Biomarkers & Vitals
 ```
 What are the creatinine values?
 What is the average albumin level?
 What is the median lactate?
 How many hemoglobin measurements are there?
-```
-
-### Vitals
-```
 Show heart rate trends over time
 What was the maximum blood pressure recorded?
 ```
@@ -67,30 +63,53 @@ What was the maximum blood pressure recorded?
 ```
 What medications include heparin?
 Show all atorvastatin prescriptions
+What vasopressors were administered?
 ```
 
-### Diagnoses
+### Diagnoses & Patient Populations
 ```
 Which patients have ICD code I63?
 Show patients diagnosed with sepsis
+Which patients have a traumatic brain injury diagnosis (S06)?
+Show all patients with acute kidney injury
 ```
 
 ### Visualizations
 ```
 Plot creatinine over time
 Show a chart of hemoglobin trends
+Visualize lactate levels over the ICU stay
+Plot a box plot of length of stay by admission type
 ```
 
-### Comparisons
+### Research-Style Questions
 ```
-Compare creatinine levels between readmitted and non-readmitted patients
+What is the average creatinine for patients readmitted within 30 days vs those who were not?
+Compare albumin levels between readmitted and non-readmitted patients
+How does length of stay differ across ICU admission types?
+What are the most common organisms found in microbiology cultures?
+Show the distribution of ICU length of stay
+What microbiology results include staph?
 ```
 
-### Follow-up questions (conversation memory)
+### Multi-Turn Conversations
 ```
 What is the creatinine?
 → Now show the trend over time
 → What about sodium instead?
+→ Plot that as a line chart
+```
+
+```
+Which patients were diagnosed with cerebral infarction (I63)?
+→ What medications were they on?
+→ Compare their albumin levels to non-readmitted patients
+```
+
+```
+Show all microbiology results
+→ Which ones involved blood cultures?
+→ What organisms were found?
 ```
 
 ## Troubleshooting
