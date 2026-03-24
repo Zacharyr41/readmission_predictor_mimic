@@ -358,16 +358,20 @@ class TestFetchAdmissionsIncludesReadmission:
         assert by_hadm[103]["readmitted_30d"] == 0
         assert by_hadm[103]["readmitted_60d"] == 1
 
-    def test_admissions_without_readmission_table_default_to_zero(
+    def test_admissions_without_readmission_table_computes_on_fly(
         self, synthetic_db_path,
     ):
-        """When readmission_labels table doesn't exist, defaults are 0."""
+        """When readmission_labels table doesn't exist, compute from admissions.
+
+        Patient 1, hadm 101 (dischtime 2150-01-20) has a next admission
+        hadm 102 (admittime 2150-02-10 = 21 days later) → readmitted_30d=1.
+        """
         backend = _DuckDBBackend(synthetic_db_path)
         admissions = _fetch_admissions(backend, [101])
         backend.close()
 
-        assert admissions[0].get("readmitted_30d", 0) == 0
-        assert admissions[0].get("readmitted_60d", 0) == 0
+        assert admissions[0]["readmitted_30d"] == 1
+        assert admissions[0]["readmitted_60d"] == 1
 
 
 # ---------------------------------------------------------------------------

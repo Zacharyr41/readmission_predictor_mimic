@@ -80,6 +80,33 @@ class _DuckDBBackend:
     def random_fn() -> str:
         return "RANDOM()"
 
+    def readmission_labels_expr(self) -> str:
+        """Return a table expression for readmission labels.
+
+        Uses the materialized table if it exists, otherwise computes on the fly.
+        """
+        try:
+            self._conn.execute("SELECT 1 FROM readmission_labels LIMIT 0")
+            return "readmission_labels"
+        except Exception:
+            return self._readmission_cte()
+
+    def _readmission_cte(self) -> str:
+        t = self.table
+        return f"""(
+            SELECT
+                hadm_id,
+                CASE WHEN LEAD(admittime) OVER (
+                         PARTITION BY subject_id ORDER BY admittime
+                     ) <= dischtime + INTERVAL 30 DAY
+                     THEN 1 ELSE 0 END AS readmitted_30d,
+                CASE WHEN LEAD(admittime) OVER (
+                         PARTITION BY subject_id ORDER BY admittime
+                     ) <= dischtime + INTERVAL 60 DAY
+                     THEN 1 ELSE 0 END AS readmitted_60d
+            FROM {t('admissions')}
+        )"""
+
     def close(self) -> None:
         self._conn.close()
 
@@ -109,6 +136,23 @@ class _BigQueryBackend:
     @staticmethod
     def random_fn() -> str:
         return "RAND()"
+
+    def readmission_labels_expr(self) -> str:
+        """Compute readmission labels on the fly using a window function."""
+        t = self.table
+        return f"""(
+            SELECT
+                hadm_id,
+                CASE WHEN LEAD(admittime) OVER (
+                         PARTITION BY subject_id ORDER BY admittime
+                     ) <= DATETIME_ADD(dischtime, INTERVAL 30 DAY)
+                     THEN 1 ELSE 0 END AS readmitted_30d,
+                CASE WHEN LEAD(admittime) OVER (
+                         PARTITION BY subject_id ORDER BY admittime
+                     ) <= DATETIME_ADD(dischtime, INTERVAL 60 DAY)
+                     THEN 1 ELSE 0 END AS readmitted_60d
+            FROM {t('admissions')}
+        )"""
 
     def _convert_params(
         self, sql: str, params: list
@@ -251,9 +295,8 @@ def _get_filtered_hadm_ids(
             params.append(int(f.value))
 
         elif f.field in ("readmitted_30d", "readmitted_60d"):
-            joins.append(
-                f"JOIN {t('readmission_labels')} rl ON a.hadm_id = rl.hadm_id"
-            )
+            rl_expr = backend.readmission_labels_expr()
+            joins.append(f"JOIN {rl_expr} rl ON a.hadm_id = rl.hadm_id")
             if f.operator not in _SAFE_COMPARISON_OPS:
                 raise ValueError(
                     f"Unsupported operator for {f.field}: {f.operator}"
@@ -568,40 +611,24 @@ def _fetch_admissions(
     t = backend.table
     ph, params = _in_clause(hadm_ids)
 
-    # Try to join readmission_labels for readmitted_30d/60d.
-    # Fall back to defaults (0) if the table doesn't exist.
-    try:
-        sql = f"""
-            SELECT a.hadm_id, a.subject_id, a.admittime, a.dischtime,
-                   a.admission_type, a.discharge_location,
-                   a.hospital_expire_flag,
-                   COALESCE(rl.readmitted_30d, 0) AS readmitted_30d,
-                   COALESCE(rl.readmitted_60d, 0) AS readmitted_60d
-            FROM {t('admissions')} a
-            LEFT JOIN {t('readmission_labels')} rl ON a.hadm_id = rl.hadm_id
-            WHERE a.hadm_id IN ({ph})
-            ORDER BY a.admittime
-        """
-        cols = [
-            "hadm_id", "subject_id", "admittime", "dischtime",
-            "admission_type", "discharge_location", "hospital_expire_flag",
-            "readmitted_30d", "readmitted_60d",
-        ]
-        return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
-    except Exception:
-        # readmission_labels table may not exist
-        sql = f"""
-            SELECT hadm_id, subject_id, admittime, dischtime,
-                   admission_type, discharge_location, hospital_expire_flag
-            FROM {t('admissions')}
-            WHERE hadm_id IN ({ph})
-            ORDER BY admittime
-        """
-        cols = [
-            "hadm_id", "subject_id", "admittime", "dischtime",
-            "admission_type", "discharge_location", "hospital_expire_flag",
-        ]
-        return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
+    rl_expr = backend.readmission_labels_expr()
+    sql = f"""
+        SELECT a.hadm_id, a.subject_id, a.admittime, a.dischtime,
+               a.admission_type, a.discharge_location,
+               a.hospital_expire_flag,
+               COALESCE(rl.readmitted_30d, 0) AS readmitted_30d,
+               COALESCE(rl.readmitted_60d, 0) AS readmitted_60d
+        FROM {t('admissions')} a
+        LEFT JOIN {rl_expr} rl ON a.hadm_id = rl.hadm_id
+        WHERE a.hadm_id IN ({ph})
+        ORDER BY a.admittime
+    """
+    cols = [
+        "hadm_id", "subject_id", "admittime", "dischtime",
+        "admission_type", "discharge_location", "hospital_expire_flag",
+        "readmitted_30d", "readmitted_60d",
+    ]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
 
 
 def _fetch_icu_stays(
