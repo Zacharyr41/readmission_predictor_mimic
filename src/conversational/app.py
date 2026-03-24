@@ -8,6 +8,9 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.conversational.models import AnswerResult
 from src.conversational.orchestrator import ConversationalPipeline
