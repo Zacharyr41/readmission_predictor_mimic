@@ -43,6 +43,13 @@ class CompetencyQuestion(BaseModel):
     scope: Literal["single_patient", "cohort", "comparison"] = "single_patient"
 
 
+class ExtractionConfig(BaseModel):
+    """Configurable settings for data extraction."""
+
+    max_cohort_size: int = 500
+    cohort_strategy: Literal["recent", "random"] = "recent"
+
+
 class ExtractionResult(BaseModel):
     patients: list[dict] = []
     admissions: list[dict] = []

@@ -464,3 +464,49 @@ class TestBuildQueryGraphAdvanced:
         assert stats["diagnoses"] == 1
         assert stats["microbiology"] == 1
         assert stats["allen_relations"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Conditional Allen relations
+# ---------------------------------------------------------------------------
+
+
+class TestSkipAllenRelations:
+    def test_skip_allen_no_temporal_relations(self, ontology_dir, minimal_extraction):
+        """When skip_allen_relations=True, no Allen relations are computed."""
+        graph, stats = build_query_graph(
+            ontology_dir, minimal_extraction, skip_allen_relations=True,
+        )
+        assert stats["allen_relations"] == 0
+
+    def test_allen_computed_by_default(self, ontology_dir, minimal_extraction):
+        """Default behavior still computes Allen relations."""
+        graph, stats = build_query_graph(ontology_dir, minimal_extraction)
+        assert stats["allen_relations"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Parallel graph build
+# ---------------------------------------------------------------------------
+
+
+class TestParallelGraphBuild:
+    def test_parallel_produces_same_triple_count(self, ontology_dir, minimal_extraction):
+        """Parallel build produces the same number of triples as serial."""
+        graph_serial, stats_serial = build_query_graph(
+            ontology_dir, minimal_extraction, max_workers=1,
+        )
+        graph_parallel, stats_parallel = build_query_graph(
+            ontology_dir, minimal_extraction, max_workers=2,
+        )
+        assert len(graph_serial) == len(graph_parallel)
+        for key in ("patients", "admissions", "icu_stays", "biomarkers", "vitals"):
+            assert stats_serial[key] == stats_parallel[key]
+
+    def test_max_workers_1_is_serial(self, ontology_dir, minimal_extraction):
+        """max_workers=1 uses serial path (baseline behavior)."""
+        graph, stats = build_query_graph(
+            ontology_dir, minimal_extraction, max_workers=1,
+        )
+        assert stats["patients"] == 1
+        assert len(graph) > 0

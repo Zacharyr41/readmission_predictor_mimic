@@ -6,10 +6,14 @@ construction writer functions — no new graph construction logic.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from rdflib import Graph, URIRef
+
+logger = logging.getLogger(__name__)
 
 from src.conversational.models import ExtractionResult
 from src.graph_construction.event_writers import (
@@ -35,6 +39,9 @@ from src.graph_construction.temporal.allen_relations import (
 def build_query_graph(
     ontology_dir: Path,
     extraction: ExtractionResult,
+    *,
+    skip_allen_relations: bool = False,
+    max_workers: int = 1,
 ) -> tuple[Graph, dict]:
     """Build an RDF graph from a conversational extraction result.
 
@@ -67,6 +74,13 @@ def build_query_graph(
 
     if not extraction.patients:
         return graph, stats
+
+    if max_workers > 1 and len(extraction.patients) > 1:
+        return _build_parallel(
+            graph, stats, ontology_dir, extraction,
+            skip_allen_relations=skip_allen_relations,
+            max_workers=max_workers,
+        )
 
     # -- Lookup indices -------------------------------------------------------
     hadm_stay_index = _build_hadm_stay_index(extraction.icu_stays)
@@ -161,10 +175,11 @@ def build_query_graph(
         stats["microbiology"] += 1
 
     # -- Allen temporal relations ---------------------------------------------
-    for patient_uri in patient_uris:
-        stats["allen_relations"] += compute_allen_relations_for_patient(
-            graph, patient_uri,
-        )
+    if not skip_allen_relations:
+        for patient_uri in patient_uris:
+            stats["allen_relations"] += compute_allen_relations_for_patient(
+                graph, patient_uri,
+            )
 
     return graph, stats
 
@@ -212,3 +227,99 @@ def _augment_admission(admission: dict) -> dict:
     aug.setdefault("readmitted_30d", False)
     aug.setdefault("readmitted_60d", False)
     return aug
+
+
+# ---------------------------------------------------------------------------
+# Parallel graph build
+# ---------------------------------------------------------------------------
+
+
+def _partition_by_patient(
+    extraction: ExtractionResult,
+) -> list[ExtractionResult]:
+    """Split extraction data into per-patient ExtractionResult chunks."""
+    adm_by_subject: dict[int, list[dict]] = defaultdict(list)
+    for adm in extraction.admissions:
+        adm_by_subject[adm["subject_id"]].append(adm)
+
+    hadm_by_subject: dict[int, set[int]] = {}
+    for sid, adms in adm_by_subject.items():
+        hadm_by_subject[sid] = {a["hadm_id"] for a in adms}
+
+    stay_by_subject: dict[int, list[dict]] = defaultdict(list)
+    for stay in extraction.icu_stays:
+        for sid, hadms in hadm_by_subject.items():
+            if stay["hadm_id"] in hadms:
+                stay_by_subject[sid].append(stay)
+                break
+
+    events_by_subject: dict[int, dict[str, list[dict]]] = defaultdict(
+        lambda: defaultdict(list),
+    )
+    for event_type, events in extraction.events.items():
+        for event in events:
+            hadm_id = event.get("hadm_id")
+            for sid, hadms in hadm_by_subject.items():
+                if hadm_id in hadms:
+                    events_by_subject[sid][event_type].append(event)
+                    break
+
+    partitions = []
+    for patient in extraction.patients:
+        sid = patient["subject_id"]
+        partitions.append(ExtractionResult(
+            patients=[patient],
+            admissions=adm_by_subject.get(sid, []),
+            icu_stays=stay_by_subject.get(sid, []),
+            events=dict(events_by_subject.get(sid, {})),
+        ))
+    return partitions
+
+
+def _build_patient_subgraph_worker(
+    args: tuple,
+) -> tuple[bytes, dict]:
+    """Worker function for parallel graph build.
+
+    Takes a tuple of (ontology_dir, extraction, skip_allen_relations).
+    Returns (ntriples_bytes, stats_dict).
+    """
+    ontology_dir, extraction, skip_allen = args
+    from src.conversational.graph_builder import build_query_graph
+
+    graph, stats = build_query_graph(
+        ontology_dir, extraction,
+        skip_allen_relations=skip_allen,
+        max_workers=1,
+    )
+    return graph.serialize(format="nt"), stats
+
+
+def _build_parallel(
+    base_graph: Graph,
+    base_stats: dict,
+    ontology_dir: Path,
+    extraction: ExtractionResult,
+    *,
+    skip_allen_relations: bool,
+    max_workers: int,
+) -> tuple[Graph, dict]:
+    """Build patient subgraphs in parallel and merge."""
+    partitions = _partition_by_patient(extraction)
+
+    worker_args = [
+        (ontology_dir, partition, skip_allen_relations)
+        for partition in partitions
+    ]
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_build_patient_subgraph_worker, worker_args))
+
+    for nt_bytes, sub_stats in results:
+        sub_graph = Graph()
+        sub_graph.parse(data=nt_bytes, format="nt")
+        base_graph += sub_graph
+        for key in base_stats:
+            base_stats[key] += sub_stats.get(key, 0)
+
+    return base_graph, base_stats

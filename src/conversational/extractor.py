@@ -17,6 +17,7 @@ import duckdb
 from src.conversational.models import (
     ClinicalConcept,
     CompetencyQuestion,
+    ExtractionConfig,
     ExtractionResult,
     PatientFilter,
     TemporalConstraint,
@@ -118,7 +119,11 @@ class _BigQueryBackend:
 # ---------------------------------------------------------------------------
 
 
-def extract(db_path: Path, cq: CompetencyQuestion) -> ExtractionResult:
+def extract(
+    db_path: Path,
+    cq: CompetencyQuestion,
+    config: ExtractionConfig | None = None,
+) -> ExtractionResult:
     """Extract MIMIC-IV data from a local DuckDB database.
 
     Opens a read-only connection, builds template SQL from the structured
@@ -126,13 +131,15 @@ def extract(db_path: Path, cq: CompetencyQuestion) -> ExtractionResult:
     """
     backend = _DuckDBBackend(db_path)
     try:
-        return _extract(backend, cq)
+        return _extract(backend, cq, config=config)
     finally:
         backend.close()
 
 
 def extract_bigquery(
-    cq: CompetencyQuestion, project: str | None = None
+    cq: CompetencyQuestion,
+    project: str | None = None,
+    config: ExtractionConfig | None = None,
 ) -> ExtractionResult:
     """Extract MIMIC-IV data directly from BigQuery.
 
@@ -141,7 +148,7 @@ def extract_bigquery(
     """
     backend = _BigQueryBackend(project)
     try:
-        return _extract(backend, cq)
+        return _extract(backend, cq, config=config)
     finally:
         backend.close()
 
@@ -152,9 +159,11 @@ def extract_bigquery(
 
 
 def _extract(
-    backend: _DuckDBBackend | _BigQueryBackend, cq: CompetencyQuestion
+    backend: _DuckDBBackend | _BigQueryBackend,
+    cq: CompetencyQuestion,
+    config: ExtractionConfig | None = None,
 ) -> ExtractionResult:
-    hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters)
+    hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters, config=config)
     if not hadm_ids:
         return ExtractionResult()
 
@@ -180,13 +189,11 @@ def _extract(
 def _get_filtered_hadm_ids(
     backend: _DuckDBBackend | _BigQueryBackend,
     filters: list[PatientFilter],
+    config: ExtractionConfig | None = None,
 ) -> list[int]:
     """Return admission IDs matching all patient filters."""
+    cfg = config or ExtractionConfig()
     t = backend.table
-    if not filters:
-        return [r[0] for r in backend.execute(
-            f"SELECT hadm_id FROM {t('admissions')}", []
-        )]
 
     joins: list[str] = []
     conditions: list[str] = []
@@ -223,6 +230,17 @@ def _get_filtered_hadm_ids(
             conditions.append("a.subject_id = ?")
             params.append(int(f.value))
 
+        elif f.field in ("readmitted_30d", "readmitted_60d"):
+            joins.append(
+                f"JOIN {t('readmission_labels')} rl ON a.hadm_id = rl.hadm_id"
+            )
+            if f.operator not in _SAFE_COMPARISON_OPS:
+                raise ValueError(
+                    f"Unsupported operator for {f.field}: {f.operator}"
+                )
+            conditions.append(f"rl.{f.field} {f.operator} ?")
+            params.append(int(f.value))
+
         else:
             logger.warning("Ignoring unsupported patient filter field: %s", f.field)
 
@@ -232,8 +250,18 @@ def _get_filtered_hadm_ids(
     join_sql = " ".join(joins)
     where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    sql = f"SELECT DISTINCT a.hadm_id FROM {t('admissions')} a {join_sql}{where_clause}"
-    return [r[0] for r in backend.execute(sql, params)]
+    order = "a.admittime DESC" if cfg.cohort_strategy == "recent" else "RANDOM()"
+    sql = (
+        f"SELECT DISTINCT a.hadm_id FROM {t('admissions')} a {join_sql}"
+        f"{where_clause} ORDER BY {order} LIMIT {cfg.max_cohort_size}"
+    )
+    hadm_ids = [r[0] for r in backend.execute(sql, params)]
+    if len(hadm_ids) == cfg.max_cohort_size:
+        logger.warning(
+            "Cohort capped at %d admissions (limit reached).",
+            cfg.max_cohort_size,
+        )
+    return hadm_ids
 
 
 # ---------------------------------------------------------------------------

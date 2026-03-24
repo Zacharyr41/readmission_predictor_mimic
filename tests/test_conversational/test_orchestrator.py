@@ -15,6 +15,7 @@ from src.conversational.models import (
     ClinicalConcept,
     CompetencyQuestion,
     ExtractionResult,
+    TemporalConstraint,
 )
 from src.conversational.orchestrator import ConversationalPipeline
 from src.conversational.reasoner import ReasoningResult
@@ -98,7 +99,7 @@ class TestAsk:
             pipeline._client, "What is the creatinine?",
             conversation_history=None,
         )
-        mock_extract.assert_called_once_with(_DB_PATH, cq)
+        mock_extract.assert_called_once_with(_DB_PATH, cq, config=None)
         mock_build.assert_called_once()
         mock_reason.assert_called_once()
         mock_answer.assert_called_once_with(
@@ -186,3 +187,63 @@ class TestReset:
 
         pipeline.reset()
         assert len(pipeline.conversation_history) == 0
+
+
+# ---------------------------------------------------------------------------
+# TestAllenRelationsPassthrough
+# ---------------------------------------------------------------------------
+
+
+class TestAllenRelationsPassthrough:
+    @_patch_all
+    def test_no_temporal_constraints_skips_allen(
+        self, mock_decompose, mock_extract,
+        mock_build, mock_reason, mock_answer,
+    ):
+        """CQ without temporal_constraints passes skip_allen_relations=True."""
+        cq = CompetencyQuestion(
+            original_question="What is the creatinine?",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+        )
+        mock_decompose.return_value = cq
+        mock_extract.return_value = ExtractionResult()
+        mock_build.return_value = (MagicMock(), {})
+        mock_reason.return_value = _make_reasoning()
+        mock_answer.return_value = _make_answer()
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("What is the creatinine?")
+
+        mock_build.assert_called_once()
+        _, kwargs = mock_build.call_args
+        assert kwargs.get("skip_allen_relations") is True
+
+    @_patch_all
+    def test_temporal_constraints_computes_allen(
+        self, mock_decompose, mock_extract,
+        mock_build, mock_reason, mock_answer,
+    ):
+        """CQ with temporal_constraints passes skip_allen_relations=False."""
+        cq = CompetencyQuestion(
+            original_question="Creatinine before intubation",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+            temporal_constraints=[
+                TemporalConstraint(relation="before", reference_event="intubation"),
+            ],
+        )
+        mock_decompose.return_value = cq
+        mock_extract.return_value = ExtractionResult()
+        mock_build.return_value = (MagicMock(), {})
+        mock_reason.return_value = _make_reasoning()
+        mock_answer.return_value = _make_answer()
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("Creatinine before intubation")
+
+        mock_build.assert_called_once()
+        _, kwargs = mock_build.call_args
+        assert kwargs.get("skip_allen_relations") is False

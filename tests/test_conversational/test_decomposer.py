@@ -250,3 +250,22 @@ class TestDecompose:
         actual_question = "What is the creatinine?"
         result = decompose(client, actual_question)
         assert result.original_question == actual_question
+
+
+# ---------------------------------------------------------------------------
+# Prompt content tests
+# ---------------------------------------------------------------------------
+
+
+class TestSupportedFilterFields:
+    def test_prompt_enumerates_filter_fields(self):
+        """The system prompt lists all supported filter field names."""
+        from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
+
+        for field in [
+            "age", "gender", "diagnosis", "admission_type",
+            "subject_id", "readmitted_30d", "readmitted_60d",
+        ]:
+            assert field in DECOMPOSITION_SYSTEM_PROMPT, (
+                f"Supported filter field '{field}' missing from decomposition prompt"
+            )

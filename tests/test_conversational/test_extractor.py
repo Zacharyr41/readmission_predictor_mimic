@@ -5,15 +5,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pydantic import ValidationError
+
 from src.conversational.extractor import (
     _BigQueryBackend,
     _DuckDBBackend,
+    _get_filtered_hadm_ids,
     extract,
     extract_bigquery,
 )
 from src.conversational.models import (
     ClinicalConcept,
     CompetencyQuestion,
+    ExtractionConfig,
     PatientFilter,
     TemporalConstraint,
 )
@@ -186,3 +190,142 @@ class TestBigQueryBackend:
         assert mock_client.query.called
         first_sql = mock_client.query.call_args_list[0][0][0]
         assert "physionet-data.mimiciv_3_1_hosp.admissions" in first_sql
+
+
+# ---------------------------------------------------------------------------
+# ExtractionConfig
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionConfig:
+    def test_default_values(self):
+        cfg = ExtractionConfig()
+        assert cfg.max_cohort_size == 500
+        assert cfg.cohort_strategy == "recent"
+
+    def test_custom_values(self):
+        cfg = ExtractionConfig(max_cohort_size=1000, cohort_strategy="random")
+        assert cfg.max_cohort_size == 1000
+        assert cfg.cohort_strategy == "random"
+
+    def test_invalid_strategy_rejected(self):
+        with pytest.raises(ValidationError):
+            ExtractionConfig(cohort_strategy="invalid")
+
+
+# ---------------------------------------------------------------------------
+# Readmission filters
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def synthetic_db_path_with_readmission(tmp_path, synthetic_duckdb_with_events):
+    """Extend synthetic DuckDB with readmission_labels table."""
+    conn = synthetic_duckdb_with_events
+    conn.execute("""
+        CREATE TABLE readmission_labels (
+            subject_id INTEGER,
+            hadm_id INTEGER,
+            dischtime TIMESTAMP,
+            next_admittime TIMESTAMP,
+            days_to_readmission INTEGER,
+            readmitted_30d INTEGER,
+            readmitted_60d INTEGER
+        )
+    """)
+    # Patient 1, hadm 101: readmitted within 30d (next admit 26 days later)
+    # Patient 1, hadm 102: not readmitted
+    # Patient 2, hadm 103: readmitted within 60d but not 30d
+    # Patient 3, hadm 104: not readmitted
+    # Patient 4, hadm 105: not readmitted
+    # Patient 5, hadm 106: not readmitted
+    conn.execute("""
+        INSERT INTO readmission_labels VALUES
+        (1, 101, '2150-01-20 14:00:00', '2150-02-10 10:00:00', 21, 1, 1),
+        (1, 102, '2150-02-15 12:00:00', NULL, NULL, 0, 0),
+        (2, 103, '2151-03-10 16:00:00', '2151-04-25 08:00:00', 46, 0, 1),
+        (3, 104, '2152-05-25 10:00:00', NULL, NULL, 0, 0),
+        (4, 105, '2150-07-05 11:00:00', NULL, NULL, 0, 0),
+        (5, 106, '2151-04-20 08:00:00', NULL, NULL, 0, 0)
+    """)
+    conn.close()
+    return tmp_path / "test.duckdb"
+
+
+class TestReadmissionFilters:
+    def test_readmitted_30d_filter(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        filters = [PatientFilter(field="readmitted_30d", operator="=", value="1")]
+        hadm_ids = _get_filtered_hadm_ids(backend, filters)
+        backend.close()
+        # Only hadm 101 has readmitted_30d=1
+        assert set(hadm_ids) == {101}
+
+    def test_readmitted_60d_filter(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        filters = [PatientFilter(field="readmitted_60d", operator="=", value="1")]
+        hadm_ids = _get_filtered_hadm_ids(backend, filters)
+        backend.close()
+        # hadm 101 and 103 have readmitted_60d=1
+        assert set(hadm_ids) == {101, 103}
+
+    def test_readmitted_not_readmitted(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        filters = [PatientFilter(field="readmitted_30d", operator="=", value="0")]
+        hadm_ids = _get_filtered_hadm_ids(backend, filters)
+        backend.close()
+        assert set(hadm_ids) == {102, 103, 104, 105, 106}
+
+    def test_unknown_filter_skipped_gracefully(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        filters = [PatientFilter(field="invented_field", operator="=", value="x")]
+        hadm_ids = _get_filtered_hadm_ids(backend, filters)
+        backend.close()
+        # Unknown filter skipped → all 6 admissions returned
+        assert len(hadm_ids) == 6
+
+
+# ---------------------------------------------------------------------------
+# Cohort capping
+# ---------------------------------------------------------------------------
+
+
+class TestCohortCapping:
+    def test_cap_applied_when_exceeds_max(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        cfg = ExtractionConfig(max_cohort_size=3, cohort_strategy="recent")
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
+        backend.close()
+        assert len(hadm_ids) == 3
+
+    def test_no_cap_when_under_max(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        cfg = ExtractionConfig(max_cohort_size=500)
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
+        backend.close()
+        # 6 admissions total, all returned
+        assert len(hadm_ids) == 6
+
+    def test_recent_strategy_returns_newest(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        cfg = ExtractionConfig(max_cohort_size=2, cohort_strategy="recent")
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
+        backend.close()
+        # Most recent by admittime: 104 (2152-05-20), 106 (2151-04-10)
+        assert set(hadm_ids) == {104, 106}
+
+    def test_random_strategy_returns_correct_count(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        cfg = ExtractionConfig(max_cohort_size=3, cohort_strategy="random")
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
+        backend.close()
+        assert len(hadm_ids) == 3
+
+    def test_cap_with_filters(self, synthetic_db_path_with_readmission):
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        cfg = ExtractionConfig(max_cohort_size=2, cohort_strategy="recent")
+        filters = [PatientFilter(field="readmitted_30d", operator="=", value="0")]
+        hadm_ids = _get_filtered_hadm_ids(backend, filters, config=cfg)
+        backend.close()
+        # 5 match readmitted_30d=0, cap to 2 most recent
+        assert len(hadm_ids) == 2

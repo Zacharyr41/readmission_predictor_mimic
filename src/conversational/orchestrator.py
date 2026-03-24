@@ -15,7 +15,7 @@ from src.conversational.answerer import generate_answer
 from src.conversational.decomposer import decompose
 from src.conversational.extractor import extract, extract_bigquery
 from src.conversational.graph_builder import build_query_graph
-from src.conversational.models import AnswerResult, CompetencyQuestion
+from src.conversational.models import AnswerResult, CompetencyQuestion, ExtractionConfig
 from src.conversational.reasoner import reason
 
 if TYPE_CHECKING:
@@ -35,6 +35,8 @@ class ConversationalPipeline:
         *,
         data_source: str = "local",
         bigquery_project: str | None = None,
+        extraction_config: ExtractionConfig | None = None,
+        max_workers: int = 1,
     ) -> None:
         import anthropic as _anthropic
 
@@ -42,6 +44,8 @@ class ConversationalPipeline:
         self._ontology_dir = ontology_dir
         self._data_source = data_source
         self._bigquery_project = bigquery_project
+        self._extraction_config = extraction_config
+        self._max_workers = max_workers
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
         self.max_history: int = 10
@@ -55,11 +59,20 @@ class ConversationalPipeline:
             )
 
             if self._data_source == "bigquery":
-                extraction = extract_bigquery(cq, project=self._bigquery_project)
+                extraction = extract_bigquery(
+                    cq, project=self._bigquery_project,
+                    config=self._extraction_config,
+                )
             else:
-                extraction = extract(self._db_path, cq)
+                extraction = extract(
+                    self._db_path, cq, config=self._extraction_config,
+                )
 
-            graph, graph_stats = build_query_graph(self._ontology_dir, extraction)
+            graph, graph_stats = build_query_graph(
+                self._ontology_dir, extraction,
+                skip_allen_relations=not bool(cq.temporal_constraints),
+                max_workers=self._max_workers,
+            )
 
             reasoning = reason(graph, cq)
 

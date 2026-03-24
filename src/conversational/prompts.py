@@ -55,12 +55,16 @@ Return ONLY valid JSON matching this schema (no extra text):
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}
   ],
   "patient_filters": [
-    {"field": "<field name>", "operator": "<>|<|=|>=|<=|contains|in>", "value": "<value>"}
+    {"field": "<age|gender|diagnosis|admission_type|subject_id|readmitted_30d|readmitted_60d>",
+     "operator": "<>|<|=|>=|<=|contains>", "value": "<value>"}
   ],
   "aggregation": "<mean|median|max|min|count|sum or null>",
   "return_type": "<text|table|text_and_table|visualization>",
   "scope": "<single_patient|cohort|comparison>"
 }
+
+Use ONLY the listed field names for patient_filters. readmitted_30d and readmitted_60d
+are binary (0 = not readmitted, 1 = readmitted within that window).
 
 Omit empty arrays and null fields — Pydantic defaults will fill them.
 
@@ -146,6 +150,18 @@ Question: "Compare mean lactate between readmitted and non-readmitted patients"
   "aggregation": "mean",
   "return_type": "text_and_table",
   "scope": "comparison"
+}
+```
+
+Question: "What is the average creatinine for patients readmitted within 30 days?"
+```json
+{
+  "original_question": "What is the average creatinine for patients readmitted within 30 days?",
+  "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
+  "patient_filters": [{"field": "readmitted_30d", "operator": "=", "value": "1"}],
+  "aggregation": "mean",
+  "return_type": "text",
+  "scope": "cohort"
 }
 ```
 
