@@ -222,10 +222,11 @@ def _resolve_event_to_stay(
 
 
 def _augment_admission(admission: dict) -> dict:
-    """Add default readmission labels for query-scoped graphs."""
+    """Add default readmission/mortality labels for query-scoped graphs."""
     aug = dict(admission)
     aug.setdefault("readmitted_30d", False)
     aug.setdefault("readmitted_60d", False)
+    aug.setdefault("hospital_expire_flag", 0)
     return aug
 
 

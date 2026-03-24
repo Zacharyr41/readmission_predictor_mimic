@@ -9,7 +9,7 @@ from pydantic import BaseModel
 class ClinicalConcept(BaseModel):
     name: str
     concept_type: Literal[
-        "biomarker", "vital", "drug", "diagnosis", "microbiology"
+        "biomarker", "vital", "drug", "diagnosis", "microbiology", "outcome"
     ]
     attributes: list[str] = []
 
@@ -41,6 +41,7 @@ class CompetencyQuestion(BaseModel):
     aggregation: str | None = None
     return_type: ReturnType = ReturnType.TEXT_AND_TABLE
     scope: Literal["single_patient", "cohort", "comparison"] = "single_patient"
+    comparison_field: str | None = None
 
 
 class ExtractionConfig(BaseModel):

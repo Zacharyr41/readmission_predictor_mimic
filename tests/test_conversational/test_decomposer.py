@@ -257,6 +257,40 @@ class TestDecompose:
 # ---------------------------------------------------------------------------
 
 
+class TestFilterValidation:
+    def test_unsupported_filter_triggers_retry(self):
+        """If LLM returns unsupported filter field, decomposer retries."""
+        bad_json = _make_cq_json(
+            patient_filters=[{"field": "icu_type", "operator": "=", "value": "neuro"}],
+        )
+        corrected_json = _make_cq_json(
+            patient_filters=[
+                {"field": "diagnosis", "operator": "contains", "value": "neuro"},
+            ],
+        )
+        client = _mock_client(bad_json, corrected_json)
+        result = decompose(client, "lactate for neuro ICU patients")
+
+        # Should have retried (2 API calls)
+        assert client.messages.create.call_count == 2
+        # Result should have valid filter fields
+        assert all(
+            f.field in {"age", "gender", "diagnosis", "admission_type",
+                        "subject_id", "readmitted_30d", "readmitted_60d"}
+            for f in result.patient_filters
+        )
+
+    def test_supported_filters_no_retry(self):
+        """Valid filter fields don't trigger a retry."""
+        good_json = _make_cq_json(
+            patient_filters=[{"field": "age", "operator": ">", "value": "65"}],
+        )
+        client = _mock_client(good_json)
+        result = decompose(client, "creatinine for patients over 65")
+        assert client.messages.create.call_count == 1
+        assert result.patient_filters[0].field == "age"
+
+
 class TestSupportedFilterFields:
     def test_prompt_enumerates_filter_fields(self):
         """The system prompt lists all supported filter field names."""

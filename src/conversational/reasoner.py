@@ -370,6 +370,68 @@ GROUP BY ?readmitted30
 # Alias: trend_over_time uses the same template as value_with_timestamps
 TEMPLATES["trend_over_time"] = TEMPLATES["value_with_timestamps"]
 
+# Parameterized comparison: {group_property} is substituted at build time
+TEMPLATES["comparison_by_field"] = """
+SELECT ?group_value (AVG(?value) AS ?avg_value) (COUNT(?value) AS ?count)
+WHERE {{
+    ?patient rdf:type mimic:Patient ;
+             {group_join}
+             mimic:hasAdmission ?admission .
+    ?admission {admission_group_clause}
+               mimic:containsICUStay ?stay .
+    ?event mimic:associatedWithICUStay ?stay ;
+           mimic:hasValue ?value .
+    {{
+        ?event mimic:hasBiomarkerType ?label .
+        FILTER(STR(?label) = "{concept_name}")
+    }}
+    UNION
+    {{
+        ?event mimic:hasClinicalSignName ?label .
+        FILTER(STR(?label) = "{concept_name}")
+    }}
+}}
+GROUP BY ?group_value
+"""
+
+# Mapping from comparison_field values to SPARQL fragments
+TEMPLATES["mortality_count"] = """
+SELECT ?expired (COUNT(DISTINCT ?admission) AS ?count)
+WHERE {{
+    ?admission rdf:type mimic:HospitalAdmission ;
+               mimic:hasHospitalExpireFlag ?expired .
+}}
+GROUP BY ?expired
+"""
+
+_COMPARISON_FIELD_MAP: dict[str, tuple[str, str]] = {
+    # field_name → (group_join on Patient, admission_group_clause)
+    "gender": (
+        "mimic:hasGender ?group_value ;",
+        "",
+    ),
+    "age": (
+        "mimic:hasAge ?group_value ;",
+        "",
+    ),
+    "readmitted_30d": (
+        "",
+        "mimic:readmittedWithin30Days ?group_value ;",
+    ),
+    "readmitted_60d": (
+        "",
+        "mimic:readmittedWithin60Days ?group_value ;",
+    ),
+    "admission_type": (
+        "",
+        "mimic:hasAdmissionType ?group_value ;",
+    ),
+    "discharge_location": (
+        "",
+        "mimic:hasDischargeLocation ?group_value ;",
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Template selection
@@ -383,13 +445,22 @@ def select_templates(cq: CompetencyQuestion) -> list[str]:
     if not cq.clinical_concepts:
         if any(f.field in ("age", "gender") for f in cq.patient_filters):
             templates.append("patient_demographics")
+        elif cq.aggregation:
+            # Aggregation without concepts → likely LOS or admission property
+            templates.append("icu_length_of_stay")
         else:
             templates.append("admission_details")
         return templates
 
     for concept in cq.clinical_concepts:
-        if cq.scope == "comparison":
-            templates.append("comparison_two_groups")
+        # Outcome has its own template regardless of aggregation
+        if concept.concept_type == "outcome":
+            templates.append("mortality_count")
+        elif cq.scope == "comparison":
+            if cq.comparison_field and cq.comparison_field in _COMPARISON_FIELD_MAP:
+                templates.append("comparison_by_field")
+            else:
+                templates.append("comparison_two_groups")
         elif cq.aggregation == "median":
             # No SPARQL MEDIAN — fetch raw values for Python post-processing
             templates.append("value_lookup")
@@ -437,7 +508,16 @@ def build_sparql(
     if cq.clinical_concepts and concept_index < len(cq.clinical_concepts):
         concept_name = _sanitize(cq.clinical_concepts[concept_index].name)
 
-    return _PREFIXES + template.format(concept_name=concept_name)
+    format_kwargs: dict[str, str] = {"concept_name": concept_name}
+
+    if template_name == "comparison_by_field" and cq.comparison_field:
+        group_join, admission_clause = _COMPARISON_FIELD_MAP.get(
+            cq.comparison_field, ("", ""),
+        )
+        format_kwargs["group_join"] = group_join
+        format_kwargs["admission_group_clause"] = admission_clause
+
+    return _PREFIXES + template.format(**format_kwargs)
 
 
 # ---------------------------------------------------------------------------

@@ -342,3 +342,117 @@ class TestReasonIntegration:
         assert len(result.sparql_queries) >= 1
         assert all(q.startswith("PREFIX") for q in result.sparql_queries)
         assert len(result.template_names) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Comparison template selection
+# ---------------------------------------------------------------------------
+
+
+class TestComparisonTemplateSelection:
+    def test_comparison_with_field_uses_parameterized_template(self):
+        """comparison_field set → selects comparison_by_field template."""
+        cq = CompetencyQuestion(
+            original_question="Compare creatinine by gender",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+            scope="comparison",
+            comparison_field="gender",
+        )
+        templates = select_templates(cq)
+        assert "comparison_by_field" in templates
+
+    def test_comparison_without_field_uses_readmission_default(self):
+        """No comparison_field → falls back to comparison_two_groups."""
+        cq = CompetencyQuestion(
+            original_question="Compare creatinine readmitted vs not",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+            scope="comparison",
+        )
+        templates = select_templates(cq)
+        assert "comparison_two_groups" in templates
+
+    def test_comparison_by_field_sparql_contains_group_property(self):
+        """Built SPARQL for comparison_by_field contains the mapped property."""
+        cq = CompetencyQuestion(
+            original_question="Compare creatinine by gender",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+            scope="comparison",
+            comparison_field="gender",
+        )
+        sparql = build_sparql("comparison_by_field", cq)
+        assert "hasGender" in sparql
+        assert "GROUP BY" in sparql
+        assert "Creatinine" in sparql
+
+    def test_comparison_by_admission_type(self):
+        """comparison_field=admission_type maps to hasAdmissionType."""
+        cq = CompetencyQuestion(
+            original_question="Compare creatinine by admission type",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+            scope="comparison",
+            comparison_field="admission_type",
+        )
+        sparql = build_sparql("comparison_by_field", cq)
+        assert "hasAdmissionType" in sparql
+
+
+# ---------------------------------------------------------------------------
+# Mortality template
+# ---------------------------------------------------------------------------
+
+
+class TestMortalityTemplate:
+    def test_outcome_concept_selects_mortality_template(self):
+        cq = CompetencyQuestion(
+            original_question="How many died?",
+            clinical_concepts=[
+                ClinicalConcept(name="mortality", concept_type="outcome"),
+            ],
+            aggregation="count",
+        )
+        templates = select_templates(cq)
+        assert "mortality_count" in templates
+
+    def test_mortality_sparql_has_expire_flag(self):
+        cq = CompetencyQuestion(
+            original_question="How many died?",
+            clinical_concepts=[
+                ClinicalConcept(name="mortality", concept_type="outcome"),
+            ],
+        )
+        sparql = build_sparql("mortality_count", cq)
+        assert "hasHospitalExpireFlag" in sparql
+
+
+# ---------------------------------------------------------------------------
+# LOS as queryable property
+# ---------------------------------------------------------------------------
+
+
+class TestLOSTemplateSelection:
+    def test_no_concepts_with_aggregation_selects_los(self):
+        """Aggregation without concepts defaults to LOS template."""
+        cq = CompetencyQuestion(
+            original_question="Average length of stay",
+            aggregation="mean",
+            scope="cohort",
+        )
+        templates = select_templates(cq)
+        assert "icu_length_of_stay" in templates
+
+    def test_no_concepts_no_aggregation_still_defaults(self):
+        """No concepts, no aggregation → admission_details (existing behavior)."""
+        cq = CompetencyQuestion(
+            original_question="Show admission details",
+            scope="cohort",
+        )
+        templates = select_templates(cq)
+        assert "admission_details" in templates

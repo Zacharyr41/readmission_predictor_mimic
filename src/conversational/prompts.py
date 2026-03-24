@@ -31,6 +31,8 @@ Map clinical entities to one of these concept_type values:
 - "biomarker"     → Lab results: creatinine, lactate, sodium, glucose, potassium,
                      INR, troponin, hemoglobin, BUN, bilirubin, albumin, WBC,
                      platelet count, bicarbonate, chloride, magnesium
+                     Use attributes to specify specimen type when relevant:
+                     e.g. attributes=["blood"] for serum labs, ["urine"] for urine labs
 - "vital"         → Vital signs: heart rate, blood pressure, systolic BP, diastolic BP,
                      respiratory rate, SpO2, temperature, MAP, GCS
 - "drug"          → Medications: vasopressors (norepinephrine, vasopressin, phenylephrine),
@@ -41,6 +43,7 @@ Map clinical entities to one of these concept_type values:
                      acute kidney injury, heart failure, cerebral infarction
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
                      wound culture, organism names (MRSA, E. coli, Klebsiella)
+- "outcome"       → Patient outcomes: mortality, death, hospital expire, survival
 
 # Output Schema
 
@@ -60,11 +63,16 @@ Return ONLY valid JSON matching this schema (no extra text):
   ],
   "aggregation": "<mean|median|max|min|count|sum or null>",
   "return_type": "<text|table|text_and_table|visualization>",
-  "scope": "<single_patient|cohort|comparison>"
+  "scope": "<single_patient|cohort|comparison>",
+  "comparison_field": "<gender|age|readmitted_30d|readmitted_60d|admission_type|discharge_location or null>"
 }
 
 Use ONLY the listed field names for patient_filters. readmitted_30d and readmitted_60d
 are binary (0 = not readmitted, 1 = readmitted within that window).
+
+When scope is "comparison", set comparison_field to the dimension being compared
+(e.g. "gender" for male vs female, "readmitted_30d" for readmitted vs not,
+"admission_type" for emergency vs elective). If not clear, default to "readmitted_30d".
 
 Omit empty arrays and null fields — Pydantic defaults will fill them.
 
@@ -149,7 +157,20 @@ Question: "Compare mean lactate between readmitted and non-readmitted patients"
   "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker"}],
   "aggregation": "mean",
   "return_type": "text_and_table",
-  "scope": "comparison"
+  "scope": "comparison",
+  "comparison_field": "readmitted_30d"
+}
+```
+
+Question: "Compare creatinine between male and female patients"
+```json
+{
+  "original_question": "Compare creatinine between male and female patients",
+  "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
+  "aggregation": "mean",
+  "return_type": "text_and_table",
+  "scope": "comparison",
+  "comparison_field": "gender"
 }
 ```
 

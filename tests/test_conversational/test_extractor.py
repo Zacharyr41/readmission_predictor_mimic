@@ -50,6 +50,38 @@ class TestExtract:
         assert len(result.patients) > 0
         assert len(result.admissions) > 0
 
+    def test_biomarker_with_fluid_attribute(self, synthetic_db_path):
+        """Attribute 'blood' filters biomarkers by d_labitems.fluid."""
+        cq = CompetencyQuestion(
+            original_question="serum creatinine",
+            clinical_concepts=[
+                ClinicalConcept(
+                    name="creatinine", concept_type="biomarker",
+                    attributes=["blood"],
+                )
+            ],
+            scope="cohort",
+        )
+        result = extract(synthetic_db_path, cq)
+        # All synthetic creatinine has fluid='Blood' → all 3 match
+        assert len(result.events["biomarker"]) == 3
+
+    def test_biomarker_attribute_filters_out_non_matching(self, synthetic_db_path):
+        """Attribute that doesn't match any fluid returns empty."""
+        cq = CompetencyQuestion(
+            original_question="urine creatinine",
+            clinical_concepts=[
+                ClinicalConcept(
+                    name="creatinine", concept_type="biomarker",
+                    attributes=["urine"],
+                )
+            ],
+            scope="cohort",
+        )
+        result = extract(synthetic_db_path, cq)
+        # No synthetic creatinine has fluid='Urine'
+        assert result.events.get("biomarker", []) == []
+
     def test_patient_filter_age(self, synthetic_db_path):
         cq = CompetencyQuestion(
             original_question="Creatinine for patients over 70",

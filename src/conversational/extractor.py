@@ -373,6 +373,8 @@ def _extract_concept(
     handler = handlers.get(concept.concept_type)
     if handler is None:
         return []
+    if concept.concept_type == "biomarker":
+        return handler(backend, concept, hadm_ids, temporal)
     return handler(backend, concept.name, hadm_ids, temporal)
 
 
@@ -383,13 +385,23 @@ def _extract_concept(
 
 def _extract_biomarkers(
     backend: _DuckDBBackend | _BigQueryBackend,
-    name: str,
+    concept: ClinicalConcept,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
 ) -> list[dict]:
     t = backend.table
+    name = concept.name
     ph, params = _in_clause(hadm_ids)
     tc_sql = _temporal_sql(temporal, "l.charttime", "l.hadm_id", backend)
+
+    # Optional attribute filtering (e.g. fluid="Blood" for serum)
+    attr_sql = ""
+    attr_params: list[str] = []
+    if concept.attributes:
+        attr_clauses = [backend.ilike("d.fluid") for _ in concept.attributes]
+        attr_sql = f"AND ({' OR '.join(attr_clauses)})"
+        attr_params = [f"%{a}%" for a in concept.attributes]
+
     sql = f"""
         SELECT l.labevent_id, l.subject_id, l.hadm_id, l.itemid,
                l.charttime, d.label, d.fluid, d.category,
@@ -399,6 +411,7 @@ def _extract_biomarkers(
         WHERE {backend.ilike('d.label')}
           AND l.valuenum IS NOT NULL
           AND l.hadm_id IN ({ph})
+          {attr_sql}
           {tc_sql}
         ORDER BY l.charttime
     """
@@ -407,7 +420,9 @@ def _extract_biomarkers(
         "label", "fluid", "category", "valuenum", "valueuom",
         "ref_range_lower", "ref_range_upper",
     ]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, [f"%{name}%"] + params)]
+    return [dict(zip(cols, r)) for r in backend.execute(
+        sql, [f"%{name}%"] + params + attr_params,
+    )]
 
 
 def _extract_vitals(
@@ -551,6 +566,7 @@ def _fetch_admissions(
         sql = f"""
             SELECT a.hadm_id, a.subject_id, a.admittime, a.dischtime,
                    a.admission_type, a.discharge_location,
+                   a.hospital_expire_flag,
                    COALESCE(rl.readmitted_30d, 0) AS readmitted_30d,
                    COALESCE(rl.readmitted_60d, 0) AS readmitted_60d
             FROM {t('admissions')} a
@@ -560,7 +576,7 @@ def _fetch_admissions(
         """
         cols = [
             "hadm_id", "subject_id", "admittime", "dischtime",
-            "admission_type", "discharge_location",
+            "admission_type", "discharge_location", "hospital_expire_flag",
             "readmitted_30d", "readmitted_60d",
         ]
         return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
@@ -568,14 +584,14 @@ def _fetch_admissions(
         # readmission_labels table may not exist
         sql = f"""
             SELECT hadm_id, subject_id, admittime, dischtime,
-                   admission_type, discharge_location
+                   admission_type, discharge_location, hospital_expire_flag
             FROM {t('admissions')}
             WHERE hadm_id IN ({ph})
             ORDER BY admittime
         """
         cols = [
             "hadm_id", "subject_id", "admittime", "dischtime",
-            "admission_type", "discharge_location",
+            "admission_type", "discharge_location", "hospital_expire_flag",
         ]
         return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
 

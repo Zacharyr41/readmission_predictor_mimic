@@ -126,4 +126,33 @@ def decompose(
         data["original_question"] = question
         cq = CompetencyQuestion.model_validate(data)
 
+    # Validate filter fields — retry if LLM used unsupported fields
+    supported_fields = {
+        "age", "gender", "diagnosis", "admission_type",
+        "subject_id", "readmitted_30d", "readmitted_60d",
+    }
+    unsupported = {f.field for f in cq.patient_filters} - supported_fields
+    if unsupported:
+        messages.append({"role": "assistant", "content": raw_text})
+        messages.append({
+            "role": "user",
+            "content": (
+                f"These patient_filter fields are not supported: {unsupported}. "
+                f"Supported fields are: {sorted(supported_fields)}. "
+                "Please rephrase the filters using only supported fields "
+                "(e.g. use 'diagnosis' to filter by condition). "
+                "Return ONLY the corrected JSON."
+            ),
+        })
+        retry = client.messages.create(
+            model=_MODEL,
+            max_tokens=_MAX_TOKENS,
+            system=DECOMPOSITION_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        retry_json = _extract_json(retry.content[0].text)
+        data = json.loads(retry_json)
+        data["original_question"] = question
+        cq = CompetencyQuestion.model_validate(data)
+
     return _validate_return_type(cq)

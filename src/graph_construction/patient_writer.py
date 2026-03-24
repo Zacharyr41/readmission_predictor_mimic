@@ -93,6 +93,12 @@ def write_admission(graph: Graph, admission_data: dict, patient_uri: URIRef) -> 
     graph.add((admission_uri, MIMIC_NS.readmittedWithin30Days, Literal(admission_data["readmitted_30d"], datatype=XSD.boolean)))
     graph.add((admission_uri, MIMIC_NS.readmittedWithin60Days, Literal(admission_data["readmitted_60d"], datatype=XSD.boolean)))
 
+    # Mortality
+    if "hospital_expire_flag" in admission_data:
+        graph.add((admission_uri, MIMIC_NS.hasHospitalExpireFlag, Literal(
+            admission_data["hospital_expire_flag"], datatype=XSD.integer,
+        )))
+
     # Bidirectional patient-admission links
     graph.add((patient_uri, MIMIC_NS.hasAdmission, admission_uri))
     graph.add((admission_uri, MIMIC_NS.admissionOf, patient_uri))
