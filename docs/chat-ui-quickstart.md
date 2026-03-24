@@ -47,69 +47,62 @@ In the sidebar:
 - API key auto-fills from .env
 - Click **Connect**
 
-## Example Queries
+## Pipeline Configuration
 
-### Biomarkers & Vitals
-```
-What are the creatinine values?
-What is the average albumin level?
-What is the median lactate?
-How many hemoglobin measurements are there?
-Show heart rate trends over time
-What was the maximum blood pressure recorded?
-```
+The pipeline caps cohort size to keep queries responsive (default: 500 most recent admissions). These settings are configurable in `src/conversational/orchestrator.py`:
 
-### Medications
-```
-What medications include heparin?
-Show all atorvastatin prescriptions
-What vasopressors were administered?
-```
+| Setting | Default | Description |
+|---|---|---|
+| `max_cohort_size` | 500 | Max admissions after filtering. Increase if you need broader coverage and can wait longer. |
+| `cohort_strategy` | `"recent"` | `"recent"` selects most recent admissions; `"random"` samples randomly. |
+| `max_workers` | 1 | Parallel graph build workers. Set to 4+ for large cohorts. |
 
-### Diagnoses & Patient Populations
-```
-Which patients have ICD code I63?
-Show patients diagnosed with sepsis
-Which patients have a traumatic brain injury diagnosis (S06)?
-Show all patients with acute kidney injury
-```
+Allen temporal relations are automatically skipped for non-temporal queries, which speeds up most lookups significantly.
 
-### Visualizations
+### Supported patient filters
+
+The decomposer recognizes these filter fields — use them in your questions for targeted cohorts:
+
+- **age** — e.g. "patients over 65"
+- **gender** — e.g. "female patients"
+- **diagnosis** — e.g. "patients with sepsis", "ICD code I63"
+- **admission_type** — e.g. "emergency admissions"
+- **subject_id** — e.g. "patient 12345"
+- **readmitted_30d** — e.g. "patients readmitted within 30 days"
+- **readmitted_60d** — e.g. "patients readmitted within 60 days"
+
+## Demo Questions
+
+### Readmission analysis
 ```
-Plot creatinine over time
-Show a chart of hemoglobin trends
-Visualize lactate levels over the ICU stay
-Plot a box plot of length of stay by admission type
+What is the average creatinine for patients readmitted within 30 days?
+Compare albumin levels between patients readmitted within 30 days and those who were not
 ```
 
-### Research-Style Questions
+### Cohort filtering
 ```
-What is the average creatinine for patients readmitted within 30 days vs those who were not?
-Compare albumin levels between readmitted and non-readmitted patients
-How does length of stay differ across ICU admission types?
-What are the most common organisms found in microbiology cultures?
-Show the distribution of ICU length of stay
-What microbiology results include staph?
+What are the lactate values for patients over 65 with sepsis?
+Show hemoglobin trends for emergency admission patients
 ```
 
-### Multi-Turn Conversations
+### Temporal reasoning
 ```
-What is the creatinine?
-→ Now show the trend over time
-→ What about sodium instead?
-→ Plot that as a line chart
+Which antibiotics were prescribed during the first 48 hours of ICU admission?
+What were the creatinine values before intubation?
 ```
 
+### Visualization
 ```
-Which patients were diagnosed with cerebral infarction (I63)?
-→ What medications were they on?
-→ Compare their albumin levels to non-readmitted patients
+Plot creatinine trends over the ICU stay for patients with acute kidney injury
+Visualize lactate levels over time for patients readmitted within 30 days
 ```
 
+### Multi-turn conversation
 ```
-Show all microbiology results
-→ Which ones involved blood cultures?
-→ What organisms were found?
+What is the average creatinine for patients readmitted within 30 days?
+→ Now compare that to patients who were not readmitted
+→ Show me the trend over time instead
+→ What about lactate for the same population?
 ```
 
 ## Troubleshooting
@@ -120,3 +113,4 @@ Show all microbiology results
 | `Database not found` | Check the DuckDB path exists: `ls data/processed/mimiciv.duckdb` |
 | BigQuery `403 Access Denied` | Run `gcloud auth application-default login` and verify project access |
 | `ANTHROPIC_API_KEY must be set` | Add it to `.env` or paste it in the sidebar |
+| Query is slow (>2 min) | Reduce `max_cohort_size` or increase `max_workers` |
