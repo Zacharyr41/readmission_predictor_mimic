@@ -1,9 +1,15 @@
-"""Template-based SQL extraction from DuckDB driven by CompetencyQuestion."""
+"""Template-based SQL extraction driven by CompetencyQuestion.
+
+Supports two backends:
+- DuckDB (local): ``extract(db_path, cq)``
+- BigQuery (remote): ``extract_bigquery(cq, project=...)``
+"""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
 
@@ -15,35 +21,152 @@ from src.conversational.models import (
     TemporalConstraint,
 )
 
+if TYPE_CHECKING:
+    from google.cloud import bigquery
+
 _SAFE_COMPARISON_OPS = frozenset({">", "<", "=", ">=", "<="})
+
+# BigQuery fully-qualified table mapping (physionet-data MIMIC-IV v3.1)
+_BQ_SOURCE = "physionet-data"
+_BQ_TABLES = {
+    "patients": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.patients",
+    "admissions": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.admissions",
+    "icustays": f"{_BQ_SOURCE}.mimiciv_3_1_icu.icustays",
+    "labevents": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.labevents",
+    "d_labitems": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.d_labitems",
+    "chartevents": f"{_BQ_SOURCE}.mimiciv_3_1_icu.chartevents",
+    "d_items": f"{_BQ_SOURCE}.mimiciv_3_1_icu.d_items",
+    "prescriptions": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.prescriptions",
+    "diagnoses_icd": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.diagnoses_icd",
+    "d_icd_diagnoses": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.d_icd_diagnoses",
+    "microbiologyevents": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.microbiologyevents",
+}
+
+
+def _get_bigquery_module():
+    """Lazy import of google.cloud.bigquery (patchable for tests)."""
+    from google.cloud import bigquery as bq
+
+    return bq
+
+
+# ---------------------------------------------------------------------------
+# Backend abstraction
+# ---------------------------------------------------------------------------
+
+
+class _DuckDBBackend:
+    """Thin wrapper around a read-only DuckDB connection."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._conn = duckdb.connect(str(db_path), read_only=True)
+
+    def table(self, name: str) -> str:
+        return name
+
+    def execute(self, sql: str, params: list) -> list[tuple]:
+        return self._conn.execute(sql, params).fetchall()
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+class _BigQueryBackend:
+    """Queries physionet-data MIMIC-IV datasets on BigQuery directly."""
+
+    def __init__(self, project: str | None = None) -> None:
+        bq = _get_bigquery_module()
+        self._client: bigquery.Client = bq.Client(project=project)
+        self._bq = bq
+
+    def table(self, name: str) -> str:
+        return f"`{_BQ_TABLES[name]}`"
+
+    def execute(self, sql: str, params: list) -> list[tuple]:
+        bq_sql, bq_params = self._convert_params(sql, params)
+        config = self._bq.QueryJobConfig(query_parameters=bq_params)
+        rows = self._client.query(bq_sql, job_config=config).result()
+        return [tuple(row.values()) for row in rows]
+
+    def _convert_params(
+        self, sql: str, params: list
+    ) -> tuple[str, list]:
+        """Replace ``?`` with ``@p0, @p1, ...`` and build typed parameters."""
+        bq_params = []
+        for i, val in enumerate(params):
+            name = f"p{i}"
+            sql = sql.replace("?", f"@{name}", 1)
+            if isinstance(val, int):
+                bq_params.append(self._bq.ScalarQueryParameter(name, "INT64", val))
+            elif isinstance(val, float):
+                bq_params.append(self._bq.ScalarQueryParameter(name, "FLOAT64", val))
+            else:
+                bq_params.append(
+                    self._bq.ScalarQueryParameter(name, "STRING", str(val))
+                )
+        return sql, bq_params
+
+    def close(self) -> None:
+        self._client.close()
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def extract(db_path: Path, cq: CompetencyQuestion) -> ExtractionResult:
-    """Extract MIMIC-IV data from DuckDB based on a CompetencyQuestion.
+    """Extract MIMIC-IV data from a local DuckDB database.
 
     Opens a read-only connection, builds template SQL from the structured
     question fields, and returns patients/admissions/ICU stays/events.
     """
-    conn = duckdb.connect(str(db_path), read_only=True)
+    backend = _DuckDBBackend(db_path)
     try:
-        hadm_ids = _get_filtered_hadm_ids(conn, cq.patient_filters)
-        if not hadm_ids:
-            return ExtractionResult()
-
-        events: dict[str, list[dict]] = {}
-        for concept in cq.clinical_concepts:
-            rows = _extract_concept(conn, concept, hadm_ids, cq.temporal_constraints)
-            if rows:
-                events.setdefault(concept.concept_type, []).extend(rows)
-
-        return ExtractionResult(
-            patients=_fetch_patients(conn, hadm_ids),
-            admissions=_fetch_admissions(conn, hadm_ids),
-            icu_stays=_fetch_icu_stays(conn, hadm_ids),
-            events=events,
-        )
+        return _extract(backend, cq)
     finally:
-        conn.close()
+        backend.close()
+
+
+def extract_bigquery(
+    cq: CompetencyQuestion, project: str | None = None
+) -> ExtractionResult:
+    """Extract MIMIC-IV data directly from BigQuery.
+
+    Queries the ``physionet-data`` MIMIC-IV datasets. Requires
+    Application Default Credentials (``gcloud auth application-default login``).
+    """
+    backend = _BigQueryBackend(project)
+    try:
+        return _extract(backend, cq)
+    finally:
+        backend.close()
+
+
+# ---------------------------------------------------------------------------
+# Core extraction logic (backend-agnostic)
+# ---------------------------------------------------------------------------
+
+
+def _extract(
+    backend: _DuckDBBackend | _BigQueryBackend, cq: CompetencyQuestion
+) -> ExtractionResult:
+    hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters)
+    if not hadm_ids:
+        return ExtractionResult()
+
+    events: dict[str, list[dict]] = {}
+    for concept in cq.clinical_concepts:
+        rows = _extract_concept(backend, concept, hadm_ids, cq.temporal_constraints)
+        if rows:
+            events.setdefault(concept.concept_type, []).extend(rows)
+
+    return ExtractionResult(
+        patients=_fetch_patients(backend, hadm_ids),
+        admissions=_fetch_admissions(backend, hadm_ids),
+        icu_stays=_fetch_icu_stays(backend, hadm_ids),
+        events=events,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -52,12 +175,15 @@ def extract(db_path: Path, cq: CompetencyQuestion) -> ExtractionResult:
 
 
 def _get_filtered_hadm_ids(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     filters: list[PatientFilter],
 ) -> list[int]:
     """Return admission IDs matching all patient filters."""
+    t = backend.table
     if not filters:
-        return [r[0] for r in conn.execute("SELECT hadm_id FROM admissions").fetchall()]
+        return [r[0] for r in backend.execute(
+            f"SELECT hadm_id FROM {t('admissions')}", []
+        )]
 
     joins: list[str] = []
     conditions: list[str] = []
@@ -79,9 +205,9 @@ def _get_filtered_hadm_ids(
 
         elif f.field == "diagnosis":
             joins.append(
-                "JOIN diagnoses_icd di ON a.hadm_id = di.hadm_id "
-                "JOIN d_icd_diagnoses dd ON di.icd_code = dd.icd_code "
-                "AND di.icd_version = dd.icd_version"
+                f"JOIN {t('diagnoses_icd')} di ON a.hadm_id = di.hadm_id "
+                f"JOIN {t('d_icd_diagnoses')} dd ON di.icd_code = dd.icd_code "
+                f"AND di.icd_version = dd.icd_version"
             )
             conditions.append("(dd.long_title ILIKE ? OR di.icd_code LIKE ?)")
             params.extend([f"%{f.value}%", f"{f.value}%"])
@@ -95,13 +221,13 @@ def _get_filtered_hadm_ids(
             params.append(int(f.value))
 
     if needs_patients:
-        joins.insert(0, "JOIN patients p ON a.subject_id = p.subject_id")
+        joins.insert(0, f"JOIN {t('patients')} p ON a.subject_id = p.subject_id")
 
     join_sql = " ".join(joins)
     where_sql = " AND ".join(conditions)
 
-    sql = f"SELECT DISTINCT a.hadm_id FROM admissions a {join_sql} WHERE {where_sql}"
-    return [r[0] for r in conn.execute(sql, params).fetchall()]
+    sql = f"SELECT DISTINCT a.hadm_id FROM {t('admissions')} a {join_sql} WHERE {where_sql}"
+    return [r[0] for r in backend.execute(sql, params)]
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +236,7 @@ def _get_filtered_hadm_ids(
 
 
 def _parse_time_window(window: str) -> str:
-    """Convert '48h', '7d', '30m' etc. to a DuckDB INTERVAL literal."""
+    """Convert '48h', '7d', '30m' etc. to an INTERVAL literal."""
     match = re.match(
         r"(\d+)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
         window.lower().strip(),
@@ -120,15 +246,17 @@ def _parse_time_window(window: str) -> str:
     value = match.group(1)
     unit_char = match.group(2)[0]
     unit_map = {"h": "HOUR", "d": "DAY", "m": "MINUTE"}
-    return f"INTERVAL '{value}' {unit_map[unit_char]}"
+    return f"INTERVAL {value} {unit_map[unit_char]}"
 
 
 def _temporal_sql(
     constraints: list[TemporalConstraint],
     time_col: str,
     hadm_col: str,
+    backend: _DuckDBBackend | _BigQueryBackend,
 ) -> str:
     """Build SQL fragment for temporal constraints (empty string if none)."""
+    icu_tbl = backend.table("icustays")
     parts: list[str] = []
     for tc in constraints:
         ref = tc.reference_event.lower()
@@ -136,7 +264,7 @@ def _temporal_sql(
             continue
 
         exists_prefix = (
-            f"AND EXISTS (SELECT 1 FROM icustays _icu "
+            f"AND EXISTS (SELECT 1 FROM {icu_tbl} _icu "
             f"WHERE _icu.hadm_id = {hadm_col}"
         )
 
@@ -177,7 +305,7 @@ def _in_clause(values: list[int]) -> tuple[str, list[int]]:
 
 
 def _extract_concept(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     concept: ClinicalConcept,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
@@ -193,7 +321,7 @@ def _extract_concept(
     handler = handlers.get(concept.concept_type)
     if handler is None:
         return []
-    return handler(conn, concept.name, hadm_ids, temporal)
+    return handler(backend, concept.name, hadm_ids, temporal)
 
 
 # ---------------------------------------------------------------------------
@@ -202,19 +330,20 @@ def _extract_concept(
 
 
 def _extract_biomarkers(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     name: str,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
 ) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
-    tc_sql = _temporal_sql(temporal, "l.charttime", "l.hadm_id")
+    tc_sql = _temporal_sql(temporal, "l.charttime", "l.hadm_id", backend)
     sql = f"""
         SELECT l.labevent_id, l.subject_id, l.hadm_id, l.itemid,
                l.charttime, d.label, d.fluid, d.category,
                l.valuenum, l.valueuom, l.ref_range_lower, l.ref_range_upper
-        FROM labevents l
-        JOIN d_labitems d ON l.itemid = d.itemid
+        FROM {t('labevents')} l
+        JOIN {t('d_labitems')} d ON l.itemid = d.itemid
         WHERE d.label ILIKE ?
           AND l.valuenum IS NOT NULL
           AND l.hadm_id IN ({ph})
@@ -226,22 +355,23 @@ def _extract_biomarkers(
         "label", "fluid", "category", "valuenum", "valueuom",
         "ref_range_lower", "ref_range_upper",
     ]
-    return [dict(zip(cols, r)) for r in conn.execute(sql, [f"%{name}%"] + params).fetchall()]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, [f"%{name}%"] + params)]
 
 
 def _extract_vitals(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     name: str,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
 ) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
-    tc_sql = _temporal_sql(temporal, "c.charttime", "c.hadm_id")
+    tc_sql = _temporal_sql(temporal, "c.charttime", "c.hadm_id", backend)
     sql = f"""
         SELECT c.stay_id, c.subject_id, c.hadm_id, c.itemid,
                c.charttime, d.label, d.category, c.valuenum
-        FROM chartevents c
-        JOIN d_items d ON c.itemid = d.itemid
+        FROM {t('chartevents')} c
+        JOIN {t('d_items')} d ON c.itemid = d.itemid
         WHERE d.label ILIKE ?
           AND c.valuenum IS NOT NULL
           AND c.hadm_id IN ({ph})
@@ -252,21 +382,22 @@ def _extract_vitals(
         "stay_id", "subject_id", "hadm_id", "itemid",
         "charttime", "label", "category", "valuenum",
     ]
-    return [dict(zip(cols, r)) for r in conn.execute(sql, [f"%{name}%"] + params).fetchall()]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, [f"%{name}%"] + params)]
 
 
 def _extract_drugs(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     name: str,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
 ) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
-    tc_sql = _temporal_sql(temporal, "pr.starttime", "pr.hadm_id")
+    tc_sql = _temporal_sql(temporal, "pr.starttime", "pr.hadm_id", backend)
     sql = f"""
         SELECT pr.hadm_id, pr.subject_id, pr.drug, pr.starttime,
                pr.stoptime, pr.dose_val_rx, pr.dose_unit_rx, pr.route
-        FROM prescriptions pr
+        FROM {t('prescriptions')} pr
         WHERE pr.drug ILIKE ?
           AND pr.hadm_id IN ({ph})
           {tc_sql}
@@ -276,21 +407,22 @@ def _extract_drugs(
         "hadm_id", "subject_id", "drug", "starttime",
         "stoptime", "dose_val_rx", "dose_unit_rx", "route",
     ]
-    return [dict(zip(cols, r)) for r in conn.execute(sql, [f"%{name}%"] + params).fetchall()]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, [f"%{name}%"] + params)]
 
 
 def _extract_diagnoses(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     name: str,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint] | None = None,
 ) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
     sql = f"""
         SELECT di.hadm_id, di.subject_id, di.seq_num, di.icd_code,
                di.icd_version, dd.long_title
-        FROM diagnoses_icd di
-        LEFT JOIN d_icd_diagnoses dd
+        FROM {t('diagnoses_icd')} di
+        LEFT JOIN {t('d_icd_diagnoses')} dd
           ON di.icd_code = dd.icd_code AND di.icd_version = dd.icd_version
         WHERE (dd.long_title ILIKE ? OR di.icd_code LIKE ?)
           AND di.hadm_id IN ({ph})
@@ -302,22 +434,23 @@ def _extract_diagnoses(
     ]
     return [
         dict(zip(cols, r))
-        for r in conn.execute(sql, [f"%{name}%", f"{name}%"] + params).fetchall()
+        for r in backend.execute(sql, [f"%{name}%", f"{name}%"] + params)
     ]
 
 
 def _extract_microbiology(
-    conn: duckdb.DuckDBPyConnection,
+    backend: _DuckDBBackend | _BigQueryBackend,
     name: str,
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
 ) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
-    tc_sql = _temporal_sql(temporal, "m.charttime", "m.hadm_id")
+    tc_sql = _temporal_sql(temporal, "m.charttime", "m.hadm_id", backend)
     sql = f"""
         SELECT m.microevent_id, m.subject_id, m.hadm_id, m.charttime,
                m.spec_type_desc, m.org_name
-        FROM microbiologyevents m
+        FROM {t('microbiologyevents')} m
         WHERE (m.spec_type_desc ILIKE ? OR m.org_name ILIKE ?)
           AND m.hadm_id IN ({ph})
           {tc_sql}
@@ -329,7 +462,7 @@ def _extract_microbiology(
     ]
     return [
         dict(zip(cols, r))
-        for r in conn.execute(sql, [f"%{name}%", f"%{name}%"] + params).fetchall()
+        for r in backend.execute(sql, [f"%{name}%", f"%{name}%"] + params)
     ]
 
 
@@ -338,25 +471,31 @@ def _extract_microbiology(
 # ---------------------------------------------------------------------------
 
 
-def _fetch_patients(conn: duckdb.DuckDBPyConnection, hadm_ids: list[int]) -> list[dict]:
+def _fetch_patients(
+    backend: _DuckDBBackend | _BigQueryBackend, hadm_ids: list[int]
+) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
     sql = f"""
         SELECT DISTINCT p.subject_id, p.gender, p.anchor_age
-        FROM patients p
-        JOIN admissions a ON p.subject_id = a.subject_id
+        FROM {t('patients')} p
+        JOIN {t('admissions')} a ON p.subject_id = a.subject_id
         WHERE a.hadm_id IN ({ph})
         ORDER BY p.subject_id
     """
     cols = ["subject_id", "gender", "anchor_age"]
-    return [dict(zip(cols, r)) for r in conn.execute(sql, params).fetchall()]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
 
 
-def _fetch_admissions(conn: duckdb.DuckDBPyConnection, hadm_ids: list[int]) -> list[dict]:
+def _fetch_admissions(
+    backend: _DuckDBBackend | _BigQueryBackend, hadm_ids: list[int]
+) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
     sql = f"""
         SELECT hadm_id, subject_id, admittime, dischtime,
                admission_type, discharge_location
-        FROM admissions
+        FROM {t('admissions')}
         WHERE hadm_id IN ({ph})
         ORDER BY admittime
     """
@@ -364,16 +503,19 @@ def _fetch_admissions(conn: duckdb.DuckDBPyConnection, hadm_ids: list[int]) -> l
         "hadm_id", "subject_id", "admittime", "dischtime",
         "admission_type", "discharge_location",
     ]
-    return [dict(zip(cols, r)) for r in conn.execute(sql, params).fetchall()]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
 
 
-def _fetch_icu_stays(conn: duckdb.DuckDBPyConnection, hadm_ids: list[int]) -> list[dict]:
+def _fetch_icu_stays(
+    backend: _DuckDBBackend | _BigQueryBackend, hadm_ids: list[int]
+) -> list[dict]:
+    t = backend.table
     ph, params = _in_clause(hadm_ids)
     sql = f"""
         SELECT stay_id, hadm_id, subject_id, intime, outtime, los
-        FROM icustays
+        FROM {t('icustays')}
         WHERE hadm_id IN ({ph})
         ORDER BY intime
     """
     cols = ["stay_id", "hadm_id", "subject_id", "intime", "outtime", "los"]
-    return [dict(zip(cols, r)) for r in conn.execute(sql, params).fetchall()]
+    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]

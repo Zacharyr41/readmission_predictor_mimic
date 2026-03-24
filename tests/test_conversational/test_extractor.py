@@ -1,10 +1,16 @@
 """Tests for the conversational data extractor."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.conversational.extractor import extract
+from src.conversational.extractor import (
+    _BigQueryBackend,
+    _DuckDBBackend,
+    extract,
+    extract_bigquery,
+)
 from src.conversational.models import (
     ClinicalConcept,
     CompetencyQuestion,
@@ -106,3 +112,77 @@ class TestExtract:
         assert "vital" in result.events
         assert len(result.events["biomarker"]) == 3
         assert len(result.events["vital"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# BigQuery backend tests (mocked — no real BQ needed)
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_bq():
+    """Create a mock google.cloud.bigquery module."""
+    mock_bq = MagicMock()
+    mock_bq.ScalarQueryParameter = MagicMock(
+        side_effect=lambda n, t, v: (n, t, v)
+    )
+    mock_bq.QueryJobConfig = MagicMock()
+    return mock_bq
+
+
+class TestBigQueryBackend:
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_table_resolution(self, mock_get_bq):
+        """Verify fully-qualified BigQuery table names."""
+        mock_get_bq.return_value = _make_mock_bq()
+        backend = _BigQueryBackend(project="test-project")
+
+        assert backend.table("patients") == "`physionet-data.mimiciv_3_1_hosp.patients`"
+        assert backend.table("icustays") == "`physionet-data.mimiciv_3_1_icu.icustays`"
+        assert backend.table("labevents") == "`physionet-data.mimiciv_3_1_hosp.labevents`"
+        assert backend.table("chartevents") == "`physionet-data.mimiciv_3_1_icu.chartevents`"
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_param_conversion(self, mock_get_bq):
+        """Verify ? → @pN conversion and typed parameters."""
+        mock_get_bq.return_value = _make_mock_bq()
+        backend = _BigQueryBackend(project="test-project")
+
+        sql = "SELECT * FROM t WHERE age > ? AND name ILIKE ?"
+        converted_sql, bq_params = backend._convert_params(sql, [70, "%creatinine%"])
+
+        assert "@p0" in converted_sql
+        assert "@p1" in converted_sql
+        assert "?" not in converted_sql
+        assert bq_params[0] == ("p0", "INT64", 70)
+        assert bq_params[1] == ("p1", "STRING", "%creatinine%")
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_extract_bigquery_generates_qualified_sql(self, mock_get_bq):
+        """Full extract_bigquery call with mocked client verifies table names in SQL."""
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+
+        mock_client = mock_bq.Client.return_value
+        mock_result = MagicMock()
+        mock_result.result.return_value = []
+        mock_client.query.return_value = mock_result
+
+        cq = CompetencyQuestion(
+            original_question="Show creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker")
+            ],
+            scope="cohort",
+        )
+        result = extract_bigquery(cq, project="test-project")
+
+        # With no admissions returned, we get an empty result
+        assert result.patients == []
+        assert result.events == {}
+
+        # Verify at least one query was sent to BigQuery
+        assert mock_client.query.called
+        first_sql = mock_client.query.call_args_list[0][0][0]
+        assert "physionet-data.mimiciv_3_1_hosp.admissions" in first_sql
