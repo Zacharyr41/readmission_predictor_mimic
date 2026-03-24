@@ -122,7 +122,7 @@ class TestCompetencyQuestion:
     def test_minimal(self):
         q = CompetencyQuestion(original_question="What is the lactate trend?")
         assert q.clinical_concepts == []
-        assert q.return_type == ReturnType.TEXT
+        assert q.return_type == ReturnType.TEXT_AND_TABLE
         assert q.scope == "single_patient"
 
     def test_full_construction(self):

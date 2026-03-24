@@ -39,7 +39,7 @@ class CompetencyQuestion(BaseModel):
     temporal_constraints: list[TemporalConstraint] = []
     patient_filters: list[PatientFilter] = []
     aggregation: str | None = None
-    return_type: ReturnType = ReturnType.TEXT
+    return_type: ReturnType = ReturnType.TEXT_AND_TABLE
     scope: Literal["single_patient", "cohort", "comparison"] = "single_patient"
 
 
