@@ -544,18 +544,40 @@ def _fetch_admissions(
 ) -> list[dict]:
     t = backend.table
     ph, params = _in_clause(hadm_ids)
-    sql = f"""
-        SELECT hadm_id, subject_id, admittime, dischtime,
-               admission_type, discharge_location
-        FROM {t('admissions')}
-        WHERE hadm_id IN ({ph})
-        ORDER BY admittime
-    """
-    cols = [
-        "hadm_id", "subject_id", "admittime", "dischtime",
-        "admission_type", "discharge_location",
-    ]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
+
+    # Try to join readmission_labels for readmitted_30d/60d.
+    # Fall back to defaults (0) if the table doesn't exist.
+    try:
+        sql = f"""
+            SELECT a.hadm_id, a.subject_id, a.admittime, a.dischtime,
+                   a.admission_type, a.discharge_location,
+                   COALESCE(rl.readmitted_30d, 0) AS readmitted_30d,
+                   COALESCE(rl.readmitted_60d, 0) AS readmitted_60d
+            FROM {t('admissions')} a
+            LEFT JOIN {t('readmission_labels')} rl ON a.hadm_id = rl.hadm_id
+            WHERE a.hadm_id IN ({ph})
+            ORDER BY a.admittime
+        """
+        cols = [
+            "hadm_id", "subject_id", "admittime", "dischtime",
+            "admission_type", "discharge_location",
+            "readmitted_30d", "readmitted_60d",
+        ]
+        return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
+    except Exception:
+        # readmission_labels table may not exist
+        sql = f"""
+            SELECT hadm_id, subject_id, admittime, dischtime,
+                   admission_type, discharge_location
+            FROM {t('admissions')}
+            WHERE hadm_id IN ({ph})
+            ORDER BY admittime
+        """
+        cols = [
+            "hadm_id", "subject_id", "admittime", "dischtime",
+            "admission_type", "discharge_location",
+        ]
+        return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
 
 
 def _fetch_icu_stays(

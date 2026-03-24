@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from src.conversational.extractor import (
     _BigQueryBackend,
     _DuckDBBackend,
+    _fetch_admissions,
     _get_filtered_hadm_ids,
     extract,
     extract_bigquery,
@@ -294,6 +295,47 @@ class TestReadmissionFilters:
         backend.close()
         # Unknown filter skipped → all 6 admissions returned
         assert len(hadm_ids) == 6
+
+
+# ---------------------------------------------------------------------------
+# Admission readmission labels in fetch
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAdmissionsIncludesReadmission:
+    def test_admissions_contain_readmission_labels(
+        self, synthetic_db_path_with_readmission,
+    ):
+        """_fetch_admissions must include readmitted_30d/60d from readmission_labels.
+
+        Regression: previously these were always defaulted to False by
+        _augment_admission, making comparison SPARQL queries return empty.
+        """
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        admissions = _fetch_admissions(backend, [101, 102, 103])
+        backend.close()
+
+        by_hadm = {a["hadm_id"]: a for a in admissions}
+        # hadm 101: readmitted_30d=1, readmitted_60d=1
+        assert by_hadm[101]["readmitted_30d"] == 1
+        assert by_hadm[101]["readmitted_60d"] == 1
+        # hadm 102: not readmitted
+        assert by_hadm[102]["readmitted_30d"] == 0
+        assert by_hadm[102]["readmitted_60d"] == 0
+        # hadm 103: readmitted within 60d only
+        assert by_hadm[103]["readmitted_30d"] == 0
+        assert by_hadm[103]["readmitted_60d"] == 1
+
+    def test_admissions_without_readmission_table_default_to_zero(
+        self, synthetic_db_path,
+    ):
+        """When readmission_labels table doesn't exist, defaults are 0."""
+        backend = _DuckDBBackend(synthetic_db_path)
+        admissions = _fetch_admissions(backend, [101])
+        backend.close()
+
+        assert admissions[0].get("readmitted_30d", 0) == 0
+        assert admissions[0].get("readmitted_60d", 0) == 0
 
 
 # ---------------------------------------------------------------------------
