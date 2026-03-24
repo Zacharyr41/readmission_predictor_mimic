@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.conversational.models import AnswerResult
+from src.conversational.models import AnswerResult, ExtractionConfig
 from src.conversational.orchestrator import ConversationalPipeline
 
 # ---------------------------------------------------------------------------
@@ -63,6 +63,29 @@ with st.sidebar:
         type="password",
     )
 
+    with st.expander("Advanced Settings"):
+        max_cohort = st.number_input(
+            "Max cohort size",
+            min_value=10,
+            max_value=5000,
+            value=500,
+            step=100,
+            help="Maximum admissions to include. Larger = slower but more data.",
+        )
+        cohort_strategy = st.selectbox(
+            "Cohort strategy",
+            options=["recent", "random"],
+            help="'recent' selects most recent admissions; 'random' samples randomly.",
+        )
+        max_workers = st.number_input(
+            "Parallel workers",
+            min_value=1,
+            max_value=16,
+            value=1,
+            step=1,
+            help="Graph build parallelism. Increase for large cohorts.",
+        )
+
     if st.button("Connect"):
         if not api_key:
             st.error("Please provide an Anthropic API key.")
@@ -82,6 +105,11 @@ with st.sidebar:
                     api_key=api_key,
                     data_source=ds,
                     bigquery_project=bq_project,
+                    extraction_config=ExtractionConfig(
+                        max_cohort_size=max_cohort,
+                        cohort_strategy=cohort_strategy,
+                    ),
+                    max_workers=max_workers,
                 )
                 st.success("Connected!")
             except Exception as exc:
