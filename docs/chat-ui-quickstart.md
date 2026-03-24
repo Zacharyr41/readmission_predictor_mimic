@@ -33,7 +33,8 @@ gcloud auth application-default login
 # 2. Set your project (should match BIGQUERY_PROJECT in .env)
 gcloud config set project <your-gcp-project-with-mimic-iv-access>
 
-# 3. Verify access to MIMIC-IV dataset
+# 3. Verify access to MIMIC-IV dataset (if it hangs, press Enter a few times —
+#    bq may be waiting for you to accept a prompt that isn't visible)
 bq ls physionet-data:mimiciv_3_1_hosp
 
 # 4. Launch
