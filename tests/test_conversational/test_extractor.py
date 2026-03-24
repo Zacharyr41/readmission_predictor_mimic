@@ -133,6 +133,17 @@ def _make_mock_bq():
     return mock_bq
 
 
+class TestBackendIlike:
+    def test_duckdb_uses_ilike(self):
+        assert "ILIKE" in _DuckDBBackend.ilike("col")
+
+    def test_bigquery_uses_lower_like(self):
+        result = _BigQueryBackend.ilike("col")
+        assert "ILIKE" not in result
+        assert "LOWER" in result
+        assert "LIKE" in result
+
+
 class TestBigQueryBackend:
     @patch("src.conversational.extractor._get_bigquery_module")
     def test_table_resolution(self, mock_get_bq):
@@ -288,6 +299,25 @@ class TestReadmissionFilters:
 # ---------------------------------------------------------------------------
 # Cohort capping
 # ---------------------------------------------------------------------------
+
+
+class TestCohortCappingSqlCompat:
+    """Ensure cohort capping SQL is valid for both DuckDB and BigQuery."""
+
+    def test_order_by_admittime_included_in_select(
+        self, synthetic_db_path_with_readmission,
+    ):
+        """ORDER BY admittime must reference a column in the SELECT list.
+
+        BigQuery rejects ORDER BY on a column not in SELECT DISTINCT.
+        Regression test for: google.api_core.exceptions.BadRequest 400.
+        """
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        cfg = ExtractionConfig(max_cohort_size=3, cohort_strategy="recent")
+        # Should not raise — admittime must be in SELECT or use a subquery
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
+        backend.close()
+        assert len(hadm_ids) == 3
 
 
 class TestCohortCapping:

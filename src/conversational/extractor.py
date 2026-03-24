@@ -71,6 +71,11 @@ class _DuckDBBackend:
     def execute(self, sql: str, params: list) -> list[tuple]:
         return self._conn.execute(sql, params).fetchall()
 
+    @staticmethod
+    def ilike(column: str) -> str:
+        """Case-insensitive LIKE expression (DuckDB supports ILIKE)."""
+        return f"{column} ILIKE ?"
+
     def close(self) -> None:
         self._conn.close()
 
@@ -91,6 +96,11 @@ class _BigQueryBackend:
         config = self._bq.QueryJobConfig(query_parameters=bq_params)
         rows = self._client.query(bq_sql, job_config=config).result()
         return [tuple(row.values()) for row in rows]
+
+    @staticmethod
+    def ilike(column: str) -> str:
+        """Case-insensitive LIKE for BigQuery (no ILIKE support)."""
+        return f"LOWER({column}) LIKE LOWER(?)"
 
     def _convert_params(
         self, sql: str, params: list
@@ -219,7 +229,9 @@ def _get_filtered_hadm_ids(
                 f"JOIN {t('d_icd_diagnoses')} dd ON di.icd_code = dd.icd_code "
                 f"AND di.icd_version = dd.icd_version"
             )
-            conditions.append("(dd.long_title ILIKE ? OR di.icd_code LIKE ?)")
+            conditions.append(
+                f"({backend.ilike('dd.long_title')} OR di.icd_code LIKE ?)"
+            )
             params.extend([f"%{f.value}%", f"{f.value}%"])
 
         elif f.field == "admission_type":
@@ -250,10 +262,16 @@ def _get_filtered_hadm_ids(
     join_sql = " ".join(joins)
     where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    order = "a.admittime DESC" if cfg.cohort_strategy == "recent" else "RANDOM()"
+    order = "admittime DESC" if cfg.cohort_strategy == "recent" else "RANDOM()"
+    # Use a subquery so ORDER BY references a column visible after SELECT DISTINCT
+    # (BigQuery rejects ORDER BY on columns not in the DISTINCT select list).
+    inner = (
+        f"SELECT DISTINCT a.hadm_id, a.admittime"
+        f" FROM {t('admissions')} a {join_sql}{where_clause}"
+    )
     sql = (
-        f"SELECT DISTINCT a.hadm_id FROM {t('admissions')} a {join_sql}"
-        f"{where_clause} ORDER BY {order} LIMIT {cfg.max_cohort_size}"
+        f"SELECT hadm_id FROM ({inner}) sub"
+        f" ORDER BY {order} LIMIT {cfg.max_cohort_size}"
     )
     hadm_ids = [r[0] for r in backend.execute(sql, params)]
     if len(hadm_ids) == cfg.max_cohort_size:
@@ -378,7 +396,7 @@ def _extract_biomarkers(
                l.valuenum, l.valueuom, l.ref_range_lower, l.ref_range_upper
         FROM {t('labevents')} l
         JOIN {t('d_labitems')} d ON l.itemid = d.itemid
-        WHERE d.label ILIKE ?
+        WHERE {backend.ilike('d.label')}
           AND l.valuenum IS NOT NULL
           AND l.hadm_id IN ({ph})
           {tc_sql}
@@ -406,7 +424,7 @@ def _extract_vitals(
                c.charttime, d.label, d.category, c.valuenum
         FROM {t('chartevents')} c
         JOIN {t('d_items')} d ON c.itemid = d.itemid
-        WHERE d.label ILIKE ?
+        WHERE {backend.ilike('d.label')}
           AND c.valuenum IS NOT NULL
           AND c.hadm_id IN ({ph})
           {tc_sql}
@@ -432,7 +450,7 @@ def _extract_drugs(
         SELECT pr.hadm_id, pr.subject_id, pr.drug, pr.starttime,
                pr.stoptime, pr.dose_val_rx, pr.dose_unit_rx, pr.route
         FROM {t('prescriptions')} pr
-        WHERE pr.drug ILIKE ?
+        WHERE {backend.ilike('pr.drug')}
           AND pr.hadm_id IN ({ph})
           {tc_sql}
         ORDER BY pr.starttime
@@ -458,7 +476,7 @@ def _extract_diagnoses(
         FROM {t('diagnoses_icd')} di
         LEFT JOIN {t('d_icd_diagnoses')} dd
           ON di.icd_code = dd.icd_code AND di.icd_version = dd.icd_version
-        WHERE (dd.long_title ILIKE ? OR di.icd_code LIKE ?)
+        WHERE ({backend.ilike('dd.long_title')} OR di.icd_code LIKE ?)
           AND di.hadm_id IN ({ph})
         ORDER BY di.seq_num
     """
@@ -485,7 +503,7 @@ def _extract_microbiology(
         SELECT m.microevent_id, m.subject_id, m.hadm_id, m.charttime,
                m.spec_type_desc, m.org_name
         FROM {t('microbiologyevents')} m
-        WHERE (m.spec_type_desc ILIKE ? OR m.org_name ILIKE ?)
+        WHERE ({backend.ilike('m.spec_type_desc')} OR {backend.ilike('m.org_name')})
           AND m.hadm_id IN ({ph})
           {tc_sql}
         ORDER BY m.charttime
