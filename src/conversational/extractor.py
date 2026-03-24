@@ -7,6 +7,7 @@ Supports two backends:
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,6 +24,8 @@ from src.conversational.models import (
 
 if TYPE_CHECKING:
     from google.cloud import bigquery
+
+logger = logging.getLogger(__name__)
 
 _SAFE_COMPARISON_OPS = frozenset({">", "<", "=", ">=", "<="})
 
@@ -220,13 +223,16 @@ def _get_filtered_hadm_ids(
             conditions.append("a.subject_id = ?")
             params.append(int(f.value))
 
+        else:
+            logger.warning("Ignoring unsupported patient filter field: %s", f.field)
+
     if needs_patients:
         joins.insert(0, f"JOIN {t('patients')} p ON a.subject_id = p.subject_id")
 
     join_sql = " ".join(joins)
-    where_sql = " AND ".join(conditions)
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    sql = f"SELECT DISTINCT a.hadm_id FROM {t('admissions')} a {join_sql} WHERE {where_sql}"
+    sql = f"SELECT DISTINCT a.hadm_id FROM {t('admissions')} a {join_sql}{where_clause}"
     return [r[0] for r in backend.execute(sql, params)]
 
 

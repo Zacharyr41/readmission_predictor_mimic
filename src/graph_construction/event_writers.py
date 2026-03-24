@@ -120,15 +120,17 @@ def write_icu_stay(graph: Graph, stay_data: dict, admission_uri: URIRef) -> URIR
     end_uri = MIMIC_NS[f"ICUStayEnd_{stay_id}"]
 
     _write_instant(graph, begin_uri, stay_data["intime"])
-    _write_instant(graph, end_uri, stay_data["outtime"])
-
     graph.add((icu_stay_uri, TIME_NS.hasBeginning, begin_uri))
-    graph.add((icu_stay_uri, TIME_NS.hasEnd, end_uri))
+
+    if stay_data.get("outtime") is not None:
+        _write_instant(graph, end_uri, stay_data["outtime"])
+        graph.add((icu_stay_uri, TIME_NS.hasEnd, end_uri))
 
     # Duration
-    duration_uri = MIMIC_NS[f"ICUStayDuration_{stay_id}"]
-    _write_duration(graph, duration_uri, stay_data["los"])
-    graph.add((icu_stay_uri, TIME_NS.hasDuration, duration_uri))
+    if stay_data.get("los") is not None:
+        duration_uri = MIMIC_NS[f"ICUStayDuration_{stay_id}"]
+        _write_duration(graph, duration_uri, stay_data["los"])
+        graph.add((icu_stay_uri, TIME_NS.hasDuration, duration_uri))
 
     # Link to admission
     graph.add((admission_uri, MIMIC_NS.containsICUStay, icu_stay_uri))
@@ -156,7 +158,10 @@ def write_icu_days(
     """
     stay_id = stay_data["stay_id"]
     intime = stay_data["intime"]
-    outtime = stay_data["outtime"]
+    outtime = stay_data.get("outtime")
+
+    if outtime is None:
+        return []
 
     icu_day_metadata = []
     day_num = 1
