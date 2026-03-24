@@ -33,8 +33,8 @@ gcloud auth application-default login
 # 2. Set your project (should match BIGQUERY_PROJECT in .env)
 gcloud config set project <your-gcp-project-with-mimic-iv-access>
 
-# 3. Verify access to MIMIC-IV tables
-bq query --use_legacy_sql=false 'SELECT 1 FROM `physionet-data.mimiciv_3_1_hosp.patients` LIMIT 1'
+# 3. Verify access to MIMIC-IV dataset
+bq ls physionet-data:mimiciv_3_1_hosp
 
 # 4. Launch
 bash scripts/run_chat.sh
