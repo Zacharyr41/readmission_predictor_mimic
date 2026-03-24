@@ -206,7 +206,7 @@ class TestBuildSparql:
             ],
         )
         sparql = build_sparql("value_lookup", cq, concept_index=0)
-        assert 'FILTER(STR(?label) = "Creatinine")' in sparql
+        assert 'LCASE(STR(?label)) = LCASE("Creatinine")' in sparql
         assert sparql.startswith("PREFIX")
 
     def test_sanitizes_quotes(self):

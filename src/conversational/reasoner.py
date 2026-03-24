@@ -97,14 +97,14 @@ WHERE {{
          mimic:hasBiomarkerType ?label ;
          mimic:hasValue ?value .
        OPTIONAL {{ ?e mimic:hasUnit ?unit . }}
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
          mimic:hasClinicalSignName ?label ;
          mimic:hasValue ?value .
        BIND("" AS ?unit)
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 """,
@@ -116,7 +116,7 @@ WHERE {{
          mimic:hasValue ?value ;
          time:inXSDDateTimeStamp ?timestamp .
        OPTIONAL {{ ?e mimic:hasUnit ?unit . }}
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
@@ -124,7 +124,7 @@ WHERE {{
          mimic:hasValue ?value ;
          time:inXSDDateTimeStamp ?timestamp .
        BIND("" AS ?unit)
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 ORDER BY ?timestamp
@@ -135,13 +135,13 @@ WHERE {{
     {{ ?e rdf:type mimic:BioMarkerEvent ;
          mimic:hasBiomarkerType ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
          mimic:hasClinicalSignName ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 """,
@@ -151,13 +151,13 @@ WHERE {{
     {{ ?e rdf:type mimic:BioMarkerEvent ;
          mimic:hasBiomarkerType ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
          mimic:hasClinicalSignName ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 """,
@@ -167,13 +167,13 @@ WHERE {{
     {{ ?e rdf:type mimic:BioMarkerEvent ;
          mimic:hasBiomarkerType ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
          mimic:hasClinicalSignName ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 """,
@@ -183,13 +183,13 @@ WHERE {{
     {{ ?e rdf:type mimic:BioMarkerEvent ;
          mimic:hasBiomarkerType ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
          mimic:hasClinicalSignName ?label ;
          mimic:hasValue ?value .
-       FILTER(STR(?label) = "{concept_name}")
+       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 """,
@@ -355,12 +355,12 @@ WHERE {{
            mimic:hasValue ?value .
     {{
         ?event mimic:hasBiomarkerType ?label .
-        FILTER(STR(?label) = "{concept_name}")
+        FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{
         ?event mimic:hasClinicalSignName ?label .
-        FILTER(STR(?label) = "{concept_name}")
+        FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 GROUP BY ?readmitted30
@@ -383,12 +383,12 @@ WHERE {{
            mimic:hasValue ?value .
     {{
         ?event mimic:hasBiomarkerType ?label .
-        FILTER(STR(?label) = "{concept_name}")
+        FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
     UNION
     {{
         ?event mimic:hasClinicalSignName ?label .
-        FILTER(STR(?label) = "{concept_name}")
+        FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
     }}
 }}
 GROUP BY ?group_value

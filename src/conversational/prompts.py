@@ -44,6 +44,8 @@ Map clinical entities to one of these concept_type values:
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
                      wound culture, organism names (MRSA, E. coli, Klebsiella)
 - "outcome"       → Patient outcomes: mortality, death, hospital expire, survival
+                     NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
+                     and use aggregation (e.g. aggregation="mean") for LOS queries
 
 # Output Schema
 
