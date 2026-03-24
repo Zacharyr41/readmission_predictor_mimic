@@ -39,6 +39,9 @@ Map clinical entities to one of these concept_type values:
                      antibiotics (vancomycin, piperacillin, ceftriaxone, meropenem),
                      sedatives (propofol, midazolam, dexmedetomidine),
                      anticoagulants (heparin, warfarin, enoxaparin)
+                     IMPORTANT: Use specific drug names, not categories. If the user asks
+                     about "antibiotics", create MULTIPLE clinical_concepts — one per drug
+                     (e.g. vancomycin, ceftriaxone, meropenem, piperacillin).
 - "diagnosis"     → ICD-10 codes or description text: sepsis, stroke, pneumonia,
                      acute kidney injury, heart failure, cerebral infarction
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
