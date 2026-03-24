@@ -34,7 +34,7 @@ gcloud auth application-default login
 gcloud config set project <your-gcp-project-with-mimic-iv-access>
 
 # 3. Verify access to MIMIC-IV tables
-bq query --use_legacy_sql=false 'SELECT COUNT(*) FROM `physionet-data.mimiciv_3_1_hosp.patients`'
+bq query --use_legacy_sql=false 'SELECT 1 FROM `physionet-data.mimiciv_3_1_hosp.patients` LIMIT 1'
 
 # 4. Launch
 bash scripts/run_chat.sh
