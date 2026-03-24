@@ -35,10 +35,25 @@ if "pipeline" not in st.session_state:
 with st.sidebar:
     st.header("Connection")
 
-    db_path = st.text_input(
-        "DuckDB path",
-        value="data/processed/mimiciv.duckdb",
+    data_source = st.radio(
+        "Data source",
+        options=["Local DuckDB", "BigQuery"],
+        horizontal=True,
     )
+
+    if data_source == "Local DuckDB":
+        db_path = st.text_input(
+            "DuckDB path",
+            value="data/processed/mimiciv.duckdb",
+        )
+        bq_project = None
+    else:
+        db_path = "data/processed/mimiciv.duckdb"  # unused but required by init
+        bq_project = st.text_input(
+            "GCP project ID",
+            value=os.environ.get("BIGQUERY_PROJECT", ""),
+        )
+
     api_key = st.text_input(
         "Anthropic API key",
         value=os.environ.get("ANTHROPIC_API_KEY", ""),
@@ -46,19 +61,24 @@ with st.sidebar:
     )
 
     if st.button("Connect"):
-        if not Path(db_path).exists():
-            st.error(f"Database not found: {db_path}")
-        elif not api_key:
+        if not api_key:
             st.error("Please provide an Anthropic API key.")
+        elif data_source == "Local DuckDB" and not Path(db_path).exists():
+            st.error(f"Database not found: {db_path}")
+        elif data_source == "BigQuery" and not bq_project:
+            st.error("Please provide a GCP project ID.")
         else:
             try:
                 ontology_dir = (
                     Path(__file__).parent.parent.parent / "ontology" / "definition"
                 )
+                ds = "bigquery" if data_source == "BigQuery" else "local"
                 st.session_state.pipeline = ConversationalPipeline(
                     db_path=Path(db_path),
                     ontology_dir=ontology_dir,
                     api_key=api_key,
+                    data_source=ds,
+                    bigquery_project=bq_project,
                 )
                 st.success("Connected!")
             except Exception as exc:

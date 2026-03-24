@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from src.conversational.answerer import generate_answer
 from src.conversational.decomposer import decompose
-from src.conversational.extractor import extract
+from src.conversational.extractor import extract, extract_bigquery
 from src.conversational.graph_builder import build_query_graph
 from src.conversational.models import AnswerResult, CompetencyQuestion
 from src.conversational.reasoner import reason
@@ -27,11 +27,21 @@ logger = logging.getLogger(__name__)
 class ConversationalPipeline:
     """Chains decomposer -> extractor -> graph_builder -> reasoner -> answerer."""
 
-    def __init__(self, db_path: Path, ontology_dir: Path, api_key: str) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        ontology_dir: Path,
+        api_key: str,
+        *,
+        data_source: str = "local",
+        bigquery_project: str | None = None,
+    ) -> None:
         import anthropic as _anthropic
 
         self._db_path = db_path
         self._ontology_dir = ontology_dir
+        self._data_source = data_source
+        self._bigquery_project = bigquery_project
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
         self.max_history: int = 10
@@ -44,7 +54,10 @@ class ConversationalPipeline:
                 conversation_history=list(self.conversation_history) or None,
             )
 
-            extraction = extract(self._db_path, cq)
+            if self._data_source == "bigquery":
+                extraction = extract_bigquery(cq, project=self._bigquery_project)
+            else:
+                extraction = extract(self._db_path, cq)
 
             graph, graph_stats = build_query_graph(self._ontology_dir, extraction)
 
