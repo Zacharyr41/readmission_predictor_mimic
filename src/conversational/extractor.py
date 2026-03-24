@@ -76,6 +76,10 @@ class _DuckDBBackend:
         """Case-insensitive LIKE expression (DuckDB supports ILIKE)."""
         return f"{column} ILIKE ?"
 
+    @staticmethod
+    def random_fn() -> str:
+        return "RANDOM()"
+
     def close(self) -> None:
         self._conn.close()
 
@@ -101,6 +105,10 @@ class _BigQueryBackend:
     def ilike(column: str) -> str:
         """Case-insensitive LIKE for BigQuery (no ILIKE support)."""
         return f"LOWER({column}) LIKE LOWER(?)"
+
+    @staticmethod
+    def random_fn() -> str:
+        return "RAND()"
 
     def _convert_params(
         self, sql: str, params: list
@@ -262,7 +270,7 @@ def _get_filtered_hadm_ids(
     join_sql = " ".join(joins)
     where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    order = "admittime DESC" if cfg.cohort_strategy == "recent" else "RANDOM()"
+    order = "admittime DESC" if cfg.cohort_strategy == "recent" else backend.random_fn()
     # Use a subquery so ORDER BY references a column visible after SELECT DISTINCT
     # (BigQuery rejects ORDER BY on columns not in the DISTINCT select list).
     inner = (
