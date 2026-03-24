@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # UMLS API
     umls_api_key: str | None = Field(default=None)
 
+    # Anthropic API (conversational analytics)
+    anthropic_api_key: str | None = Field(default=None)
+
     # Cohort configuration
     cohort_icd_codes: list[str] = Field(default=["I63", "I61", "I60"])
     readmission_window_days: int = Field(default=30)
