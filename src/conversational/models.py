@@ -12,6 +12,7 @@ class ClinicalConcept(BaseModel):
         "biomarker", "vital", "drug", "diagnosis", "microbiology", "outcome"
     ]
     attributes: list[str] = []
+    resolved_from_category: bool = False
 
 
 class TemporalConstraint(BaseModel):

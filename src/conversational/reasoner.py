@@ -230,6 +230,25 @@ WHERE {{
 }}
 ORDER BY ?startTime
 """,
+    "drug_lookup_all": """
+SELECT ?drugName ?startTime ?endTime ?dose ?doseUnit ?route
+WHERE {{
+    ?e rdf:type mimic:PrescriptionEvent ;
+       mimic:hasDrugName ?drugName .
+    OPTIONAL {{
+        ?e time:hasBeginning ?begin .
+        ?begin time:inXSDDateTimeStamp ?startTime .
+    }}
+    OPTIONAL {{
+        ?e time:hasEnd ?end .
+        ?end time:inXSDDateTimeStamp ?endTime .
+    }}
+    OPTIONAL {{ ?e mimic:hasDoseValue ?dose . }}
+    OPTIONAL {{ ?e mimic:hasDoseUnit ?doseUnit . }}
+    OPTIONAL {{ ?e mimic:hasRoute ?route . }}
+}}
+ORDER BY ?startTime
+""",
     "event_count_by_type": """
 SELECT ?type (COUNT(?event) AS ?count)
 WHERE {{
@@ -517,7 +536,26 @@ def build_sparql(
         format_kwargs["group_join"] = group_join
         format_kwargs["admission_group_clause"] = admission_clause
 
-    return _PREFIXES + template.format(**format_kwargs)
+    result = _PREFIXES + template.format(**format_kwargs)
+
+    # When concept was resolved from a category (e.g. "antibiotics" → multiple
+    # specific drugs), the extraction already filtered the data. Remove SPARQL
+    # FILTER clauses on concept_name since they'd match the category name, not
+    # the specific names in the graph.
+    if (
+        cq.clinical_concepts
+        and concept_index < len(cq.clinical_concepts)
+        and cq.clinical_concepts[concept_index].resolved_from_category
+    ):
+        import re
+        result = re.sub(
+            r'\s*FILTER\((?:LCASE\(STR\(\?(?:label|drugName|eventLabel)\)\).*?|'
+            r'CONTAINS\(LCASE\(STR\(\?(?:drugName|label|eventLabel)\)\).*?)\)\s*',
+            "\n",
+            result,
+        )
+
+    return result
 
 
 # ---------------------------------------------------------------------------

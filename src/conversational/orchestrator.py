@@ -62,6 +62,12 @@ class ConversationalPipeline:
                 conversation_history=list(self.conversation_history) or None,
             )
 
+            # Mark concepts that were resolved from categories
+            for concept in cq.clinical_concepts:
+                resolved = self._resolver.resolve(concept)
+                if len(resolved) > 1 or (len(resolved) == 1 and resolved[0] != concept.name):
+                    concept.resolved_from_category = True
+
             if self._data_source == "bigquery":
                 extraction = extract_bigquery(
                     cq, project=self._bigquery_project,
