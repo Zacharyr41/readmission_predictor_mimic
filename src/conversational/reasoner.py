@@ -546,13 +546,15 @@ def build_sparql(
         cq.clinical_concepts
         and concept_index < len(cq.clinical_concepts)
         and cq.clinical_concepts[concept_index].resolved_from_category
+        and concept_name
     ):
-        import re
-        result = re.sub(
-            r'\s*FILTER\((?:LCASE\(STR\(\?(?:label|drugName|eventLabel)\)\).*?|'
-            r'CONTAINS\(LCASE\(STR\(\?(?:drugName|label|eventLabel)\)\).*?)\)\s*',
-            "\n",
-            result,
+        # Remove lines containing FILTER on the concept name — the extraction
+        # already filtered the data so the SPARQL filter is redundant and
+        # would fail (it'd match the category name, not specific names).
+        lines = result.split("\n")
+        result = "\n".join(
+            line for line in lines
+            if not ("FILTER" in line and concept_name in line)
         )
 
     return result
