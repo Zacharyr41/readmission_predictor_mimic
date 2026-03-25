@@ -26,6 +26,8 @@ from src.conversational.models import (
 if TYPE_CHECKING:
     from google.cloud import bigquery
 
+    from src.conversational.concept_resolver import ConceptResolver
+
 logger = logging.getLogger(__name__)
 
 _SAFE_COMPARISON_OPS = frozenset({">", "<", "=", ">=", "<="})
@@ -185,6 +187,7 @@ def extract(
     db_path: Path,
     cq: CompetencyQuestion,
     config: ExtractionConfig | None = None,
+    resolver: ConceptResolver | None = None,
 ) -> ExtractionResult:
     """Extract MIMIC-IV data from a local DuckDB database.
 
@@ -193,7 +196,7 @@ def extract(
     """
     backend = _DuckDBBackend(db_path)
     try:
-        return _extract(backend, cq, config=config)
+        return _extract(backend, cq, config=config, resolver=resolver)
     finally:
         backend.close()
 
@@ -202,6 +205,7 @@ def extract_bigquery(
     cq: CompetencyQuestion,
     project: str | None = None,
     config: ExtractionConfig | None = None,
+    resolver: ConceptResolver | None = None,
 ) -> ExtractionResult:
     """Extract MIMIC-IV data directly from BigQuery.
 
@@ -210,7 +214,7 @@ def extract_bigquery(
     """
     backend = _BigQueryBackend(project)
     try:
-        return _extract(backend, cq, config=config)
+        return _extract(backend, cq, config=config, resolver=resolver)
     finally:
         backend.close()
 
@@ -224,6 +228,7 @@ def _extract(
     backend: _DuckDBBackend | _BigQueryBackend,
     cq: CompetencyQuestion,
     config: ExtractionConfig | None = None,
+    resolver: ConceptResolver | None = None,
 ) -> ExtractionResult:
     hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters, config=config)
     if not hadm_ids:
@@ -231,9 +236,23 @@ def _extract(
 
     events: dict[str, list[dict]] = {}
     for concept in cq.clinical_concepts:
-        rows = _extract_concept(backend, concept, hadm_ids, cq.temporal_constraints)
-        if rows:
-            events.setdefault(concept.concept_type, []).extend(rows)
+        # Resolve category-level concepts to specific names
+        if resolver:
+            resolved_names = resolver.resolve(concept)
+        else:
+            resolved_names = [concept.name]
+
+        for name in resolved_names:
+            resolved_concept = ClinicalConcept(
+                name=name,
+                concept_type=concept.concept_type,
+                attributes=concept.attributes,
+            ) if name != concept.name else concept
+            rows = _extract_concept(
+                backend, resolved_concept, hadm_ids, cq.temporal_constraints,
+            )
+            if rows:
+                events.setdefault(concept.concept_type, []).extend(rows)
 
     return ExtractionResult(
         patients=_fetch_patients(backend, hadm_ids),

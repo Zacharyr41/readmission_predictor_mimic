@@ -1,0 +1,101 @@
+{
+  "_metadata": {
+    "description": "Maps clinical category names to SNOMED root codes and known MIMIC member names",
+    "note": "members list is a bootstrap for common categories; use SNOMED hierarchy for full resolution"
+  },
+  "antibiotics": {
+    "snomed_code": "372532007",
+    "members": ["vancomycin", "ceftriaxone", "meropenem", "piperacillin", "ampicillin",
+                 "amoxicillin", "ciprofloxacin", "levofloxacin", "metronidazole",
+                 "cefepime", "cefazolin", "azithromycin", "doxycycline",
+                 "trimethoprim", "gentamicin", "tobramycin", "linezolid",
+                 "clindamycin", "erythromycin", "nafcillin", "oxacillin",
+                 "ceftazidime", "imipenem", "ertapenem", "daptomycin"]
+  },
+  "vasopressors": {
+    "snomed_code": "372881000",
+    "members": ["norepinephrine", "vasopressin", "phenylephrine", "epinephrine",
+                 "dopamine", "dobutamine", "milrinone"]
+  },
+  "sedatives": {
+    "snomed_code": "372614000",
+    "members": ["propofol", "midazolam", "dexmedetomidine", "lorazepam",
+                 "diazepam", "ketamine", "fentanyl"]
+  },
+  "anticoagulants": {
+    "snomed_code": "372862008",
+    "members": ["heparin", "warfarin", "enoxaparin", "rivaroxaban",
+                 "apixaban", "fondaparinux", "argatroban", "bivalirudin"]
+  },
+  "opioids": {
+    "snomed_code": "373265006",
+    "members": ["morphine", "fentanyl", "hydromorphone", "oxycodone",
+                 "methadone", "remifentanil", "codeine", "tramadol"]
+  },
+  "antihypertensives": {
+    "snomed_code": "372586001",
+    "members": ["amlodipine", "lisinopril", "metoprolol", "atenolol",
+                 "losartan", "valsartan", "hydralazine", "labetalol",
+                 "nicardipine", "nitroprusside", "esmolol", "diltiazem"]
+  },
+  "diuretics": {
+    "snomed_code": "372695000",
+    "members": ["furosemide", "bumetanide", "spironolactone",
+                 "hydrochlorothiazide", "acetazolamide", "mannitol",
+                 "chlorthalidone", "torsemide", "metolazone"]
+  },
+  "insulin": {
+    "snomed_code": "67866001",
+    "members": ["insulin", "insulin glargine", "insulin lispro",
+                 "insulin aspart", "insulin regular"]
+  },
+  "electrolytes": {
+    "snomed_code": "86355000",
+    "members": ["sodium", "potassium", "chloride", "bicarbonate",
+                 "calcium", "magnesium", "phosphate"]
+  },
+  "liver function tests": {
+    "snomed_code": "250637002",
+    "members": ["alanine aminotransferase", "aspartate aminotransferase",
+                 "alkaline phosphatase", "bilirubin", "albumin",
+                 "total protein", "gamma glutamyl transferase",
+                 "lactate dehydrogenase"]
+  },
+  "renal function tests": {
+    "snomed_code": "250745003",
+    "members": ["creatinine", "blood urea nitrogen", "glomerular filtration rate",
+                 "urea nitrogen"]
+  },
+  "complete blood count": {
+    "snomed_code": "26604007",
+    "members": ["hemoglobin", "hematocrit", "white blood cell",
+                 "platelet count", "red blood cell", "mean corpuscular volume",
+                 "mean corpuscular hemoglobin"]
+  },
+  "coagulation tests": {
+    "snomed_code": "396550006",
+    "members": ["inr", "prothrombin time", "partial thromboplastin time",
+                 "fibrinogen", "d-dimer", "thrombin time"]
+  },
+  "cardiac markers": {
+    "snomed_code": "250644004",
+    "members": ["troponin", "troponin t", "troponin i", "ck-mb",
+                 "brain natriuretic peptide", "nt-probnp"]
+  },
+  "blood gases": {
+    "snomed_code": "167029005",
+    "members": ["ph", "pco2", "po2", "base excess", "calculated total co2",
+                 "oxygen saturation"]
+  },
+  "gram-negative bacteria": {
+    "snomed_code": "81325006",
+    "members": ["escherichia coli", "klebsiella", "pseudomonas",
+                 "acinetobacter", "enterobacter", "serratia",
+                 "proteus", "citrobacter", "stenotrophomonas"]
+  },
+  "gram-positive bacteria": {
+    "snomed_code": "59206002",
+    "members": ["staphylococcus aureus", "staphylococcus epidermidis",
+                 "enterococcus", "streptococcus", "clostridium"]
+  }
+}

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.conversational.answerer import generate_answer
+from src.conversational.concept_resolver import ConceptResolver
 from src.conversational.decomposer import decompose
 from src.conversational.extractor import extract, extract_bigquery
 from src.conversational.graph_builder import build_query_graph
@@ -46,6 +47,9 @@ class ConversationalPipeline:
         self._bigquery_project = bigquery_project
         self._extraction_config = extraction_config
         self._max_workers = max_workers
+        self._resolver = ConceptResolver(
+            mappings_dir=Path(__file__).parent.parent.parent / "data" / "mappings",
+        )
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
         self.max_history: int = 10
@@ -62,10 +66,12 @@ class ConversationalPipeline:
                 extraction = extract_bigquery(
                     cq, project=self._bigquery_project,
                     config=self._extraction_config,
+                    resolver=self._resolver,
                 )
             else:
                 extraction = extract(
                     self._db_path, cq, config=self._extraction_config,
+                    resolver=self._resolver,
                 )
 
             graph, graph_stats = build_query_graph(

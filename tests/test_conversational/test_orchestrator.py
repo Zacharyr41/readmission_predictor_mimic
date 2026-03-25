@@ -99,7 +99,10 @@ class TestAsk:
             pipeline._client, "What is the creatinine?",
             conversation_history=None,
         )
-        mock_extract.assert_called_once_with(_DB_PATH, cq, config=None)
+        mock_extract.assert_called_once()
+        extract_args = mock_extract.call_args
+        assert extract_args[0] == (_DB_PATH, cq)
+        assert extract_args[1]["config"] is None
         mock_build.assert_called_once()
         mock_reason.assert_called_once()
         mock_answer.assert_called_once_with(
