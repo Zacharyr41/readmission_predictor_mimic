@@ -213,3 +213,100 @@ class TestAnswerResult:
             sparql_queries_used=["ASK { ?s ?p ?o }"],
         )
         assert a == AnswerResult.model_validate_json(a.model_dump_json())
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.5 — multi-CQ support
+# ---------------------------------------------------------------------------
+
+
+class TestAnswerResultSubAnswers:
+    """Phase 4.5 adds ``sub_answers`` to carry per-CQ answers inside one
+    top-level AnswerResult. Recursive (a sub-answer is itself an AnswerResult),
+    optional, defaulting to None so single-CQ behaviour is unchanged."""
+
+    def test_default_is_none(self):
+        a = AnswerResult(text_summary="single")
+        assert a.sub_answers is None
+
+    def test_can_carry_children(self):
+        from src.conversational.models import AnswerResult as AR
+
+        parent = AR(
+            text_summary="combined",
+            sub_answers=[
+                AR(text_summary="sub 1"),
+                AR(text_summary="sub 2", interpretation_summary="echo 2"),
+            ],
+        )
+        assert parent.sub_answers is not None
+        assert len(parent.sub_answers) == 2
+        assert parent.sub_answers[1].interpretation_summary == "echo 2"
+
+    def test_json_round_trip_preserves_nesting(self):
+        from src.conversational.models import AnswerResult as AR
+
+        original = AR(
+            text_summary="top",
+            sub_answers=[AR(text_summary="child")],
+        )
+        restored = AR.model_validate_json(original.model_dump_json())
+        assert restored == original
+        assert restored.sub_answers[0].text_summary == "child"
+
+
+class TestDecompositionResult:
+    """Phase 4.5: the decomposer returns ``DecompositionResult`` — a (narrative,
+    list[CompetencyQuestion]) wrapper. Single-CQ decompositions set narrative
+    to None and list length 1; big-question decompositions carry both."""
+
+    def test_single_cq_case(self):
+        from src.conversational.models import DecompositionResult
+
+        cq = CompetencyQuestion(original_question="avg creatinine")
+        d = DecompositionResult(competency_questions=[cq])
+        assert d.narrative is None
+        assert len(d.competency_questions) == 1
+        assert d.is_multi is False
+
+    def test_big_question_case(self):
+        from src.conversational.models import DecompositionResult
+
+        d = DecompositionResult(
+            narrative="Break down: (1) cohort, (2) differences.",
+            competency_questions=[
+                CompetencyQuestion(original_question="count"),
+                CompetencyQuestion(original_question="differences"),
+            ],
+        )
+        assert d.narrative.startswith("Break down")
+        assert len(d.competency_questions) == 2
+        assert d.is_multi is True
+
+    def test_empty_competency_questions_is_rejected(self):
+        """A DecompositionResult must always contain at least one CQ —
+        empty is never a valid state (ambiguity is modelled with a single CQ
+        whose ``clarifying_question`` is set)."""
+        from src.conversational.models import DecompositionResult
+
+        with pytest.raises(ValidationError):
+            DecompositionResult(competency_questions=[])
+
+    def test_json_round_trip(self):
+        from src.conversational.models import DecompositionResult
+
+        d = DecompositionResult(
+            narrative="a short narrative",
+            competency_questions=[
+                CompetencyQuestion(
+                    original_question="q1",
+                    interpretation_summary="i1",
+                ),
+                CompetencyQuestion(
+                    original_question="q2",
+                    clarifying_question="unclear",
+                ),
+            ],
+        )
+        restored = DecompositionResult.model_validate_json(d.model_dump_json())
+        assert restored == d

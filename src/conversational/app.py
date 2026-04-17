@@ -178,7 +178,7 @@ def _render_plotly(spec: dict, data: list[dict]) -> None:
         st.warning("Could not render chart.")
 
 
-def _render_answer(answer: AnswerResult) -> None:
+def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
     """Display an AnswerResult inside the current chat message context.
 
     Phase 4 rendering:
@@ -188,9 +188,20 @@ def _render_answer(answer: AnswerResult) -> None:
       - ``clarifying_question`` replaces the normal body: when the pipeline
         short-circuits on ambiguity, the UI renders the follow-up question
         prominently and shows a hint that a reply is expected.
+
+    Phase 4.5 rendering:
+      - When ``sub_answers`` is set, the top-level ``text_summary`` is the
+        big-question narrative. Each sub-answer is rendered below inside
+        its own expander so the clinician can drill down to any component
+        of the decomposition.
+
+    ``is_sub`` is passed when called recursively for a sub-answer; it
+    suppresses the per-sub query-details expander (the top-level already
+    shows aggregated stats) and uses tighter visual styling.
     """
     if answer.interpretation_summary:
-        st.info(f"**Interpreting as:** {answer.interpretation_summary}")
+        label = "Sub-question interpretation" if is_sub else "Interpreting as"
+        st.info(f"**{label}:** {answer.interpretation_summary}")
 
     if answer.clarifying_question:
         # Short-circuit: no data to render, only the question.
@@ -206,7 +217,21 @@ def _render_answer(answer: AnswerResult) -> None:
     if answer.visualization_spec and answer.data_table:
         _render_plotly(answer.visualization_spec, answer.data_table)
 
-    if answer.graph_stats or answer.sparql_queries_used:
+    # Multi-CQ: render each sub-answer below the narrative in its own expander.
+    # The top-level wraps sub-answers, not sub-answers wrap more sub-answers,
+    # so we don't recurse into sub.sub_answers even if set.
+    if answer.sub_answers:
+        st.markdown("---")
+        st.markdown("**Breakdown:**")
+        for i, sub in enumerate(answer.sub_answers, 1):
+            # Use the sub-CQ's original question in the header when available
+            # (it's echoed on AnswerResult.interpretation_summary for context).
+            header = f"Part {i}"
+            with st.expander(header, expanded=(i == 1)):
+                _render_answer(sub, is_sub=True)
+
+    # Query-details expander only at the top level; aggregated across sub-CQs.
+    if not is_sub and (answer.graph_stats or answer.sparql_queries_used):
         with st.expander("Query Details"):
             if answer.graph_stats:
                 st.json(answer.graph_stats)

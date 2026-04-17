@@ -13,10 +13,19 @@ from typing import TYPE_CHECKING
 
 from src.conversational.answerer import generate_answer
 from src.conversational.concept_resolver import ConceptResolver
-from src.conversational.decomposer import decompose
-from src.conversational.extractor import extract, extract_bigquery
+from src.conversational.decomposer import decompose_question
+from src.conversational.extractor import (
+    extract,
+    extract_bigquery,
+    merge_extractions,
+)
 from src.conversational.graph_builder import build_query_graph
-from src.conversational.models import AnswerResult, CompetencyQuestion, ExtractionConfig
+from src.conversational.models import (
+    AnswerResult,
+    CompetencyQuestion,
+    DecompositionResult,
+    ExtractionConfig,
+)
 from src.conversational.reasoner import reason
 
 if TYPE_CHECKING:
@@ -57,67 +66,104 @@ class ConversationalPipeline:
     def ask(self, question: str) -> AnswerResult:
         """Run the full pipeline for a natural-language question.
 
-        Phase 4 wiring:
-          - If the decomposer sets ``cq.clarifying_question``, we short-circuit
-            here: no extract/graph/reason/answer runs. The UI surfaces the
-            follow-up question to the user and waits for their next turn.
-          - Otherwise, ``cq.interpretation_summary`` is propagated onto the
-            ``AnswerResult`` so the UI can render "this is what I answered"
-            above the summary.
+        Phase 4.5: the decomposer may return a single CompetencyQuestion
+        (Shape A, the common case) OR a big-question decomposition (Shape B:
+        narrative + N sub-CQs that share ONE downstream knowledge graph).
+
+        Flow:
+          1. decompose_question → DecompositionResult
+          2. If ANY sub-CQ has a clarifying_question, short-circuit and
+             surface that question — skipping extract / graph / reason / answer.
+          3. Otherwise extract per sub-CQ, then merge into one
+             ExtractionResult. For a single-CQ decomposition, merging is a
+             no-op and is skipped.
+          4. Build exactly ONE RDF graph from the merged extraction. Allen
+             relations are built if ANY sub-CQ has temporal constraints.
+          5. Reason once per sub-CQ against the shared graph.
+          6. Generate per-CQ answers. For single-CQ: return that answer
+             directly. For multi-CQ: wrap in a top-level AnswerResult whose
+             ``text_summary`` is the narrative and whose ``sub_answers``
+             carries the per-CQ details.
         """
         try:
-            cq = decompose(
+            decomp = decompose_question(
                 self._client, question,
                 conversation_history=list(self.conversation_history) or None,
             )
 
-            # Clarify short-circuit: skip the expensive downstream pipeline
-            # and return a stub AnswerResult whose body IS the clarifying
-            # question. The conversation history still records this turn so
-            # follow-up questions can reference it.
-            if cq.clarifying_question and cq.clarifying_question.strip():
+            # Clarify short-circuit: any sub-CQ with a non-empty
+            # clarifying_question wins; the whole turn becomes a clarify.
+            clarifying_cq = next(
+                (
+                    cq for cq in decomp.competency_questions
+                    if cq.clarifying_question and cq.clarifying_question.strip()
+                ),
+                None,
+            )
+            if clarifying_cq is not None:
                 answer = AnswerResult(
-                    text_summary=cq.clarifying_question,
-                    interpretation_summary=cq.interpretation_summary,
-                    clarifying_question=cq.clarifying_question,
+                    text_summary=clarifying_cq.clarifying_question,
+                    interpretation_summary=clarifying_cq.interpretation_summary,
+                    clarifying_question=clarifying_cq.clarifying_question,
                 )
-                self._remember(cq, answer)
+                # Record the first CQ in history so conversation context is preserved.
+                self._remember(decomp.competency_questions[0], answer)
                 return answer
 
-            # Mark concepts that were resolved from categories
-            for concept in cq.clinical_concepts:
-                resolved = self._resolver.resolve(concept)
-                if len(resolved) > 1 or (len(resolved) == 1 and resolved[0] != concept.name):
-                    concept.resolved_from_category = True
+            # Mark category-resolved concepts across every sub-CQ. This is
+            # per-concept, idempotent, and cheap — safe to do before extraction.
+            for cq in decomp.competency_questions:
+                for concept in cq.clinical_concepts:
+                    resolved = self._resolver.resolve(concept)
+                    if len(resolved) > 1 or (
+                        len(resolved) == 1 and resolved[0] != concept.name
+                    ):
+                        concept.resolved_from_category = True
 
-            if self._data_source == "bigquery":
-                extraction = extract_bigquery(
-                    cq, project=self._bigquery_project,
-                    config=self._extraction_config,
-                    resolver=self._resolver,
-                )
-            else:
-                extraction = extract(
-                    self._db_path, cq, config=self._extraction_config,
-                    resolver=self._resolver,
-                )
+            # Per-CQ extract; single-CQ fast path skips the merge step.
+            extractions = [self._extract_one(cq) for cq in decomp.competency_questions]
+            merged_extraction = (
+                extractions[0] if len(extractions) == 1
+                else merge_extractions(extractions)
+            )
 
+            # Build ONE graph. Allen relations iff any sub-CQ needs them.
+            any_temporal = any(
+                bool(cq.temporal_constraints) for cq in decomp.competency_questions
+            )
             graph, graph_stats = build_query_graph(
-                self._ontology_dir, extraction,
-                skip_allen_relations=not bool(cq.temporal_constraints),
+                self._ontology_dir, merged_extraction,
+                skip_allen_relations=not any_temporal,
                 max_workers=self._max_workers,
             )
 
-            reasoning = reason(graph, cq)
+            # Reason + answer per sub-CQ against the shared graph.
+            sub_answers: list[AnswerResult] = []
+            all_sparql: list[str] = []
+            for cq in decomp.competency_questions:
+                reasoning = reason(graph, cq)
+                all_sparql.extend(reasoning.sparql_queries)
+                sub = generate_answer(
+                    self._client, cq, reasoning.rows,
+                    graph_stats, reasoning.sparql_queries,
+                )
+                sub.interpretation_summary = cq.interpretation_summary
+                sub_answers.append(sub)
 
-            answer = generate_answer(
-                self._client, cq, reasoning.rows,
-                graph_stats, reasoning.sparql_queries,
-            )
-            # Propagate the decomposer's interpretation echo onto the answer.
-            answer.interpretation_summary = cq.interpretation_summary
+            if not decomp.is_multi:
+                # Single-CQ: return the one sub-answer directly (legacy shape).
+                answer = sub_answers[0]
+            else:
+                # Multi-CQ: wrap sub-answers under a narrative-led top-level.
+                answer = AnswerResult(
+                    text_summary=decomp.narrative or "Multi-part answer:",
+                    interpretation_summary=decomp.narrative,
+                    graph_stats=graph_stats,
+                    sparql_queries_used=all_sparql,
+                    sub_answers=sub_answers,
+                )
 
-            self._remember(cq, answer)
+            self._remember(decomp.competency_questions[0], answer)
             return answer
 
         except Exception:
@@ -128,6 +174,19 @@ class ConversationalPipeline:
                     "Please try rephrasing."
                 ),
             )
+
+    def _extract_one(self, cq: CompetencyQuestion):
+        """Dispatch to the right extractor backend for a single CQ."""
+        if self._data_source == "bigquery":
+            return extract_bigquery(
+                cq, project=self._bigquery_project,
+                config=self._extraction_config,
+                resolver=self._resolver,
+            )
+        return extract(
+            self._db_path, cq, config=self._extraction_config,
+            resolver=self._resolver,
+        )
 
     def _remember(self, cq: CompetencyQuestion, answer: AnswerResult) -> None:
         """Append to conversation_history, enforcing ``max_history``."""

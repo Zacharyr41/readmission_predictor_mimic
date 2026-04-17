@@ -52,8 +52,16 @@ def _make_reasoning() -> ReasoningResult:
 
 
 def _patch_all(fn):
-    """Stack all 5 stage patches needed for orchestrator tests."""
-    fn = patch("src.conversational.orchestrator.decompose")(fn)
+    """Stack all 5 stage patches needed for orchestrator tests.
+
+    Phase 4.5: the orchestrator calls ``decompose_question`` (returns a
+    ``DecompositionResult``) instead of the legacy single-CQ ``decompose``.
+    Tests keep their argument name ``mock_decompose`` but what they mock is
+    now the question-level entrypoint; ``_setup_mocks`` wraps the returned
+    CQ in a single-CQ DecompositionResult so legacy test bodies work
+    unchanged.
+    """
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
     fn = patch("src.conversational.orchestrator.extract")(fn)
     fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
     fn = patch("src.conversational.orchestrator.reason")(fn)
@@ -62,12 +70,21 @@ def _patch_all(fn):
 
 
 def _setup_mocks(mock_decompose, mock_extract, mock_build, mock_reason, mock_answer):
-    """Wire up default return values for all stage mocks."""
+    """Wire up default return values for all stage mocks.
+
+    For backward compat with legacy test bodies that access
+    ``mock_decompose.return_value`` as if it were a bare CompetencyQuestion,
+    we also attach the CQ directly (via the wrapping DecompositionResult's
+    first element). Tests that mutate attributes on the CQ still see the
+    change because both references point at the same object.
+    """
+    from src.conversational.models import DecompositionResult
+
     cq = _make_cq()
     reasoning = _make_reasoning()
     answer = _make_answer()
 
-    mock_decompose.return_value = cq
+    mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
     mock_extract.return_value = ExtractionResult()
     mock_build.return_value = (MagicMock(), {"triples": 50})
     mock_reason.return_value = reasoning
@@ -117,13 +134,18 @@ class TestAsk:
         self, mock_decompose, mock_extract,
         mock_build, mock_reason, mock_answer,
     ):
+        from src.conversational.models import DecompositionResult
+
         cq1 = _make_cq("What is the creatinine?")
         cq2 = _make_cq("Now show sodium")
         answer1 = _make_answer("Creatinine was 1.1")
         answer2 = _make_answer("Sodium was 140")
         reasoning = _make_reasoning()
 
-        mock_decompose.side_effect = [cq1, cq2]
+        mock_decompose.side_effect = [
+            DecompositionResult(competency_questions=[cq1]),
+            DecompositionResult(competency_questions=[cq2]),
+        ]
         mock_extract.return_value = ExtractionResult()
         mock_build.return_value = (MagicMock(), {})
         mock_reason.return_value = reasoning
@@ -204,13 +226,15 @@ class TestAllenRelationsPassthrough:
         mock_build, mock_reason, mock_answer,
     ):
         """CQ without temporal_constraints passes skip_allen_relations=True."""
+        from src.conversational.models import DecompositionResult
+
         cq = CompetencyQuestion(
             original_question="What is the creatinine?",
             clinical_concepts=[
                 ClinicalConcept(name="Creatinine", concept_type="biomarker"),
             ],
         )
-        mock_decompose.return_value = cq
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
         mock_extract.return_value = ExtractionResult()
         mock_build.return_value = (MagicMock(), {})
         mock_reason.return_value = _make_reasoning()
@@ -229,6 +253,8 @@ class TestAllenRelationsPassthrough:
         mock_build, mock_reason, mock_answer,
     ):
         """CQ with temporal_constraints passes skip_allen_relations=False."""
+        from src.conversational.models import DecompositionResult
+
         cq = CompetencyQuestion(
             original_question="Creatinine before intubation",
             clinical_concepts=[
@@ -238,7 +264,7 @@ class TestAllenRelationsPassthrough:
                 TemporalConstraint(relation="before", reference_event="intubation"),
             ],
         )
-        mock_decompose.return_value = cq
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
         mock_extract.return_value = ExtractionResult()
         mock_build.return_value = (MagicMock(), {})
         mock_reason.return_value = _make_reasoning()
@@ -265,11 +291,13 @@ class TestPhase4InterpretationAndClarify:
         """When the decomposer sets ``clarifying_question``, extract / graph /
         reason / answer must NOT run. The returned AnswerResult's body is the
         clarifying question verbatim."""
+        from src.conversational.models import DecompositionResult
+
         cq = _make_cq("show me the labs")
         cq.clinical_concepts = []
         cq.interpretation_summary = "Unclear: no specific lab or cohort provided."
         cq.clarifying_question = "Which lab and which patients?"
-        mock_decompose.return_value = cq
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
 
         # Booby-trap: if downstream stages run, these will raise.
         mock_extract.side_effect = AssertionError("extract must not run on clarify short-circuit")
@@ -325,9 +353,10 @@ class TestPhase4InterpretationAndClarify:
     ):
         """The decomposer's interpretation must flow onto the AnswerResult
         before the answerer returns, so the UI can echo it above the summary."""
-        _setup_mocks(mock_decompose, mock_extract, mock_build, mock_reason, mock_answer)
-        returned_cq = mock_decompose.return_value
-        returned_cq.interpretation_summary = "Mean serum creatinine over the cohort."
+        cq, _, _ = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        cq.interpretation_summary = "Mean serum creatinine over the cohort."
         # answerer returns a fresh AnswerResult — no interpretation on it yet.
         fresh_answer = AnswerResult(text_summary="1.1 mg/dL mean.")
         mock_answer.return_value = fresh_answer
@@ -336,3 +365,199 @@ class TestPhase4InterpretationAndClarify:
         result = pipeline.ask("avg creatinine")
 
         assert result.interpretation_summary == "Mean serum creatinine over the cohort."
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.5 — multi-CQ (big-question) orchestration
+# ---------------------------------------------------------------------------
+
+
+def _patch_all_multi(fn):
+    """Stack patches for the multi-CQ orchestrator path.
+
+    ``decompose_question`` is the new entrypoint; ``merge_extractions`` is the
+    new helper. Both need to be patchable so we can verify the multi-CQ flow
+    without a real graph or real LLM.
+    """
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator.extract")(fn)
+    fn = patch("src.conversational.orchestrator.merge_extractions")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    return fn
+
+
+def _make_decomp(*cqs, narrative=None):
+    from src.conversational.models import DecompositionResult
+
+    return DecompositionResult(
+        narrative=narrative,
+        competency_questions=list(cqs),
+    )
+
+
+class TestMultiCQOrchestration:
+    """For a big-question (Shape B) turn:
+      - extract() is called once per sub-CQ
+      - merge_extractions() unions those into one ExtractionResult
+      - build_query_graph() is called EXACTLY ONCE on the merged result
+      - reason() is called once per sub-CQ against the shared graph
+      - generate_answer() is called once per sub-CQ
+      - the returned AnswerResult has sub_answers=[sub_1, …, sub_n] and its
+        top-level text_summary reflects the narrative
+    """
+
+    @_patch_all_multi
+    def test_big_question_builds_ONE_graph_and_reasons_per_cq(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+    ):
+        cq1 = _make_cq("count readmitted sepsis")
+        cq2 = _make_cq("compare labs")
+        mock_decompose_q.return_value = _make_decomp(
+            cq1, cq2,
+            narrative="Break down: cohort size, then lab comparisons.",
+        )
+
+        # Each extract() call returns a distinct ExtractionResult.
+        mock_extract.side_effect = [ExtractionResult(), ExtractionResult()]
+        merged_marker = ExtractionResult()
+        mock_merge.return_value = merged_marker
+        mock_build.return_value = (MagicMock(), {"triples": 99})
+        mock_reason.side_effect = [_make_reasoning(), _make_reasoning()]
+        mock_answer.side_effect = [
+            _make_answer("sub-answer 1"),
+            _make_answer("sub-answer 2"),
+        ]
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("why do sepsis pts get readmitted")
+
+        # Two extractions merged once into one build_query_graph call.
+        assert mock_extract.call_count == 2
+        mock_merge.assert_called_once()
+        merged_arg = mock_merge.call_args.args[0]
+        assert len(merged_arg) == 2  # list of 2 ExtractionResults
+        mock_build.assert_called_once()
+        build_call = mock_build.call_args
+        # Second positional or kwarg: the merged extraction object identity.
+        passed_extraction = (
+            build_call.args[1] if len(build_call.args) > 1 else build_call.kwargs["extraction"]
+        )
+        assert passed_extraction is merged_marker
+
+        # Reason was called once per sub-CQ, against the same graph.
+        assert mock_reason.call_count == 2
+        graphs_reasoned_on = [call.args[0] for call in mock_reason.call_args_list]
+        assert graphs_reasoned_on[0] is graphs_reasoned_on[1]
+
+        # generate_answer called once per sub-CQ.
+        assert mock_answer.call_count == 2
+
+        # Result carries sub_answers and the narrative.
+        assert result.sub_answers is not None
+        assert len(result.sub_answers) == 2
+        assert result.sub_answers[0].text_summary == "sub-answer 1"
+        assert result.sub_answers[1].text_summary == "sub-answer 2"
+        assert "Break down" in (result.text_summary or "")
+
+    @_patch_all_multi
+    def test_skip_allen_is_false_when_any_sub_cq_has_temporal(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+    ):
+        """If ANY sub-CQ has temporal constraints, the shared graph must be
+        built WITH Allen relations so all sub-CQs can query them."""
+        cq_no_temporal = _make_cq("count")
+        cq_with_temporal = _make_cq("creatinine during icu")
+        cq_with_temporal.temporal_constraints = [
+            TemporalConstraint(relation="during", reference_event="ICU stay"),
+        ]
+        mock_decompose_q.return_value = _make_decomp(cq_no_temporal, cq_with_temporal)
+        mock_extract.side_effect = [ExtractionResult(), ExtractionResult()]
+        mock_merge.return_value = ExtractionResult()
+        mock_build.return_value = (MagicMock(), {})
+        mock_reason.side_effect = [_make_reasoning(), _make_reasoning()]
+        mock_answer.side_effect = [_make_answer(), _make_answer()]
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("mixed question")
+
+        _, kwargs = mock_build.call_args
+        assert kwargs.get("skip_allen_relations") is False
+
+    @_patch_all_multi
+    def test_single_cq_path_does_not_call_merge_or_wrap(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+    ):
+        """Shape A decomposition (1 CQ, no narrative): don't bother calling
+        merge_extractions, and return the sub-answer directly without
+        wrapping it in a synthesised top-level shell."""
+        cq = _make_cq()
+        mock_decompose_q.return_value = _make_decomp(cq)
+        mock_extract.return_value = ExtractionResult()
+        mock_build.return_value = (MagicMock(), {})
+        mock_reason.return_value = _make_reasoning()
+        leaf_answer = _make_answer("single answer")
+        mock_answer.return_value = leaf_answer
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("avg creatinine")
+
+        # Merge is NOT called when there's only one extraction — single-CQ
+        # fast path keeps the legacy shape.
+        mock_merge.assert_not_called()
+        assert result.sub_answers is None
+        assert result.text_summary == "single answer"
+
+    @_patch_all_multi
+    def test_any_clarifying_question_short_circuits_multi_cq(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+    ):
+        """If the decomposer returns Shape B but ANY sub-CQ has a
+        clarifying_question set, treat the whole turn as a clarify: surface
+        the first clarifying sub-CQ's question and skip all downstream
+        stages."""
+        cq_ok = _make_cq("count")
+        cq_ambig = _make_cq("wtf")
+        cq_ambig.clarifying_question = "Which cohort exactly?"
+        cq_ambig.interpretation_summary = "Unclear."
+        mock_decompose_q.return_value = _make_decomp(
+            cq_ok, cq_ambig,
+            narrative="two parts",
+        )
+        # Booby-trap every downstream stage.
+        mock_extract.side_effect = AssertionError("extract must not run")
+        mock_merge.side_effect = AssertionError("merge must not run")
+        mock_build.side_effect = AssertionError("build must not run")
+        mock_reason.side_effect = AssertionError("reason must not run")
+        mock_answer.side_effect = AssertionError("answer must not run")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("big ambiguous question")
+
+        assert result.clarifying_question == "Which cohort exactly?"
+        assert result.text_summary == "Which cohort exactly?"

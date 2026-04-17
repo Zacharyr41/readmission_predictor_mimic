@@ -121,7 +121,11 @@ Map clinical entities to one of these concept_type values:
 _OUTPUT_SCHEMA = """\
 # Output Schema
 
-Return ONLY valid JSON matching this schema (no extra text):
+You may return JSON in ONE of two shapes.
+
+## Shape A — single CompetencyQuestion (default)
+
+Use this when the user's question can be answered by one structured query.
 
 {
   "original_question": "<verbatim user question>",
@@ -142,9 +146,62 @@ Return ONLY valid JSON matching this schema (no extra text):
   "clarifying_question": "<question to ask the user when a field above would otherwise be a guess; null/omitted when confident>"
 }
 
+## Shape B — big-question decomposition (multiple CompetencyQuestions)
+
+Use this when the user's question is too broad to answer with one query —
+see "Big-Question Decomposition" below for when this applies. ALL the
+sub-CQs share ONE knowledge graph, so they are answered as a coordinated
+set, not independent runs.
+
+{
+  "narrative": "<one-sentence rationale for the breakdown, clinician-readable>",
+  "competency_questions": [
+    { ... Shape A object ... },
+    { ... Shape A object ... }
+  ]
+}
+
+Each element of ``competency_questions`` is a full Shape A object — every
+one must set its own ``interpretation_summary``. ``clarifying_question`` is
+NOT valid inside a Shape B response; if the question is ambiguous, return
+Shape A with ``clarifying_question`` set instead.
+
 Omit empty arrays and null fields — Pydantic defaults will fill them.
 ``interpretation_summary`` is the one field you must always populate; it's
 what the clinician sees echoed back before the answer.
+"""
+
+
+_BIG_QUESTION = """\
+# Big-Question Decomposition
+
+A "big question" is one where answering well requires multiple coordinated
+queries against the same cohort. Examples:
+
+  - "Why do our sepsis patients keep getting readmitted within 30 days?"
+    → cohort size / lab differences / medication differences.
+  - "How do readmitted and non-readmitted elderly patients differ?"
+    → demographics / comorbidities / medications / length of stay.
+
+When you recognise a big question, return Shape B from the Output Schema
+section. Keep the decomposition SMALL (usually 2-4 sub-CQs) and make sure:
+
+  - Each sub-CQ is answerable on its own — it still has to pass every rule
+    in "Self-check Before Responding".
+  - The sub-CQs target the SAME broad cohort (share filters where sensible),
+    so the shared knowledge graph is coherent.
+  - ``narrative`` explains the rationale in one sentence — why these
+    particular sub-CQs answer the user's big question.
+
+When NOT to use Shape B:
+
+  - A single direct question with one answer ("average creatinine over 65")
+    — Shape A, always.
+  - An ambiguous question where you cannot pin down a cohort ("show me the
+    labs") — Shape A with ``clarifying_question`` set. Don't guess a
+    decomposition in lieu of asking.
+  - A comparison that fits into one CQ via ``scope: "comparison"`` and a
+    ``comparison_field`` — that's already a single CQ, not a big question.
 """
 
 
@@ -270,7 +327,8 @@ def _load_single_cq_examples() -> list[dict]:
     """Load every JSON file under ``prompt_examples/single_cq/``.
 
     Files are sorted by filename so numbering (``01_``, ``02_``, …) controls
-    presentation order. Each file is a CompetencyQuestion JSON payload.
+    presentation order. Each file is a CompetencyQuestion JSON payload
+    (Shape A — see Output Schema).
     """
     single_dir = PROMPT_EXAMPLES_DIR / "single_cq"
     if not single_dir.exists():
@@ -281,21 +339,58 @@ def _load_single_cq_examples() -> list[dict]:
     ]
 
 
+def _load_big_question_examples() -> list[dict]:
+    """Load every JSON file under ``prompt_examples/big_question/``.
+
+    Each file is a Shape B payload (``narrative`` + ``competency_questions``).
+    Phase 4.5: these teach the LLM to emit the multi-CQ shape for broad
+    questions that share a single downstream knowledge graph.
+    """
+    big_dir = PROMPT_EXAMPLES_DIR / "big_question"
+    if not big_dir.exists():
+        return []
+    return [
+        json.loads(p.read_text())
+        for p in sorted(big_dir.glob("*.json"))
+    ]
+
+
 def _examples_section() -> str:
-    """Render the Examples section by formatting each fixture as a question +
-    JSON code fence, mirroring the old prompt layout so the LLM's behaviour
-    is preserved during the migration."""
-    examples = _load_single_cq_examples()
-    if not examples:
+    """Render the Examples section.
+
+    Single-CQ examples are rendered first (Shape A), then big-question
+    examples under a subheading (Shape B). Each example carries a question
+    header so the LLM can match example structure to intent.
+    """
+    single = _load_single_cq_examples()
+    big = _load_big_question_examples()
+    if not single and not big:
         return "# Examples\n\n(no examples provided)\n"
+
     parts: list[str] = ["# Examples", ""]
-    for ex in examples:
-        question = ex.get("original_question", "<no question>")
-        parts.append(f'Question: "{question}"')
-        parts.append("```json")
-        parts.append(json.dumps(ex, indent=2))
-        parts.append("```")
+    if single:
+        parts.append("## Shape A — single CompetencyQuestion")
         parts.append("")
+        for ex in single:
+            question = ex.get("original_question", "<no question>")
+            parts.append(f'Question: "{question}"')
+            parts.append("```json")
+            parts.append(json.dumps(ex, indent=2))
+            parts.append("```")
+            parts.append("")
+    if big:
+        parts.append("## Shape B — big-question decomposition")
+        parts.append("")
+        for ex in big:
+            # big-question examples have no top-level original_question, so
+            # we show the first sub-CQ's question plus the narrative for context.
+            sub_qs = ex.get("competency_questions", [])
+            first_q = sub_qs[0].get("original_question", "<no question>") if sub_qs else "<no question>"
+            parts.append(f'Big question (example lead-in): "{first_q}"')
+            parts.append("```json")
+            parts.append(json.dumps(ex, indent=2))
+            parts.append("```")
+            parts.append("")
     return "\n".join(parts)
 
 
@@ -335,6 +430,7 @@ def build_system_prompt(registry: OperationRegistry) -> str:
         _RETURN_TYPE_INFERENCE,
         _SCOPE_INFERENCE,
         _WHEN_TO_CLARIFY,
+        _BIG_QUESTION,
         _SELF_CHECK,
         _examples_section(),
     ])

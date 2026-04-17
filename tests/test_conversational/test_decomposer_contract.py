@@ -499,11 +499,16 @@ class TestPhase4PromptSections:
     def test_output_schema_lists_new_fields(self):
         """Phase 4 adds interpretation_summary (required) and clarifying_question
         (optional) to the output schema. The LLM needs both named in the
-        schema block or it won't emit them."""
+        schema block or it won't emit them.
+
+        Phase 4.5 introduced ``## Shape A`` / ``## Shape B`` sub-headers
+        inside this section, so we scan for the next top-level header
+        (``\\n# ``) rather than any header.
+        """
         from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
 
         schema_start = DECOMPOSITION_SYSTEM_PROMPT.find("# Output Schema")
-        schema_end = DECOMPOSITION_SYSTEM_PROMPT.find("# ", schema_start + 1)
+        schema_end = DECOMPOSITION_SYSTEM_PROMPT.find("\n# ", schema_start + 1)
         schema_block = DECOMPOSITION_SYSTEM_PROMPT[schema_start:schema_end]
         assert "interpretation_summary" in schema_block
         assert "clarifying_question" in schema_block
@@ -612,3 +617,182 @@ class TestSynthesisCoversEveryFixture:
         result = decompose(client, case["question"])
         assert result.interpretation_summary
         assert result.interpretation_summary.strip()
+
+
+# ---------------------------------------------------------------------------
+# 11. Phase 4.5 — big-question decomposition
+# ---------------------------------------------------------------------------
+
+
+class TestShapeAB:
+    """The decomposer must parse both Shape A (single CQ) and Shape B
+    (narrative + competency_questions) LLM responses. Shape detection is
+    structural — presence of the ``competency_questions`` key."""
+
+    def test_shape_A_produces_single_cq_decomposition(self):
+        from src.conversational.decomposer import decompose_question
+
+        shape_a = json.dumps({
+            "original_question": "avg creatinine",
+            "clinical_concepts": [
+                {"name": "creatinine", "concept_type": "biomarker"},
+            ],
+            "aggregation": "mean",
+            "return_type": "text",
+            "scope": "cohort",
+        })
+        client = mock_anthropic([shape_a])
+        result = decompose_question(client, "avg creatinine")
+        assert result.is_multi is False
+        assert result.narrative is None
+        assert len(result.competency_questions) == 1
+        assert result.competency_questions[0].clinical_concepts[0].name == "creatinine"
+
+    def test_shape_B_produces_multi_cq_decomposition(self):
+        from src.conversational.decomposer import decompose_question
+
+        shape_b = json.dumps({
+            "narrative": "Break down: cohort size then lab differences.",
+            "competency_questions": [
+                {
+                    "original_question": "count readmitted sepsis",
+                    "clinical_concepts": [
+                        {"name": "sepsis", "concept_type": "diagnosis"},
+                    ],
+                    "patient_filters": [
+                        {"field": "readmitted_30d", "operator": "=", "value": "1"},
+                    ],
+                    "aggregation": "count",
+                    "return_type": "text",
+                    "scope": "cohort",
+                },
+                {
+                    "original_question": "compare lactate by readmission",
+                    "clinical_concepts": [
+                        {"name": "lactate", "concept_type": "biomarker"},
+                    ],
+                    "aggregation": "mean",
+                    "return_type": "text_and_table",
+                    "scope": "comparison",
+                    "comparison_field": "readmitted_30d",
+                },
+            ],
+        })
+        client = mock_anthropic([shape_b])
+        result = decompose_question(client, "why do sepsis pts get readmitted")
+        assert result.is_multi is True
+        assert result.narrative.startswith("Break down")
+        assert len(result.competency_questions) == 2
+        # Each sub-CQ must have an interpretation_summary — either pinned by
+        # the LLM (neither was here) or synthesised by the decomposer.
+        for cq in result.competency_questions:
+            assert cq.interpretation_summary
+            assert cq.interpretation_summary.strip()
+
+    def test_backward_compat_decompose_returns_first_cq(self):
+        """The old ``decompose`` entry point still works and returns a single
+        CompetencyQuestion — the first from whatever shape the LLM returned."""
+        from src.conversational.decomposer import decompose
+
+        shape_b = json.dumps({
+            "narrative": "n/a",
+            "competency_questions": [
+                {
+                    "original_question": "q1",
+                    "clinical_concepts": [
+                        {"name": "creatinine", "concept_type": "biomarker"},
+                    ],
+                    "return_type": "text",
+                    "scope": "cohort",
+                },
+                {
+                    "original_question": "q2",
+                    "clinical_concepts": [
+                        {"name": "lactate", "concept_type": "biomarker"},
+                    ],
+                    "return_type": "text",
+                    "scope": "cohort",
+                },
+            ],
+        })
+        client = mock_anthropic([shape_b])
+        cq = decompose(client, "big question")
+        assert cq.clinical_concepts[0].name == "creatinine"
+
+    def test_unsupported_filter_retry_handles_multi_cq(self):
+        """If ANY sub-CQ uses an unsupported filter field, the retry fires
+        once with all offenders named. The retry response must also validate."""
+        from src.conversational.decomposer import decompose_question
+
+        bad = json.dumps({
+            "narrative": "n/a",
+            "competency_questions": [
+                {
+                    "original_question": "q1",
+                    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
+                    "patient_filters": [{"field": "icu_type", "operator": "=", "value": "neuro"}],
+                    "return_type": "text",
+                    "scope": "cohort",
+                },
+            ],
+        })
+        good = json.dumps({
+            "narrative": "n/a",
+            "competency_questions": [
+                {
+                    "original_question": "q1",
+                    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
+                    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "neuro"}],
+                    "return_type": "text",
+                    "scope": "cohort",
+                },
+            ],
+        })
+        client = mock_anthropic([bad, good])
+        result = decompose_question(client, "neuro ICU creatinine decomposition")
+        assert client.messages.create.call_count == 2
+        for cq in result.competency_questions:
+            for f in cq.patient_filters:
+                assert f.field in _supported_filter_fields()
+
+
+class TestPhase4_5PromptSections:
+    def test_output_schema_describes_both_shapes(self):
+        """Schema block must name both Shape A and Shape B so the LLM learns
+        when to emit each."""
+        from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
+
+        start = DECOMPOSITION_SYSTEM_PROMPT.find("# Output Schema")
+        end = DECOMPOSITION_SYSTEM_PROMPT.find("\n# ", start + 1)
+        block = DECOMPOSITION_SYSTEM_PROMPT[start:end]
+        assert "Shape A" in block
+        assert "Shape B" in block
+        assert "competency_questions" in block
+        assert "narrative" in block
+
+    def test_big_question_section_present(self):
+        """Dedicated section explains when to decompose a big question into
+        multiple sub-CQs (and when NOT to)."""
+        from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
+
+        assert "# Big-Question Decomposition" in DECOMPOSITION_SYSTEM_PROMPT
+
+    def test_big_question_example_appears_in_prompt(self):
+        """The big_question/*.json example(s) must be spliced into the
+        Examples section so the LLM has at least one worked Shape B precedent."""
+        from src.conversational.prompts import (
+            DECOMPOSITION_SYSTEM_PROMPT,
+            PROMPT_EXAMPLES_DIR,
+        )
+
+        big_dir = PROMPT_EXAMPLES_DIR / "big_question"
+        assert big_dir.exists()
+        files = list(big_dir.glob("*.json"))
+        assert files, "no big_question examples authored"
+        for path in files:
+            data = json.loads(path.read_text())
+            first_q = data["competency_questions"][0]["original_question"]
+            assert first_q in DECOMPOSITION_SYSTEM_PROMPT, (
+                f"Big-question example {path.name!r} (first sub-Q {first_q!r}) "
+                "did not make it into the rendered prompt."
+            )

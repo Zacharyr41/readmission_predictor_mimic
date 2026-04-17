@@ -6,7 +6,11 @@ import json
 import re
 from typing import TYPE_CHECKING
 
-from src.conversational.models import CompetencyQuestion, ReturnType
+from src.conversational.models import (
+    CompetencyQuestion,
+    DecompositionResult,
+    ReturnType,
+)
 
 if TYPE_CHECKING:
     import anthropic
@@ -117,44 +121,68 @@ def _synthesise_interpretation(cq: CompetencyQuestion) -> str:
     return f"{verb} {concepts}{filter_clause}{temporal_clause}{tail}.".replace(" ,", ",")
 
 
-def decompose(
+def _postprocess_cq(cq: CompetencyQuestion) -> CompetencyQuestion:
+    """Apply return-type validation + interpretation-summary synthesis.
+
+    Broken out so it can be applied to each CQ of a Shape B decomposition
+    as well as to the single CQ of a Shape A response.
+    """
+    cq = _validate_return_type(cq)
+    # Phase 4: interpretation_summary is clinician-facing; make sure it's never
+    # blank. The prompt always asks the LLM to populate it, but if it forgets
+    # or returns whitespace we synthesise a mechanical restatement from the
+    # structured fields so the UI has something to echo.
+    if not cq.interpretation_summary or not cq.interpretation_summary.strip():
+        cq.interpretation_summary = _synthesise_interpretation(cq)
+    return cq
+
+
+def _parse_response_payload(
+    data: dict, original_question: str,
+) -> DecompositionResult:
+    """Parse an LLM response payload into a DecompositionResult.
+
+    The LLM may return either Shape A (single CQ dict) or Shape B
+    ({"narrative": ..., "competency_questions": [...]}). We detect by
+    presence of the ``competency_questions`` key. In Shape A, the top-level
+    ``original_question`` is always overwritten with the user's actual
+    question; in Shape B, only the outer wrapper lacks that field and each
+    sub-CQ keeps its own ``original_question`` (typically a sub-question
+    authored by the LLM).
+    """
+    if "competency_questions" in data:
+        # Shape B: big-question decomposition.
+        cqs = [CompetencyQuestion.model_validate(c) for c in data.get("competency_questions", [])]
+        return DecompositionResult(
+            narrative=data.get("narrative"),
+            competency_questions=cqs,
+        )
+    # Shape A: single CQ. Stamp the user's question over whatever the LLM
+    # echoed, so downstream steps see the exact input text.
+    data = {**data, "original_question": original_question}
+    return DecompositionResult(
+        narrative=None,
+        competency_questions=[CompetencyQuestion.model_validate(data)],
+    )
+
+
+def decompose_question(
     client: anthropic.Anthropic,
     question: str,
     conversation_history: list | None = None,
-) -> CompetencyQuestion:
-    """Decompose a clinical question into a structured CompetencyQuestion.
+) -> DecompositionResult:
+    """Decompose a clinical question into a DecompositionResult.
 
-    Parameters
-    ----------
-    client:
-        An initialised ``anthropic.Anthropic`` instance.
-    question:
-        The natural-language clinical question.
-    conversation_history:
-        Optional list of ``(CompetencyQuestion, AnswerResult)`` tuples from
-        prior conversation turns.
+    Handles both single-CQ (Shape A) and big-question (Shape B) LLM responses
+    behind one entry point. Retry-once-on-failure behaviour is preserved from
+    the pre-Phase-4.5 implementation. Unsupported filter fields trigger a
+    retry across every sub-CQ in one batch.
 
     Returns
     -------
-    CompetencyQuestion
-        Parsed and validated structured representation.
-
-    Raises
-    ------
-    json.JSONDecodeError | pydantic.ValidationError
-        If the LLM fails to produce valid JSON after one retry.
+    DecompositionResult
+        Always contains at least one CompetencyQuestion.
     """
-    
-    ## TODO(zach): More robust prompt, with more filter/population options
-    ## TODO(zach): We want to provide examples of decomposing an initial "human" Q into the competency questions
-    ## TODO (zach): Provide broader context on what this pipeline is (self-awareness sort of thing)
-    ## TODO (zach - phase 1): programmatic integration with external source of truth like SNOMED CT and for ICD codes
-    ## TODO (zach): Many Many Many test cases -- broad test cases. Automate as part of test suite. 
-    # TODO (zach): Filtering shouldn't be artificially set to num patients, but can include other fields (more robust filtering system or maybe less artiifcial filters?)
-    ## TODO (zach): compell user to really understand what they ask / limited filtering/deterministic portions of interface with clear explanations
-    ## For above - AI comprehension of questions (i.e. hey user, this is what I'm attempting to answer)
-    ## UI should be clear as to what its doing, what it searches for , etc. 
-    
     messages = build_decomposition_messages(question, conversation_history)
 
     response = client.messages.create(
@@ -169,8 +197,7 @@ def decompose(
 
     try:
         data = json.loads(json_str)
-        data["original_question"] = question
-        cq = CompetencyQuestion.model_validate(data)
+        decomp = _parse_response_payload(data, question)
     except (json.JSONDecodeError, Exception) as exc:
         # Retry once — feed the error back so the LLM can self-correct.
         messages.append({"role": "assistant", "content": raw_text})
@@ -189,22 +216,23 @@ def decompose(
         )
         retry_json = _extract_json(retry.content[0].text)
         data = json.loads(retry_json)
-        data["original_question"] = question
-        cq = CompetencyQuestion.model_validate(data)
+        decomp = _parse_response_payload(data, question)
 
-    # Validate filter fields — retry if LLM used unsupported fields.
-    # Source of truth is the OperationRegistry so this set stays in sync with
-    # what the extractor can actually compile and what the prompt advertises.
+    # Validate filter fields across EVERY sub-CQ. One retry if any use
+    # unsupported fields; the corrective message names every offender in
+    # one round-trip rather than per-CQ.
     from src.conversational.operations import get_default_registry
 
     supported_fields = set(get_default_registry().supported_names("filter"))
-    unsupported = {f.field for f in cq.patient_filters} - supported_fields
-    if unsupported:
+    all_unsupported: set[str] = set()
+    for cq in decomp.competency_questions:
+        all_unsupported |= {f.field for f in cq.patient_filters} - supported_fields
+    if all_unsupported:
         messages.append({"role": "assistant", "content": raw_text})
         messages.append({
             "role": "user",
             "content": (
-                f"These patient_filter fields are not supported: {unsupported}. "
+                f"These patient_filter fields are not supported: {all_unsupported}. "
                 f"Supported fields are: {sorted(supported_fields)}. "
                 "Please rephrase the filters using only supported fields "
                 "(e.g. use 'diagnosis' to filter by condition). "
@@ -219,16 +247,34 @@ def decompose(
         )
         retry_json = _extract_json(retry.content[0].text)
         data = json.loads(retry_json)
-        data["original_question"] = question
-        cq = CompetencyQuestion.model_validate(data)
+        decomp = _parse_response_payload(data, question)
 
-    cq = _validate_return_type(cq)
+    # Post-process every CQ: validate return_type + synthesise interpretation
+    # if the LLM left one blank. Done after all retry paths so the fallback
+    # only runs on the final parsed shape.
+    decomp.competency_questions = [
+        _postprocess_cq(cq) for cq in decomp.competency_questions
+    ]
+    return decomp
 
-    # Phase 4: interpretation_summary is clinician-facing; make sure it's never
-    # blank. The prompt always asks the LLM to populate it, but if it forgets
-    # or returns whitespace we synthesise a mechanical restatement from the
-    # structured fields so the UI has something to echo.
-    if not cq.interpretation_summary or not cq.interpretation_summary.strip():
-        cq.interpretation_summary = _synthesise_interpretation(cq)
 
-    return cq
+def decompose(
+    client: anthropic.Anthropic,
+    question: str,
+    conversation_history: list | None = None,
+) -> CompetencyQuestion:
+    """Backward-compatible single-CQ entry point.
+
+    Returns the FIRST CompetencyQuestion of whatever the LLM produced. For
+    Shape A responses this is the only CQ; for Shape B it's the first
+    sub-CQ, which discards the narrative and remaining sub-CQs. Callers
+    that need the full decomposition — notably the orchestrator — should
+    call ``decompose_question`` instead.
+
+    Raises
+    ------
+    json.JSONDecodeError | pydantic.ValidationError
+        If the LLM fails to produce valid JSON after one retry.
+    """
+    decomp = decompose_question(client, question, conversation_history)
+    return decomp.competency_questions[0]

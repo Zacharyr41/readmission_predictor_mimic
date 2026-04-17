@@ -1,0 +1,50 @@
+{
+  "narrative": "This is too broad for one query. A useful decomposition: (1) how large is the readmitted-sepsis cohort, (2) what do their last-24h ICU labs look like vs non-readmitted sepsis, (3) which antibiotics differ between the two groups at discharge.",
+  "competency_questions": [
+    {
+      "original_question": "How many sepsis patients were readmitted within 30 days?",
+      "clinical_concepts": [
+        {"name": "sepsis", "concept_type": "diagnosis"}
+      ],
+      "patient_filters": [
+        {"field": "readmitted_30d", "operator": "=", "value": "1"}
+      ],
+      "aggregation": "count",
+      "return_type": "text",
+      "scope": "cohort",
+      "interpretation_summary": "Count of admissions with a sepsis diagnosis flagged readmitted_30d = 1."
+    },
+    {
+      "original_question": "Compare last-24h ICU labs between readmitted and non-readmitted sepsis patients.",
+      "clinical_concepts": [
+        {"name": "creatinine", "concept_type": "biomarker"},
+        {"name": "lactate", "concept_type": "biomarker"},
+        {"name": "WBC", "concept_type": "biomarker"}
+      ],
+      "temporal_constraints": [
+        {"relation": "within", "reference_event": "ICU discharge", "time_window": "24h"}
+      ],
+      "patient_filters": [
+        {"field": "diagnosis", "operator": "contains", "value": "sepsis"}
+      ],
+      "aggregation": "mean",
+      "return_type": "text_and_table",
+      "scope": "comparison",
+      "comparison_field": "readmitted_30d",
+      "interpretation_summary": "Mean creatinine / lactate / WBC in the last 24h of ICU, grouped by readmitted_30d, in sepsis admissions."
+    },
+    {
+      "original_question": "Which antibiotics were prescribed to readmitted vs non-readmitted sepsis patients?",
+      "clinical_concepts": [
+        {"name": "antibiotics", "concept_type": "drug"}
+      ],
+      "patient_filters": [
+        {"field": "diagnosis", "operator": "contains", "value": "sepsis"}
+      ],
+      "return_type": "text_and_table",
+      "scope": "comparison",
+      "comparison_field": "readmitted_30d",
+      "interpretation_summary": "Antibiotic exposure in sepsis admissions, grouped by readmitted_30d."
+    }
+  ]
+}

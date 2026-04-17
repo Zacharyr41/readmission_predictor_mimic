@@ -282,6 +282,80 @@ def _extract(
     )
 
 
+def merge_extractions(results: list[ExtractionResult]) -> ExtractionResult:
+    """Union-with-dedup over multiple ExtractionResults.
+
+    Phase 4.5: when a big question decomposes into multiple CompetencyQuestions,
+    each is run through the extractor independently, and the resulting
+    ExtractionResults are merged into one before the RDF graph is built. This
+    way exactly ONE graph is constructed for the whole turn — much cheaper
+    than building N graphs, and cross-CQ relationships (e.g. "this patient's
+    labs and this patient's readmission flag live in the same graph") are
+    preserved automatically.
+
+    Dedup strategy per bucket:
+      patients           → by ``subject_id``
+      admissions         → by ``hadm_id``
+      icu_stays          → by ``stay_id``
+      events[biomarker]  → by ``labevent_id``     (MIMIC PK)
+      events[microbio…]  → by ``microevent_id``   (MIMIC PK)
+      events[vital]      → composite ``(stay_id, itemid, charttime)``
+      events[drug]       → composite ``(hadm_id, drug, starttime)``
+      events[diagnosis]  → composite ``(hadm_id, seq_num)``
+      events[other]      → per-object identity (pessimistic fallback; no crash)
+
+    The merged result is a fresh ExtractionResult whose lists do not alias
+    the inputs. Mutating it does not affect any source.
+    """
+    if not results:
+        return ExtractionResult()
+
+    patients_by_id: dict = {}
+    admissions_by_hadm: dict = {}
+    icu_by_stay: dict = {}
+    events_by_kind: dict[str, dict] = {}
+
+    for r in results:
+        for p in r.patients:
+            patients_by_id.setdefault(p.get("subject_id"), p)
+        for a in r.admissions:
+            admissions_by_hadm.setdefault(a.get("hadm_id"), a)
+        for s in r.icu_stays:
+            icu_by_stay.setdefault(s.get("stay_id"), s)
+        for kind, rows in r.events.items():
+            bucket = events_by_kind.setdefault(kind, {})
+            key_fn = _EVENT_DEDUP_KEYS.get(kind)
+            for row in rows:
+                if key_fn is None:
+                    # Unknown event kind — keep each object distinct (fallback
+                    # that prefers not-losing-rows over perfect dedup).
+                    bucket[id(row)] = row
+                else:
+                    key = key_fn(row)
+                    bucket.setdefault(key, row)
+
+    return ExtractionResult(
+        patients=list(patients_by_id.values()),
+        admissions=list(admissions_by_hadm.values()),
+        icu_stays=list(icu_by_stay.values()),
+        events={kind: list(b.values()) for kind, b in events_by_kind.items()},
+    )
+
+
+_EVENT_DEDUP_KEYS: dict[str, "callable"] = {  # type: ignore[valid-type]
+    # Primary-key types (single field).
+    "biomarker": lambda r: r.get("labevent_id"),
+    "microbiology": lambda r: r.get("microevent_id"),
+    # Composite-key types (no single PK available from MIMIC tables).
+    "vital": lambda r: (r.get("stay_id"), r.get("itemid"), r.get("charttime")),
+    "drug": lambda r: (r.get("hadm_id"), r.get("drug"), r.get("starttime")),
+    "diagnosis": lambda r: (r.get("hadm_id"), r.get("seq_num")),
+}
+"""Per-event-kind dedup-key extractors. Must match the primary keys the
+MIMIC-IV source tables expose; adding a new event kind means adding an entry
+here (and writing the corresponding extractor)."""
+
+
 def _iter_hadm_batches(hadm_ids: list[int], batch_size: int):
     """Yield successive slices of ``hadm_ids`` of length ``batch_size``.
 

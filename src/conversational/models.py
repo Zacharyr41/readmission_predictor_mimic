@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class ClinicalConcept(BaseModel):
@@ -90,3 +90,37 @@ class AnswerResult(BaseModel):
     # Truthy when the pipeline short-circuited on a clarifying question; the
     # UI renders this as a follow-up prompt to the user instead of an answer.
     clarifying_question: str | None = None
+    # Phase 4.5: when a big question decomposes into multiple CompetencyQuestions,
+    # each sub-CQ's per-answer AnswerResult is carried here so the UI can show
+    # the breakdown under one synthesized top-level summary. None for single-CQ
+    # turns.
+    sub_answers: list["AnswerResult"] | None = None
+
+
+class DecompositionResult(BaseModel):
+    """Output of the decomposer.
+
+    Phase 4.5: the decomposer now returns a wrapper around a list of
+    CompetencyQuestions plus an optional narrative. The common case is still
+    a single CQ with no narrative; "big questions" yield a narrative and
+    several sub-CQs that all share one downstream graph.
+
+    The ``competency_questions`` list is never empty — ambiguous questions
+    are represented as a single CQ with its ``clarifying_question`` field
+    set, not an empty list.
+    """
+
+    narrative: str | None = None
+    competency_questions: list[CompetencyQuestion]
+
+    @field_validator("competency_questions")
+    @classmethod
+    def _at_least_one_cq(cls, v: list[CompetencyQuestion]) -> list[CompetencyQuestion]:
+        if not v:
+            raise ValueError("DecompositionResult must contain at least one CompetencyQuestion")
+        return v
+
+    @property
+    def is_multi(self) -> bool:
+        """True when the decomposer produced more than one CQ for this turn."""
+        return len(self.competency_questions) > 1
