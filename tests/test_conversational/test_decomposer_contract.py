@@ -32,6 +32,7 @@ from src.conversational.models import (
     CompetencyQuestion,
     ClinicalConcept,
 )
+from src.conversational.operations import get_default_registry
 from src.conversational.prompts import (
     DECOMPOSITION_SYSTEM_PROMPT,
     build_decomposition_messages,
@@ -45,12 +46,13 @@ from tests.test_conversational.conftest import (
 )
 
 
-# Supported filter fields per the current decomposer implementation.
-# Phase 1 will replace this literal with ``registry.supported_names("filter")``.
-_CURRENT_SUPPORTED_FILTERS = frozenset({
-    "age", "gender", "diagnosis", "admission_type",
-    "subject_id", "readmitted_30d", "readmitted_60d",
-})
+def _supported_filter_fields() -> frozenset[str]:
+    """Source of truth for supported filter fields: the OperationRegistry.
+
+    Pre-Phase-1 this was a literal; now it's a one-liner and the test
+    becomes self-updating as new filter ops are registered.
+    """
+    return get_default_registry().supported_names("filter")
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +83,10 @@ def test_every_prompt_example_validates_as_competency_question(block: dict):
 def test_every_supported_filter_field_appears_in_prompt():
     """Every filter field the decomposer enforces must be named in the prompt.
 
-    Stub today: reads from ``_CURRENT_SUPPORTED_FILTERS``. Phase 1 swaps the
-    source to ``OperationRegistry.supported_names('filter')`` so the test
-    becomes self-updating.
+    Sourced from the ``OperationRegistry`` — self-updating. Register a new
+    filter operation and this test fails until the prompt is updated.
     """
-    for field in _CURRENT_SUPPORTED_FILTERS:
+    for field in _supported_filter_fields():
         assert field in DECOMPOSITION_SYSTEM_PROMPT, (
             f"Supported filter field {field!r} is missing from the prompt — "
             "the LLM will never be told it's an option."
@@ -96,7 +97,7 @@ def test_prompt_does_not_advertise_unsupported_filter_fields():
     """Catch the reverse drift: a field listed in the prompt but not enforced.
 
     Extracts the ``field`` enumeration from the prompt schema block and checks
-    it against ``_CURRENT_SUPPORTED_FILTERS``. The whole block is a single
+    it against ``_supported_filter_fields()``. The whole block is a single
     Literal like ``<age|gender|diagnosis|...>`` — we parse that.
     """
     match = re.search(
@@ -105,7 +106,7 @@ def test_prompt_does_not_advertise_unsupported_filter_fields():
     )
     assert match, "Could not locate patient_filters field enumeration in prompt"
     advertised = set(match.group(1).split("|"))
-    extra = advertised - _CURRENT_SUPPORTED_FILTERS
+    extra = advertised - _supported_filter_fields()
     assert not extra, (
         f"Prompt advertises filter fields that the decomposer will reject: {extra}"
     )
@@ -281,7 +282,7 @@ def test_retry_on_unsupported_filter_sends_corrective_follow_up():
     assert client.messages.create.call_count == 2
     # Final result must only reference supported fields.
     for f in result.patient_filters:
-        assert f.field in _CURRENT_SUPPORTED_FILTERS
+        assert f.field in _supported_filter_fields()
 
 
 # ---------------------------------------------------------------------------

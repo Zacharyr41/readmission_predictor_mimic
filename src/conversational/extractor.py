@@ -30,8 +30,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SAFE_COMPARISON_OPS = frozenset({">", "<", "=", ">=", "<="})
-
 # BigQuery fully-qualified table mapping (physionet-data MIMIC-IV v3.1)
 _BQ_SOURCE = "physionet-data"
 _BQ_TABLES = {
@@ -272,65 +270,38 @@ def _get_filtered_hadm_ids(
     filters: list[PatientFilter],
     config: ExtractionConfig | None = None,
 ) -> list[int]:
-    """Return admission IDs matching all patient filters."""
+    """Return admission IDs matching all patient filters.
+
+    Per-filter SQL is produced by the ``OperationRegistry`` (see
+    ``src/conversational/operations.py``); this function owns only the
+    outer SQL shell — patients JOIN prepend, ORDER BY, LIMIT. Unknown filter
+    fields are skipped inside ``compile_filters`` (matching prior behaviour);
+    the decomposer is responsible for catching them earlier and retrying.
+    """
+    from src.conversational.operations import (
+        FilterCompileContext,
+        get_default_registry,
+    )
+
     cfg = config or ExtractionConfig()
     t = backend.table
+    registry = get_default_registry()
+    ctx = FilterCompileContext(backend=backend)
 
-    joins: list[str] = []
-    conditions: list[str] = []
-    params: list = []
-    needs_patients = False
-
+    # Warn about unknown fields — the legacy path logged this per field.
+    supported = registry.supported_names("filter")
     for f in filters:
-        if f.field == "age":
-            needs_patients = True
-            if f.operator not in _SAFE_COMPARISON_OPS:
-                raise ValueError(f"Unsupported operator for age: {f.operator}")
-            conditions.append(f"p.anchor_age {f.operator} ?")
-            params.append(int(f.value))
-
-        elif f.field == "gender":
-            needs_patients = True
-            conditions.append("p.gender = ?")
-            params.append(f.value.upper())
-
-        elif f.field == "diagnosis":
-            joins.append(
-                f"JOIN {t('diagnoses_icd')} di ON a.hadm_id = di.hadm_id "
-                f"JOIN {t('d_icd_diagnoses')} dd ON di.icd_code = dd.icd_code "
-                f"AND di.icd_version = dd.icd_version"
-            )
-            conditions.append(
-                f"({backend.ilike('dd.long_title')} OR di.icd_code LIKE ?)"
-            )
-            params.extend([f"%{f.value}%", f"{f.value}%"])
-
-        elif f.field == "admission_type":
-            conditions.append("a.admission_type = ?")
-            params.append(f.value)
-
-        elif f.field == "subject_id":
-            conditions.append("a.subject_id = ?")
-            params.append(int(f.value))
-
-        elif f.field in ("readmitted_30d", "readmitted_60d"):
-            rl_expr = backend.readmission_labels_expr()
-            joins.append(f"JOIN {rl_expr} rl ON a.hadm_id = rl.hadm_id")
-            if f.operator not in _SAFE_COMPARISON_OPS:
-                raise ValueError(
-                    f"Unsupported operator for {f.field}: {f.operator}"
-                )
-            conditions.append(f"rl.{f.field} {f.operator} ?")
-            params.append(int(f.value))
-
-        else:
+        if f.field not in supported:
             logger.warning("Ignoring unsupported patient filter field: %s", f.field)
 
-    if needs_patients:
+    frag = registry.compile_filters(filters, ctx)
+
+    joins: list[str] = list(frag.joins)
+    if frag.needs_patients:
         joins.insert(0, f"JOIN {t('patients')} p ON a.subject_id = p.subject_id")
 
     join_sql = " ".join(joins)
-    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    where_clause = f" WHERE {' AND '.join(frag.where)}" if frag.where else ""
 
     order = "admittime DESC" if cfg.cohort_strategy == "recent" else backend.random_fn()
     # Use a subquery so ORDER BY references a column visible after SELECT DISTINCT
@@ -343,7 +314,7 @@ def _get_filtered_hadm_ids(
         f"SELECT hadm_id FROM ({inner}) sub"
         f" ORDER BY {order} LIMIT {cfg.max_cohort_size}"
     )
-    hadm_ids = [r[0] for r in backend.execute(sql, params)]
+    hadm_ids = [r[0] for r in backend.execute(sql, frag.params)]
     if len(hadm_ids) == cfg.max_cohort_size:
         logger.warning(
             "Cohort capped at %d admissions (limit reached).",
