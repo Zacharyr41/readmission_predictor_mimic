@@ -49,12 +49,12 @@ In the sidebar:
 
 ## Pipeline Configuration
 
-The pipeline caps cohort size to keep queries responsive (default: 500 most recent admissions). These settings are configurable in `src/conversational/orchestrator.py`:
+The pipeline now returns every admission matching your filters — there is no artificial cohort cap. Admissions are fetched in batches to keep per-query payloads reasonable. Settings are configurable in `src/conversational/orchestrator.py`:
 
 | Setting | Default | Description |
 |---|---|---|
-| `max_cohort_size` | 500 | Max admissions after filtering. Increase if you need broader coverage and can wait longer. |
-| `cohort_strategy` | `"recent"` | `"recent"` selects most recent admissions; `"random"` samples randomly. |
+| `batch_size` | 2000 | Admissions per `IN (…)` batch sent to the database. Lower if you hit BigQuery parameter limits; raise for fewer round-trips. |
+| `cohort_strategy` | `"recent"` | Ordering only: `"recent"` sorts by admittime DESC, `"random"` shuffles. Does not change the final result set. |
 | `max_workers` | 1 | Parallel graph build workers. Set to 4+ for large cohorts. |
 
 Allen temporal relations are automatically skipped for non-temporal queries, which speeds up most lookups significantly.
@@ -113,4 +113,4 @@ What is the average creatinine for patients readmitted within 30 days?
 | `Database not found` | Check the DuckDB path exists: `ls data/processed/mimiciv.duckdb` |
 | BigQuery `403 Access Denied` | Run `gcloud auth application-default login` and verify project access |
 | `ANTHROPIC_API_KEY must be set` | Add it to `.env` or paste it in the sidebar |
-| Query is slow (>2 min) | Reduce `max_cohort_size` or increase `max_workers` |
+| Query is slow (>2 min) | Narrow your filters, reduce `batch_size` for memory pressure, or increase `max_workers` |

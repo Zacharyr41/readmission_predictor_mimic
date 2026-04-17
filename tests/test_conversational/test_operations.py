@@ -155,10 +155,8 @@ def _run_registry_query(
         f"SELECT DISTINCT a.hadm_id, a.admittime"
         f" FROM {t('admissions')} a {join_sql}{where_clause}"
     )
-    sql = (
-        f"SELECT hadm_id FROM ({inner}) sub"
-        f" ORDER BY {order} LIMIT {config.max_cohort_size}"
-    )
+    # Phase 2: cap removed; ordering-only subquery preserved for compatibility.
+    sql = f"SELECT hadm_id FROM ({inner}) sub ORDER BY {order}"
     return [r[0] for r in backend.execute(sql, frag.params)]
 
 
@@ -242,7 +240,7 @@ _FILTER_PARITY_CASES = [
 @pytest.mark.parametrize("flt", _FILTER_PARITY_CASES)
 def test_filter_parity_with_legacy_extractor(duckdb_backend, flt):
     """Registry-compiled filter returns the same hadm_ids as the legacy path."""
-    config = ExtractionConfig(max_cohort_size=100, cohort_strategy="recent")
+    config = ExtractionConfig(cohort_strategy="recent")
 
     legacy = _get_filtered_hadm_ids(duckdb_backend, [flt], config=config)
     via_registry = _run_registry_query(duckdb_backend, [flt], config)
@@ -256,7 +254,7 @@ def test_filter_parity_with_legacy_extractor(duckdb_backend, flt):
 
 def test_filter_parity_with_multiple_filters(duckdb_backend):
     """Combining filters must still match the legacy path."""
-    config = ExtractionConfig(max_cohort_size=100, cohort_strategy="recent")
+    config = ExtractionConfig(cohort_strategy="recent")
     filters = [
         PatientFilter(field="age", operator=">", value="50"),
         PatientFilter(field="gender", operator="=", value="M"),
@@ -269,7 +267,7 @@ def test_filter_parity_with_multiple_filters(duckdb_backend):
 
 def test_empty_filter_list_returns_all(duckdb_backend):
     """No filters → return every admission (up to the cap)."""
-    config = ExtractionConfig(max_cohort_size=100, cohort_strategy="recent")
+    config = ExtractionConfig(cohort_strategy="recent")
     legacy = _get_filtered_hadm_ids(duckdb_backend, [], config=config)
     via_registry = _run_registry_query(duckdb_backend, [], config)
     assert sorted(legacy) == sorted(via_registry)
@@ -467,7 +465,7 @@ class TestListValuedFilters:
             get_default_registry,
         )
 
-        config = ExtractionConfig(max_cohort_size=100, cohort_strategy="recent")
+        config = ExtractionConfig(cohort_strategy="recent")
         r = get_default_registry()
         ctx = FilterCompileContext(backend=duckdb_backend)
 

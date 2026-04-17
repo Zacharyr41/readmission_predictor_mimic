@@ -244,17 +244,25 @@ class TestBigQueryBackend:
 class TestExtractionConfig:
     def test_default_values(self):
         cfg = ExtractionConfig()
-        assert cfg.max_cohort_size == 500
+        assert cfg.batch_size == 2000
         assert cfg.cohort_strategy == "recent"
 
     def test_custom_values(self):
-        cfg = ExtractionConfig(max_cohort_size=1000, cohort_strategy="random")
-        assert cfg.max_cohort_size == 1000
+        cfg = ExtractionConfig(batch_size=500, cohort_strategy="random")
+        assert cfg.batch_size == 500
         assert cfg.cohort_strategy == "random"
 
     def test_invalid_strategy_rejected(self):
         with pytest.raises(ValidationError):
             ExtractionConfig(cohort_strategy="invalid")
+
+    def test_max_cohort_size_no_longer_exists(self):
+        """Phase 2 removed the artificial 500-row cap. Attempting to construct
+        an ExtractionConfig with ``max_cohort_size=...`` must raise, so any
+        stale call site surfaces loudly at test time rather than silently
+        passing the kwarg through without effect."""
+        with pytest.raises(ValidationError):
+            ExtractionConfig(max_cohort_size=100)
 
 
 # ---------------------------------------------------------------------------
@@ -379,61 +387,133 @@ class TestFetchAdmissionsIncludesReadmission:
 # ---------------------------------------------------------------------------
 
 
-class TestCohortCappingSqlCompat:
-    """Ensure cohort capping SQL is valid for both DuckDB and BigQuery."""
+# ---------------------------------------------------------------------------
+# Uncapped cohort / SQL compatibility
+# ---------------------------------------------------------------------------
 
-    def test_order_by_admittime_included_in_select(
+
+class TestUncappedCohort:
+    """The 500-row cap was Phase 2's primary target. The cohort query now
+    returns every admission that matches the filters; batching happens
+    downstream in the fetchers."""
+
+    def test_no_filters_returns_all_admissions(
         self, synthetic_db_path_with_readmission,
     ):
-        """ORDER BY admittime must reference a column in the SELECT list.
-
-        BigQuery rejects ORDER BY on a column not in SELECT DISTINCT.
-        Regression test for: google.api_core.exceptions.BadRequest 400.
-        """
         backend = _DuckDBBackend(synthetic_db_path_with_readmission)
-        cfg = ExtractionConfig(max_cohort_size=3, cohort_strategy="recent")
-        # Should not raise — admittime must be in SELECT or use a subquery
-        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=ExtractionConfig())
         backend.close()
-        assert len(hadm_ids) == 3
-
-
-class TestCohortCapping:
-    def test_cap_applied_when_exceeds_max(self, synthetic_db_path_with_readmission):
-        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
-        cfg = ExtractionConfig(max_cohort_size=3, cohort_strategy="recent")
-        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
-        backend.close()
-        assert len(hadm_ids) == 3
-
-    def test_no_cap_when_under_max(self, synthetic_db_path_with_readmission):
-        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
-        cfg = ExtractionConfig(max_cohort_size=500)
-        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
-        backend.close()
-        # 6 admissions total, all returned
+        # Synthetic fixture has 6 admissions, all returned.
         assert len(hadm_ids) == 6
 
-    def test_recent_strategy_returns_newest(self, synthetic_db_path_with_readmission):
+    def test_no_limit_in_emitted_sql(self, synthetic_db_path_with_readmission):
+        """Structural guard: the generated SQL must not contain LIMIT. Captured
+        by intercepting backend.execute to inspect the query string before any
+        execution. If LIMIT sneaks back in during a refactor, this trips."""
         backend = _DuckDBBackend(synthetic_db_path_with_readmission)
-        cfg = ExtractionConfig(max_cohort_size=2, cohort_strategy="recent")
-        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
-        backend.close()
-        # Most recent by admittime: 104 (2152-05-20), 106 (2151-04-10)
-        assert set(hadm_ids) == {104, 106}
+        seen_sql: list[str] = []
+        original_execute = backend.execute
 
-    def test_random_strategy_returns_correct_count(self, synthetic_db_path_with_readmission):
-        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
-        cfg = ExtractionConfig(max_cohort_size=3, cohort_strategy="random")
-        hadm_ids = _get_filtered_hadm_ids(backend, [], config=cfg)
-        backend.close()
-        assert len(hadm_ids) == 3
+        def spy(sql, params):
+            seen_sql.append(sql)
+            return original_execute(sql, params)
 
-    def test_cap_with_filters(self, synthetic_db_path_with_readmission):
-        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
-        cfg = ExtractionConfig(max_cohort_size=2, cohort_strategy="recent")
-        filters = [PatientFilter(field="readmitted_30d", operator="=", value="0")]
-        hadm_ids = _get_filtered_hadm_ids(backend, filters, config=cfg)
+        backend.execute = spy  # type: ignore[method-assign]
+        _get_filtered_hadm_ids(backend, [], config=ExtractionConfig())
         backend.close()
-        # 5 match readmitted_30d=0, cap to 2 most recent
-        assert len(hadm_ids) == 2
+        assert seen_sql, "expected at least one SQL execution"
+        assert not any("LIMIT" in s for s in seen_sql), (
+            f"LIMIT found in emitted SQL:\n{seen_sql!r}"
+        )
+
+    def test_order_by_admittime_still_compatible(
+        self, synthetic_db_path_with_readmission,
+    ):
+        """ORDER BY admittime must still reference a column visible after
+        SELECT DISTINCT — regression from the pre-cap era (BigQuery rejected
+        it otherwise). Executing on DuckDB fails loud if the subquery shape
+        breaks."""
+        backend = _DuckDBBackend(synthetic_db_path_with_readmission)
+        hadm_ids = _get_filtered_hadm_ids(backend, [], config=ExtractionConfig())
+        backend.close()
+        # All 6 returned, ordered by admittime DESC.
+        assert len(hadm_ids) == 6
+
+
+class TestBatchedExtraction:
+    """Phase 2 introduced ``batch_size`` to bound IN-clause width. The
+    extractor splits hadm_ids into chunks of ``batch_size`` and accumulates
+    across chunks; final result must not depend on ``batch_size``."""
+
+    def test_iter_hadm_batches_splits_correctly(self):
+        from src.conversational.extractor import _iter_hadm_batches
+
+        assert list(_iter_hadm_batches([], 3)) == []
+        assert list(_iter_hadm_batches([1, 2, 3], 3)) == [[1, 2, 3]]
+        assert list(_iter_hadm_batches([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+        assert list(_iter_hadm_batches([1], 100)) == [[1]]
+
+    def test_biomarker_extraction_invariant_under_batch_size(
+        self, synthetic_db_path,
+    ):
+        """Same CQ, two different batch sizes → same rows (order-insensitive).
+
+        This is the central property: batching is a performance knob that
+        must not change results.
+        """
+        cq = CompetencyQuestion(
+            original_question="creatinine values",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="cohort",
+        )
+        small_batch = extract(
+            synthetic_db_path, cq, config=ExtractionConfig(batch_size=2),
+        )
+        big_batch = extract(
+            synthetic_db_path, cq, config=ExtractionConfig(batch_size=1000),
+        )
+
+        # Compare event content by ID, not by list identity.
+        def _ids(events: list[dict]) -> set:
+            return {e["labevent_id"] for e in events}
+
+        assert _ids(small_batch.events["biomarker"]) == _ids(
+            big_batch.events["biomarker"]
+        )
+
+    def test_patient_dedup_across_batches(self, synthetic_db_path):
+        """A patient with multiple admissions might appear in more than one
+        batch. The extractor must dedup so each subject_id surfaces once."""
+        cq = CompetencyQuestion(
+            original_question="all biomarkers",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="cohort",
+        )
+        # Patient 1 has hadm 101 and 102. With batch_size=1 those land in
+        # separate batches — the patient fetcher must still return patient 1
+        # exactly once.
+        result = extract(synthetic_db_path, cq, config=ExtractionConfig(batch_size=1))
+        subject_ids = [p["subject_id"] for p in result.patients]
+        assert len(subject_ids) == len(set(subject_ids))
+
+    def test_admission_count_unchanged_across_batch_sizes(self, synthetic_db_path):
+        """Admissions are unique by hadm_id; batching must preserve count."""
+        cq = CompetencyQuestion(
+            original_question="all biomarkers",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="cohort",
+        )
+        for batch_size in (1, 2, 3, 1000):
+            result = extract(
+                synthetic_db_path, cq, config=ExtractionConfig(batch_size=batch_size),
+            )
+            hadms = {a["hadm_id"] for a in result.admissions}
+            assert len(hadms) == len(result.admissions), (
+                f"admission duplication at batch_size={batch_size}"
+            )

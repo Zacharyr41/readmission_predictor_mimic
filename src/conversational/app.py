@@ -64,18 +64,24 @@ with st.sidebar:
     )
 
     with st.expander("Advanced Settings"):
-        max_cohort = st.number_input(
-            "Max cohort size",
-            min_value=10,
-            max_value=5000,
-            value=500,
+        batch_size = st.number_input(
+            "Batch size",
+            min_value=100,
+            max_value=10000,
+            value=2000,
             step=100,
-            help="Maximum admissions to include. Larger = slower but more data.",
+            help=(
+                "Admissions per IN-clause batch sent to the database. "
+                "Lower if you hit BigQuery parameter limits; higher for fewer round-trips."
+            ),
         )
         cohort_strategy = st.selectbox(
             "Cohort strategy",
             options=["recent", "random"],
-            help="'recent' selects most recent admissions; 'random' samples randomly.",
+            help=(
+                "'recent' orders admissions by admittime DESC; 'random' shuffles "
+                "them. Affects batch composition but not final result set."
+            ),
         )
         max_workers = st.number_input(
             "Parallel workers",
@@ -106,7 +112,7 @@ with st.sidebar:
                     data_source=ds,
                     bigquery_project=bq_project,
                     extraction_config=ExtractionConfig(
-                        max_cohort_size=max_cohort,
+                        batch_size=batch_size,
                         cohort_strategy=cohort_strategy,
                     ),
                     max_workers=max_workers,

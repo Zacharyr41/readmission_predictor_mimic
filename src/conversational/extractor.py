@@ -228,36 +228,71 @@ def _extract(
     config: ExtractionConfig | None = None,
     resolver: ConceptResolver | None = None,
 ) -> ExtractionResult:
-    hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters, config=config)
+    cfg = config or ExtractionConfig()
+    hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters, config=cfg)
     if not hadm_ids:
         return ExtractionResult()
 
+    # Phase 2: the cohort query now returns every matching admission (no LIMIT),
+    # so here we chunk it into ``batch_size`` pieces before sending to
+    # downstream fetchers. Each fetcher is called once per batch and results
+    # are concatenated; patients are deduped by subject_id since a single
+    # patient can appear in multiple admission batches.
+    batch_size = cfg.batch_size
+    patients_by_subject: dict = {}
+    admissions: list[dict] = []
+    icu_stays: list[dict] = []
     events: dict[str, list[dict]] = {}
-    for concept in cq.clinical_concepts:
-        # Resolve category-level concepts to specific names
-        if resolver:
-            resolved_names = resolver.resolve(concept)
-        else:
-            resolved_names = [concept.name]
 
-        for name in resolved_names:
-            resolved_concept = ClinicalConcept(
-                name=name,
-                concept_type=concept.concept_type,
-                attributes=concept.attributes,
-            ) if name != concept.name else concept
+    # Pre-resolve concept name expansion once; the resolved names are batch-independent.
+    resolved_concepts: list[tuple[str, ClinicalConcept]] = []
+    for concept in cq.clinical_concepts:
+        names = resolver.resolve(concept) if resolver else [concept.name]
+        for name in names:
+            resolved_concept = (
+                ClinicalConcept(
+                    name=name,
+                    concept_type=concept.concept_type,
+                    attributes=concept.attributes,
+                )
+                if name != concept.name
+                else concept
+            )
+            resolved_concepts.append((concept.concept_type, resolved_concept))
+
+    for batch in _iter_hadm_batches(hadm_ids, batch_size):
+        # Patients: dedupe by subject_id across batches.
+        for p in _fetch_patients(backend, batch):
+            patients_by_subject.setdefault(p["subject_id"], p)
+        admissions.extend(_fetch_admissions(backend, batch))
+        icu_stays.extend(_fetch_icu_stays(backend, batch))
+
+        for concept_type, resolved_concept in resolved_concepts:
             rows = _extract_concept(
-                backend, resolved_concept, hadm_ids, cq.temporal_constraints,
+                backend, resolved_concept, batch, cq.temporal_constraints,
             )
             if rows:
-                events.setdefault(concept.concept_type, []).extend(rows)
+                events.setdefault(concept_type, []).extend(rows)
 
     return ExtractionResult(
-        patients=_fetch_patients(backend, hadm_ids),
-        admissions=_fetch_admissions(backend, hadm_ids),
-        icu_stays=_fetch_icu_stays(backend, hadm_ids),
+        patients=list(patients_by_subject.values()),
+        admissions=admissions,
+        icu_stays=icu_stays,
         events=events,
     )
+
+
+def _iter_hadm_batches(hadm_ids: list[int], batch_size: int):
+    """Yield successive slices of ``hadm_ids`` of length ``batch_size``.
+
+    The primary reason batching exists is to bound the width of the
+    ``hadm_id IN (...)`` clause sent to the database (BigQuery caps at ~10k
+    positional params, DuckDB has no hard limit but very wide IN lists slow
+    planning). Final result shape must not depend on the batch size —
+    that's exercised by ``test_biomarker_extraction_invariant_under_batch_size``.
+    """
+    for i in range(0, len(hadm_ids), batch_size):
+        yield hadm_ids[i : i + batch_size]
 
 
 # ---------------------------------------------------------------------------
@@ -306,21 +341,13 @@ def _get_filtered_hadm_ids(
     order = "admittime DESC" if cfg.cohort_strategy == "recent" else backend.random_fn()
     # Use a subquery so ORDER BY references a column visible after SELECT DISTINCT
     # (BigQuery rejects ORDER BY on columns not in the DISTINCT select list).
+    # Phase 2: no LIMIT — downstream fetchers batch via cfg.batch_size.
     inner = (
         f"SELECT DISTINCT a.hadm_id, a.admittime"
         f" FROM {t('admissions')} a {join_sql}{where_clause}"
     )
-    sql = (
-        f"SELECT hadm_id FROM ({inner}) sub"
-        f" ORDER BY {order} LIMIT {cfg.max_cohort_size}"
-    )
-    hadm_ids = [r[0] for r in backend.execute(sql, frag.params)]
-    if len(hadm_ids) == cfg.max_cohort_size:
-        logger.warning(
-            "Cohort capped at %d admissions (limit reached).",
-            cfg.max_cohort_size,
-        )
-    return hadm_ids
+    sql = f"SELECT hadm_id FROM ({inner}) sub ORDER BY {order}"
+    return [r[0] for r in backend.execute(sql, frag.params)]
 
 
 # ---------------------------------------------------------------------------

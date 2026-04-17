@@ -46,9 +46,16 @@ class CompetencyQuestion(BaseModel):
 
 
 class ExtractionConfig(BaseModel):
-    """Configurable settings for data extraction."""
+    """Configurable settings for data extraction.
 
-    max_cohort_size: int = 500
+    Phase 2 removed the artificial ``max_cohort_size`` cap; the cohort query
+    now returns every matching admission. ``batch_size`` bounds the width of
+    the ``hadm_id IN (...)`` clauses downstream fetchers send to the
+    database — a performance knob, not a semantic one.
+    """
+
+    model_config = {"extra": "forbid"}
+    batch_size: int = 2000
     cohort_strategy: Literal["recent", "random"] = "recent"
 
 
