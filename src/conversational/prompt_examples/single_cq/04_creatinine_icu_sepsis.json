@@ -1,0 +1,14 @@
+{
+  "original_question": "What are the creatinine levels during ICU stay for sepsis patients?",
+  "clinical_concepts": [
+    {"name": "creatinine", "concept_type": "biomarker"}
+  ],
+  "temporal_constraints": [
+    {"relation": "during", "reference_event": "ICU stay"}
+  ],
+  "patient_filters": [
+    {"field": "diagnosis", "operator": "contains", "value": "sepsis"}
+  ],
+  "return_type": "text_and_table",
+  "scope": "cohort"
+}

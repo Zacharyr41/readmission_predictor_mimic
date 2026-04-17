@@ -1,0 +1,8 @@
+{
+  "original_question": "List all patients diagnosed with cerebral infarction",
+  "clinical_concepts": [
+    {"name": "cerebral infarction", "concept_type": "diagnosis"}
+  ],
+  "return_type": "table",
+  "scope": "cohort"
+}

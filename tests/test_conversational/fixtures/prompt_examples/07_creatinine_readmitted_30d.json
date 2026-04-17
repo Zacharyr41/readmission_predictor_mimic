@@ -1,0 +1,12 @@
+{
+  "original_question": "What is the average creatinine for patients readmitted within 30 days?",
+  "clinical_concepts": [
+    {"name": "creatinine", "concept_type": "biomarker"}
+  ],
+  "patient_filters": [
+    {"field": "readmitted_30d", "operator": "=", "value": "1"}
+  ],
+  "aggregation": "mean",
+  "return_type": "text",
+  "scope": "cohort"
+}

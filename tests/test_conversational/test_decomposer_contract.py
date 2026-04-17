@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -94,18 +95,28 @@ def test_every_supported_filter_field_appears_in_prompt():
 
 
 def test_prompt_does_not_advertise_unsupported_filter_fields():
-    """Catch the reverse drift: a field listed in the prompt but not enforced.
+    """Catch the reverse drift: a name in the prompt's Supported Operations
+    section that the decomposer would reject.
 
-    Extracts the ``field`` enumeration from the prompt schema block and checks
-    it against ``_supported_filter_fields()``. The whole block is a single
-    Literal like ``<age|gender|diagnosis|...>`` — we parse that.
+    The "Supported Operations" section is registry-rendered; its names come
+    straight from ``describe_for_prompt``. Any name that shows up in the
+    filter sub-section must therefore be a registered filter — if the prompt
+    ever grows a non-registry section advertising extra filters, this test
+    trips.
     """
-    match = re.search(
-        r'"field":\s*"<([^">]+)>"',
-        DECOMPOSITION_SYSTEM_PROMPT,
+    # Locate the filter sub-section and collect every name appearing at the
+    # start of a row (the ``describe_for_prompt`` format is
+    # ``  <name:<22> (ops) ...``).
+    section_start = DECOMPOSITION_SYSTEM_PROMPT.find(
+        "## filter  (used in patient_filters[].field)"
     )
-    assert match, "Could not locate patient_filters field enumeration in prompt"
-    advertised = set(match.group(1).split("|"))
+    assert section_start >= 0, "filter sub-section missing from prompt"
+    next_section = DECOMPOSITION_SYSTEM_PROMPT.find(
+        "## ", section_start + 1
+    )
+    section = DECOMPOSITION_SYSTEM_PROMPT[section_start:next_section]
+
+    advertised = set(re.findall(r"^\s{2}(\w[\w_]*)\b", section, flags=re.MULTILINE))
     extra = advertised - _supported_filter_fields()
     assert not extra, (
         f"Prompt advertises filter fields that the decomposer will reject: {extra}"
@@ -303,3 +314,162 @@ def test_prompt_examples_validate_return_type_idempotent(block: dict):
     once = _validate_return_type(cq.model_copy(deep=True))
     twice = _validate_return_type(once.model_copy(deep=True))
     assert twice.model_dump() == once.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# 8. Phase 3 — self-awareness, pipeline staging, registry-driven sections
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineSelfAwareness:
+    """The prompt must tell the LLM where it sits in the pipeline, so that
+    downstream-step-specific failure modes (LLM writing SQL, inventing data)
+    can be avoided. These tests enforce the role section is present and
+    names every pipeline stage."""
+
+    def test_role_section_declares_decomposer(self):
+        assert "Decomposer" in DECOMPOSITION_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("stage", [
+        "Decompose", "Extract", "Graph build", "Reason", "Answer",
+    ])
+    def test_every_pipeline_stage_named_in_prompt(self, stage: str):
+        assert stage in DECOMPOSITION_SYSTEM_PROMPT, (
+            f"Pipeline stage {stage!r} missing from the Role section — "
+            "self-awareness is incomplete."
+        )
+
+    def test_role_section_forbids_sql_generation(self):
+        """The LLM must be told not to write SQL. This is the single most
+        important constraint — a regression here leaks compute into step 1."""
+        assert "NEVER" in DECOMPOSITION_SYSTEM_PROMPT
+        assert "SQL" in DECOMPOSITION_SYSTEM_PROMPT
+
+
+class TestRegistryDrivenSections:
+    """Every registered operation name across all three kinds must appear in
+    its own prompt sub-section. Aggregate and comparison_axis dispatch is
+    new in Phase 3 — Phase 1b already covers filter fields."""
+
+    @pytest.mark.parametrize("kind,subsection_header", [
+        ("filter", "## filter"),
+        ("aggregate", "## aggregate"),
+        ("comparison_axis", "## comparison_axis"),
+    ])
+    def test_every_registered_name_appears_in_its_subsection(
+        self, kind: str, subsection_header: str,
+    ):
+        from src.conversational.operations import get_default_registry
+
+        start = DECOMPOSITION_SYSTEM_PROMPT.find(subsection_header)
+        assert start >= 0, f"subsection {subsection_header!r} missing from prompt"
+        next_header = DECOMPOSITION_SYSTEM_PROMPT.find("## ", start + 1)
+        # If this is the last subsection, take everything to the next top-level
+        # ``# `` header; otherwise stop at the next ``## `` sub-header.
+        if next_header < 0:
+            end = DECOMPOSITION_SYSTEM_PROMPT.find("\n# ", start + 1)
+            next_header = end if end >= 0 else len(DECOMPOSITION_SYSTEM_PROMPT)
+        subsection = DECOMPOSITION_SYSTEM_PROMPT[start:next_header]
+
+        for name in get_default_registry().supported_names(kind):
+            assert name in subsection, (
+                f"Operation name {name!r} (kind={kind}) missing from the "
+                f"{subsection_header} sub-section"
+            )
+
+
+class TestPromptSnapshot:
+    """The committed ``prompts_snapshot.txt`` is the rendered prompt verbatim.
+    When the prompt changes — because someone added an example, registered
+    a new operation, edited a static section, whatever — this test fails
+    loudly and forces the snapshot to be regenerated in the same commit.
+    That way prompt changes are visible in PR diffs rather than buried in
+    a function call that nobody reads."""
+
+    SNAPSHOT_PATH = Path(__file__).parent / "fixtures" / "prompts_snapshot.txt"
+
+    def test_prompt_matches_snapshot(self):
+        if not self.SNAPSHOT_PATH.exists():
+            self.SNAPSHOT_PATH.write_text(DECOMPOSITION_SYSTEM_PROMPT)
+            pytest.skip(
+                f"Snapshot written to {self.SNAPSHOT_PATH}. Re-run tests to verify."
+            )
+        expected = self.SNAPSHOT_PATH.read_text()
+        if expected != DECOMPOSITION_SYSTEM_PROMPT:
+            diff_preview = (
+                f"Prompt changed. To accept, re-run with:\n"
+                f"    rm {self.SNAPSHOT_PATH}\n"
+                f"    pytest {__file__}\n"
+                f"Length: expected {len(expected)} chars, got "
+                f"{len(DECOMPOSITION_SYSTEM_PROMPT)}."
+            )
+            assert expected == DECOMPOSITION_SYSTEM_PROMPT, diff_preview
+
+
+class TestBuildSystemPromptPluggable:
+    """``build_system_prompt(registry)`` must accept an arbitrary registry so
+    tests can exercise the prompt with registries they control — and so the
+    Phase-5 SNOMED work can swap the registry when a resolver is present.
+    """
+
+    def test_builder_uses_supplied_registry(self):
+        from src.conversational.operations import (
+            FilterFragment,
+            FilterOperation,
+            OperationRegistry,
+        )
+        from src.conversational.prompts import build_system_prompt
+
+        custom = OperationRegistry()
+        custom.register(FilterOperation(
+            name="zzz_custom_field",
+            operators=frozenset({"="}),
+            value_type="scalar",
+            description="test-only filter registered in a custom registry",
+            compile_fn=lambda f, ctx: FilterFragment(),
+        ))
+        prompt = build_system_prompt(custom)
+        assert "zzz_custom_field" in prompt
+        # Default-registry names should NOT appear because we passed a
+        # fresh registry containing only the custom op.
+        assert "readmitted_30d" not in prompt.split("## filter")[1].split("## ")[0]
+
+
+# ---------------------------------------------------------------------------
+# 9. Example files live in their canonical location
+# ---------------------------------------------------------------------------
+
+
+class TestPromptExampleLocation:
+    """Phase 3 inverted the source of truth: example JSON files under
+    ``src/conversational/prompt_examples/single_cq/`` are what gets rendered
+    into the prompt, not a prompt string that we then extract from. This
+    test guards against a regression where those files get ignored."""
+
+    def test_single_cq_directory_exists_and_is_nonempty(self):
+        from src.conversational.prompts import PROMPT_EXAMPLES_DIR
+
+        single_dir = PROMPT_EXAMPLES_DIR / "single_cq"
+        assert single_dir.exists(), (
+            f"Source-of-truth examples directory missing: {single_dir}"
+        )
+        files = list(single_dir.glob("*.json"))
+        assert files, "No single_cq examples on disk — prompt will be empty"
+
+    def test_every_source_example_appears_verbatim_in_prompt(self):
+        """Structural guard: the rendered prompt includes each source
+        example's ``original_question`` so the LLM sees them as worked
+        examples, not just loose JSON."""
+        from src.conversational.prompts import (
+            DECOMPOSITION_SYSTEM_PROMPT,
+            PROMPT_EXAMPLES_DIR,
+        )
+
+        single_dir = PROMPT_EXAMPLES_DIR / "single_cq"
+        for path in sorted(single_dir.glob("*.json")):
+            data = json.loads(path.read_text())
+            q = data.get("original_question", "")
+            assert q and q in DECOMPOSITION_SYSTEM_PROMPT, (
+                f"Example {path.name!r} with question {q!r} did not make it "
+                f"into the rendered prompt."
+            )

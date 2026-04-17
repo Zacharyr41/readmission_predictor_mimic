@@ -1,10 +1,7 @@
 {
   "original_question": "Compare mean lactate between readmitted and non-readmitted patients",
   "clinical_concepts": [
-    {
-      "name": "lactate",
-      "concept_type": "biomarker"
-    }
+    {"name": "lactate", "concept_type": "biomarker"}
   ],
   "aggregation": "mean",
   "return_type": "text_and_table",

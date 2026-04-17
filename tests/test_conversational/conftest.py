@@ -13,11 +13,14 @@ Fixture directories
     after decomposer post-processing. ``tags`` are free-form labels.
 
 ``fixtures/prompt_examples/*.json``
-    Auto-extracted at test-session start from DECOMPOSITION_SYSTEM_PROMPT. Every
-    ```json``` block inside the live prompt is written to a file here, named by
-    a hash of the block's question. Because these are regenerated on every run,
-    they cannot drift from the live prompt — if the prompt changes, so do the
-    files, and so do any tests that parametrize over them.
+    Mirror of the canonical examples under
+    ``src/conversational/prompt_examples/single_cq/``. Regenerated at test-
+    session start so the test fixture tracks the source. The source-of-truth
+    layout inverted in Phase 3: examples are now authored as JSON files under
+    ``src/`` and the prompt is *built from* them, rather than extracted from
+    a prompt string. The drift-proof guarantee is the same — tests that
+    parametrize over these fixtures see whatever the prompt builder currently
+    embeds.
 
 ``fixtures/malformed_json/*.txt``
     Raw strings that simulate LLM responses which are not clean JSON. Used by
@@ -26,16 +29,16 @@ Fixture directories
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
+from src.conversational.prompts import (
+    DECOMPOSITION_SYSTEM_PROMPT,
+    PROMPT_EXAMPLES_DIR as _SRC_PROMPT_EXAMPLES_DIR,
+)
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -85,70 +88,28 @@ def mock_anthropic(responses: list[str]) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-_JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
-
-
-def _extract_prompt_json_blocks(prompt: str) -> list[dict[str, Any]]:
-    """Parse every ```json``` block in *prompt* and return them as dicts.
-
-    Blocks that fail to parse are skipped silently — the prompt-example-
-    validity test will catch that separately (by parametrizing over the
-    raw block source). For now we only return successfully-parsed blocks
-    so callers can use them as CompetencyQuestion payloads.
-    """
-    blocks: list[dict[str, Any]] = []
-    for match in _JSON_BLOCK_RE.finditer(prompt):
-        raw = match.group(1).strip()
-        try:
-            blocks.append(json.loads(raw))
-        except json.JSONDecodeError:
-            # Still capture the raw text so the validity test can fail on it
-            blocks.append({"__raw__": raw, "__parse_error__": True})
-    return blocks
-
-
 def _sync_prompt_examples() -> list[Path]:
-    """Regenerate ``fixtures/prompt_examples/`` from the live prompt.
+    """Mirror ``src/conversational/prompt_examples/single_cq/`` into the test
+    fixture directory.
 
     Called once per test session (see ``_prompt_examples_synced`` autouse
-    fixture). Overwrites any existing files so no drift is possible. Each
-    block is stored under a filename derived from the ``original_question``
-    field (stable, human-readable) or a content hash (fallback).
+    fixture). Overwrites any existing files so the fixture can never lag
+    the canonical source. Filenames are preserved so test IDs stay stable.
     """
     PROMPT_EXAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Clear out any previous snapshot so removed prompt blocks don't linger.
+    # Clear out the old snapshot so removed source files don't linger.
     for existing in PROMPT_EXAMPLES_DIR.glob("*.json"):
         existing.unlink()
 
+    src_single = _SRC_PROMPT_EXAMPLES_DIR / "single_cq"
     written: list[Path] = []
-    for block in _extract_prompt_json_blocks(DECOMPOSITION_SYSTEM_PROMPT):
-        if block.get("__parse_error__"):
-            # Preserve the raw text for the validity test to trip on.
-            raw = block["__raw__"]
-            digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
-            path = PROMPT_EXAMPLES_DIR / f"_unparseable_{digest}.json"
-            path.write_text(raw)
-            written.append(path)
-            continue
-
-        question = block.get("original_question", "")
-        if question:
-            slug = _slugify(question)[:60]
-        else:
-            slug = hashlib.sha1(
-                json.dumps(block, sort_keys=True).encode("utf-8")
-            ).hexdigest()[:10]
-        path = PROMPT_EXAMPLES_DIR / f"{slug}.json"
-        path.write_text(json.dumps(block, indent=2))
-        written.append(path)
-
+    if src_single.exists():
+        for src_path in sorted(src_single.glob("*.json")):
+            dest = PROMPT_EXAMPLES_DIR / src_path.name
+            dest.write_text(src_path.read_text())
+            written.append(dest)
     return written
-
-
-def _slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
-    return slug or "unnamed"
 
 
 @pytest.fixture(scope="session", autouse=True)

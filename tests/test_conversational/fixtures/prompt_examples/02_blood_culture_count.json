@@ -1,0 +1,9 @@
+{
+  "original_question": "How many patients had a positive blood culture?",
+  "clinical_concepts": [
+    {"name": "blood culture", "concept_type": "microbiology"}
+  ],
+  "aggregation": "count",
+  "return_type": "text",
+  "scope": "cohort"
+}

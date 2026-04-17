@@ -1,0 +1,11 @@
+{
+  "original_question": "Plot the lactate trend over time for patient 12345",
+  "clinical_concepts": [
+    {"name": "lactate", "concept_type": "biomarker"}
+  ],
+  "patient_filters": [
+    {"field": "subject_id", "operator": "=", "value": "12345"}
+  ],
+  "return_type": "visualization",
+  "scope": "single_patient"
+}

@@ -1,0 +1,11 @@
+{
+  "original_question": "How did the heart rate change over the ICU stay?",
+  "clinical_concepts": [
+    {"name": "heart rate", "concept_type": "vital"}
+  ],
+  "temporal_constraints": [
+    {"relation": "during", "reference_event": "ICU stay"}
+  ],
+  "return_type": "visualization",
+  "scope": "single_patient"
+}

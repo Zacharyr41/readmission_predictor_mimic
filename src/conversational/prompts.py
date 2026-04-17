@@ -1,14 +1,78 @@
-"""System prompts and message builders for the conversational analytics pipeline."""
+"""System prompts and message builders for the conversational analytics pipeline.
+
+Phase 3: the decomposition system prompt is now assembled from parts.
+
+Each structural section — Role & Pipeline, Decomposition Goals, Ontology,
+Concept Types, Supported Operations, Output Schema, Examples — is a
+separately-maintained string or file. The "Supported Operations" section is
+injected from the OperationRegistry so the LLM's view of filters / aggregates
+/ comparison axes cannot drift from what the extractor and reasoner will
+actually accept. Examples are loaded from ``src/conversational/prompt_examples/``
+so adding a behavioural example is a matter of dropping a JSON file, not
+editing a multi-kilobyte prompt string.
+
+Call sites import ``DECOMPOSITION_SYSTEM_PROMPT`` (unchanged public name);
+it's now a module-level constant built from the default registry at import time.
+Tests that want a custom registry call ``build_system_prompt(registry)``
+directly.
+
+Phase 4 will extend this with interpretation_summary / clarifying_question
+sections once those fields land on ``CompetencyQuestion``.
+"""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-DECOMPOSITION_SYSTEM_PROMPT = """\
-You are a clinical question decomposer for an ICU analytics system built on MIMIC-IV data.
-Your ONLY job is to translate a natural-language clinical question into a structured JSON object.
-You must NEVER generate SQL, SPARQL, or compute any results — only structure the question.
+from src.conversational.operations import OperationRegistry, get_default_registry
 
+
+# ---------------------------------------------------------------------------
+# Static sections (hand-authored prose)
+# ---------------------------------------------------------------------------
+
+
+_ROLE_AND_PIPELINE = """\
+# Role and Pipeline
+
+You are the **Decomposer**, step 1 of a 5-step pipeline used by clinicians and
+clinical researchers to answer questions against MIMIC-IV ICU data.
+
+The pipeline:
+  1. Decompose  (you)          natural language  →  structured CompetencyQuestion
+  2. Extract                   CompetencyQuestion →  rows from MIMIC-IV (SQL)
+  3. Graph build               rows              →  RDF knowledge graph
+  4. Reason                    graph + CQ        →  answer rows (SPARQL)
+  5. Answer                    rows              →  text summary / table / chart
+
+Because you are only step 1, you NEVER compute an answer, write SQL, or invent
+data. Downstream steps will fail loudly if your CompetencyQuestion references
+a concept, filter, aggregation, or comparison axis that is not listed in the
+"Supported Operations" section below — so prefer the closest supported option
+and, if nothing fits, return a best-effort structured CompetencyQuestion that
+stays within the supported surface area.
+"""
+
+
+_DECOMPOSITION_GOALS = """\
+# Decomposition Goals
+
+A good CompetencyQuestion:
+  - Uses **concrete clinical concepts** (named lab, drug, diagnosis) where the
+    user's question permits. Only fall back to a category ("antibiotics",
+    "vasopressors") when no specific name is given.
+  - Picks the **narrowest defensible scope**: a single patient when one is
+    named, a cohort when the question is population-level, a comparison only
+    when two groups are being explicitly contrasted.
+  - Includes temporal anchors (reference_event + time_window) whenever the
+    question implies them ("first 24 hours", "during ICU stay").
+  - Uses only the filter fields, aggregations, and comparison axes listed in
+    "Supported Operations" — never invents new ones.
+"""
+
+
+_ONTOLOGY = """\
 # Ontology
 
 The knowledge graph follows this class hierarchy (OWL-Time temporal modelling):
@@ -23,7 +87,10 @@ The knowledge graph follows this class hierarchy (OWL-Time temporal modelling):
                         ├─ MicrobiologyEvent    (cultures)
                         ├─ PrescriptionEvent    (medications)
                         └─ DiagnosisEvent       (ICD codes)
+"""
 
+
+_CONCEPT_TYPES = """\
 # Concept Types and Examples
 
 Map clinical entities to one of these concept_type values:
@@ -48,7 +115,10 @@ Map clinical entities to one of these concept_type values:
 - "outcome"       → Patient outcomes: mortality, death, hospital expire, survival
                      NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
                      and use aggregation (e.g. aggregation="mean") for LOS queries
+"""
 
+
+_OUTPUT_SCHEMA = """\
 # Output Schema
 
 Return ONLY valid JSON matching this schema (no extra text):
@@ -62,24 +132,19 @@ Return ONLY valid JSON matching this schema (no extra text):
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}
   ],
   "patient_filters": [
-    {"field": "<age|gender|diagnosis|admission_type|subject_id|readmitted_30d|readmitted_60d>",
-     "operator": "<>|<|=|>=|<=|contains>", "value": "<value>"}
+    {"field": "<see Supported Operations / filter>", "operator": "<see that filter's row>", "value": "<string or list of strings>"}
   ],
-  "aggregation": "<mean|median|max|min|count|sum or null>",
+  "aggregation": "<see Supported Operations / aggregate; or null>",
   "return_type": "<text|table|text_and_table|visualization>",
   "scope": "<single_patient|cohort|comparison>",
-  "comparison_field": "<gender|age|readmitted_30d|readmitted_60d|admission_type|discharge_location or null>"
+  "comparison_field": "<see Supported Operations / comparison_axis; or null>"
 }
 
-Use ONLY the listed field names for patient_filters. readmitted_30d and readmitted_60d
-are binary (0 = not readmitted, 1 = readmitted within that window).
-
-When scope is "comparison", set comparison_field to the dimension being compared
-(e.g. "gender" for male vs female, "readmitted_30d" for readmitted vs not,
-"admission_type" for emergency vs elective). If not clear, default to "readmitted_30d".
-
 Omit empty arrays and null fields — Pydantic defaults will fill them.
+"""
 
+
+_RETURN_TYPE_INFERENCE = """\
 # Return Type Inference
 
 Infer return_type from the question's intent:
@@ -99,7 +164,10 @@ Infer return_type from the question's intent:
   distribution, or visualization. ALSO use when the question asks about temporal
   trends ("over time", "trajectory", "trend", "day-by-day", "hourly changes")
   even without explicit visualization keywords — temporal trends are best shown visually.
+"""
 
+
+_SCOPE_INFERENCE = """\
 # Scope Inference
 
 - "single_patient": A specific patient ID is mentioned, or "this patient", "the patient"
@@ -107,122 +175,136 @@ Infer return_type from the question's intent:
 - "comparison": Explicit group-vs-group — "compare", "vs", "between … and …",
   "readmitted vs not readmitted"
 
-# Examples
-
-Question: "What is the average creatinine for patients over 65?"
-```json
-{
-  "original_question": "What is the average creatinine for patients over 65?",
-  "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
-  "patient_filters": [{"field": "age", "operator": ">", "value": "65"}],
-  "aggregation": "mean",
-  "return_type": "text",
-  "scope": "cohort"
-}
-```
-
-Question: "How many patients had a positive blood culture?"
-```json
-{
-  "original_question": "How many patients had a positive blood culture?",
-  "clinical_concepts": [{"name": "blood culture", "concept_type": "microbiology"}],
-  "aggregation": "count",
-  "return_type": "text",
-  "scope": "cohort"
-}
-```
-
-Question: "List all patients diagnosed with cerebral infarction"
-```json
-{
-  "original_question": "List all patients diagnosed with cerebral infarction",
-  "clinical_concepts": [{"name": "cerebral infarction", "concept_type": "diagnosis"}],
-  "return_type": "table",
-  "scope": "cohort"
-}
-```
-
-Question: "What are the creatinine levels during ICU stay for sepsis patients?"
-```json
-{
-  "original_question": "What are the creatinine levels during ICU stay for sepsis patients?",
-  "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
-  "temporal_constraints": [{"relation": "during", "reference_event": "ICU stay"}],
-  "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "sepsis"}],
-  "return_type": "text_and_table",
-  "scope": "cohort"
-}
-```
-
-Question: "Compare mean lactate between readmitted and non-readmitted patients"
-```json
-{
-  "original_question": "Compare mean lactate between readmitted and non-readmitted patients",
-  "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker"}],
-  "aggregation": "mean",
-  "return_type": "text_and_table",
-  "scope": "comparison",
-  "comparison_field": "readmitted_30d"
-}
-```
-
-Question: "Compare creatinine between male and female patients"
-```json
-{
-  "original_question": "Compare creatinine between male and female patients",
-  "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
-  "aggregation": "mean",
-  "return_type": "text_and_table",
-  "scope": "comparison",
-  "comparison_field": "gender"
-}
-```
-
-Question: "What is the average creatinine for patients readmitted within 30 days?"
-```json
-{
-  "original_question": "What is the average creatinine for patients readmitted within 30 days?",
-  "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}],
-  "patient_filters": [{"field": "readmitted_30d", "operator": "=", "value": "1"}],
-  "aggregation": "mean",
-  "return_type": "text",
-  "scope": "cohort"
-}
-```
-
-Question: "Which antibiotics were prescribed during the first 48 hours of ICU admission?"
-```json
-{
-  "original_question": "Which antibiotics were prescribed during the first 48 hours of ICU admission?",
-  "clinical_concepts": [{"name": "antibiotics", "concept_type": "drug"}],
-  "temporal_constraints": [{"relation": "within", "reference_event": "ICU admission", "time_window": "48h"}],
-  "return_type": "text_and_table",
-  "scope": "cohort"
-}
-```
-
-Question: "Plot the lactate trend over time for patient 12345"
-```json
-{
-  "original_question": "Plot the lactate trend over time for patient 12345",
-  "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker"}],
-  "patient_filters": [{"field": "subject_id", "operator": "=", "value": "12345"}],
-  "return_type": "visualization",
-  "scope": "single_patient"
-}
-```
-
-Question: "How did the heart rate change over the ICU stay?"
-```json
-{
-  "original_question": "How did the heart rate change over the ICU stay?",
-  "clinical_concepts": [{"name": "heart rate", "concept_type": "vital"}],
-  "temporal_constraints": [{"relation": "during", "reference_event": "ICU stay"}],
-  "return_type": "visualization",
-  "scope": "single_patient"
-}
-```
+When scope is "comparison", set comparison_field to the dimension being compared
+(see "Supported Operations / comparison_axis" below). If not clear, default to
+"readmitted_30d".
 """
+
+
+# ---------------------------------------------------------------------------
+# Operation-section rendering
+# ---------------------------------------------------------------------------
+
+
+def _operations_section(registry: OperationRegistry) -> str:
+    """Render the Supported Operations section from the registry.
+
+    Three sub-sections, one per kind. Each row is produced by the operation's
+    ``describe_for_prompt`` method, so adding a new operation updates the
+    prompt automatically. No drift possible — the prompt<->registry round-trip
+    test enforces this.
+    """
+    lines: list[str] = ["# Supported Operations", ""]
+    lines.append(
+        "Use ONLY the names listed here for patient_filters[].field, "
+        "aggregation, and comparison_field. Any other value triggers a retry."
+    )
+    for kind, label in [
+        ("filter", "filter  (used in patient_filters[].field)"),
+        ("aggregate", "aggregate  (used in aggregation)"),
+        ("comparison_axis", "comparison_axis  (used in comparison_field)"),
+    ]:
+        lines.append("")
+        lines.append(f"## {label}")
+        lines.append("")
+        lines.append(registry.describe_for_prompt(kind))
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Examples
+# ---------------------------------------------------------------------------
+
+
+PROMPT_EXAMPLES_DIR = Path(__file__).parent / "prompt_examples"
+
+
+def _load_single_cq_examples() -> list[dict]:
+    """Load every JSON file under ``prompt_examples/single_cq/``.
+
+    Files are sorted by filename so numbering (``01_``, ``02_``, …) controls
+    presentation order. Each file is a CompetencyQuestion JSON payload.
+    """
+    single_dir = PROMPT_EXAMPLES_DIR / "single_cq"
+    if not single_dir.exists():
+        return []
+    return [
+        json.loads(p.read_text())
+        for p in sorted(single_dir.glob("*.json"))
+    ]
+
+
+def _examples_section() -> str:
+    """Render the Examples section by formatting each fixture as a question +
+    JSON code fence, mirroring the old prompt layout so the LLM's behaviour
+    is preserved during the migration."""
+    examples = _load_single_cq_examples()
+    if not examples:
+        return "# Examples\n\n(no examples provided)\n"
+    parts: list[str] = ["# Examples", ""]
+    for ex in examples:
+        question = ex.get("original_question", "<no question>")
+        parts.append(f'Question: "{question}"')
+        parts.append("```json")
+        parts.append(json.dumps(ex, indent=2))
+        parts.append("```")
+        parts.append("")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Builder
+# ---------------------------------------------------------------------------
+
+
+_PROMPT_HEADER = """\
+You are a clinical question decomposer for an ICU analytics system built on MIMIC-IV data.
+Your ONLY job is to translate a natural-language clinical question into a structured JSON object.
+You must NEVER generate SQL, SPARQL, or compute any results — only structure the question.
+"""
+
+
+def build_system_prompt(registry: OperationRegistry) -> str:
+    """Assemble the full decomposition system prompt.
+
+    Sections in order:
+        header → Role & Pipeline → Decomposition Goals → Ontology
+        → Concept Types → Output Schema → Supported Operations
+        → Return Type Inference → Scope Inference → Examples
+
+    Every structural section lives in exactly one place: either a constant in
+    this module or a JSON file under ``prompt_examples/``. Rebuilding from
+    the registry ensures the "Supported Operations" section reflects the
+    current set of filter / aggregate / comparison_axis operations.
+    """
+    return "\n".join([
+        _PROMPT_HEADER,
+        _ROLE_AND_PIPELINE,
+        _DECOMPOSITION_GOALS,
+        _ONTOLOGY,
+        _CONCEPT_TYPES,
+        _OUTPUT_SCHEMA,
+        _operations_section(registry),
+        _RETURN_TYPE_INFERENCE,
+        _SCOPE_INFERENCE,
+        _examples_section(),
+    ])
+
+
+DECOMPOSITION_SYSTEM_PROMPT: str = build_system_prompt(get_default_registry())
+"""The default-registry system prompt, built once at import time.
+
+Call sites that want a custom registry should call ``build_system_prompt``
+directly. Editing the prompt means editing either (a) one of the static
+``_SECTION`` strings above, (b) an example JSON under ``prompt_examples/``,
+or (c) an operation's ``describe_for_prompt`` in ``operations*.py`` — never
+this module-level constant."""
+
+
+# ---------------------------------------------------------------------------
+# Answer-generation prompt (unchanged from Phase 0)
+# ---------------------------------------------------------------------------
+
 
 ANSWER_GENERATION_SYSTEM_PROMPT = """\
 You are a clinical data analyst generating concise summaries from structured query results.
@@ -235,6 +317,11 @@ Rules:
 - If the result set is empty, state clearly that no matching data was found.
 - Do not include caveats about data quality unless the results themselves indicate issues.
 """
+
+
+# ---------------------------------------------------------------------------
+# Message builder (unchanged from Phase 0)
+# ---------------------------------------------------------------------------
 
 
 def build_decomposition_messages(

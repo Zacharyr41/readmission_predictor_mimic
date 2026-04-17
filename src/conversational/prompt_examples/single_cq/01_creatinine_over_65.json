@@ -1,17 +1,10 @@
 {
   "original_question": "What is the average creatinine for patients over 65?",
   "clinical_concepts": [
-    {
-      "name": "creatinine",
-      "concept_type": "biomarker"
-    }
+    {"name": "creatinine", "concept_type": "biomarker"}
   ],
   "patient_filters": [
-    {
-      "field": "age",
-      "operator": ">",
-      "value": "65"
-    }
+    {"field": "age", "operator": ">", "value": "65"}
   ],
   "aggregation": "mean",
   "return_type": "text",
