@@ -1,0 +1,16 @@
+{
+  "name": "older_adults_synonym",
+  "question": "Compare heart rate in older adults vs younger patients",
+  "llm_response": "{\"original_question\": \"Compare heart rate in older adults vs younger patients\", \"clinical_concepts\": [{\"name\": \"heart rate\", \"concept_type\": \"vital\"}], \"aggregation\": \"mean\", \"return_type\": \"text_and_table\", \"scope\": \"comparison\", \"comparison_field\": \"age\"}",
+  "expected_cq": {
+    "original_question": "Compare heart rate in older adults vs younger patients",
+    "clinical_concepts": [{"name": "heart rate", "concept_type": "vital", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "comparison",
+    "comparison_field": "age"
+  },
+  "tags": ["comparison", "vital", "synonym:older_adults", "comparison_field:age"]
+}

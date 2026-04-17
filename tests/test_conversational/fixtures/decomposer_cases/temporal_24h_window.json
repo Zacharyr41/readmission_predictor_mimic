@@ -1,0 +1,16 @@
+{
+  "name": "temporal_24h_window",
+  "question": "Creatinine values within the first 24 hours of ICU admission",
+  "llm_response": "{\"original_question\": \"Creatinine values within the first 24 hours of ICU admission\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}], \"temporal_constraints\": [{\"relation\": \"within\", \"reference_event\": \"ICU admission\", \"time_window\": \"24h\"}], \"return_type\": \"text_and_table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Creatinine values within the first 24 hours of ICU admission",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [{"relation": "within", "reference_event": "ICU admission", "time_window": "24h"}],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "temporal:within", "time_window:24h"]
+}

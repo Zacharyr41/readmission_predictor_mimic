@@ -1,0 +1,21 @@
+{
+  "name": "multi_filter_combo",
+  "question": "Average creatinine for female sepsis patients over 50 readmitted within 30 days",
+  "llm_response": "{\"original_question\": \"Average creatinine for female sepsis patients over 50 readmitted within 30 days\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"gender\", \"operator\": \"=\", \"value\": \"F\"}, {\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"sepsis\"}, {\"field\": \"age\", \"operator\": \">\", \"value\": \"50\"}, {\"field\": \"readmitted_30d\", \"operator\": \"=\", \"value\": \"1\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Average creatinine for female sepsis patients over 50 readmitted within 30 days",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [
+      {"field": "gender", "operator": "=", "value": "F"},
+      {"field": "diagnosis", "operator": "contains", "value": "sepsis"},
+      {"field": "age", "operator": ">", "value": "50"},
+      {"field": "readmitted_30d", "operator": "=", "value": "1"}
+    ],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "multi_filter", "filter:gender", "filter:diagnosis", "filter:age", "filter:readmitted_30d"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "median_lactate",
+  "question": "What is the median lactate?",
+  "llm_response": "{\"original_question\": \"What is the median lactate?\", \"clinical_concepts\": [{\"name\": \"lactate\", \"concept_type\": \"biomarker\"}], \"aggregation\": \"median\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What is the median lactate?",
+    "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "median",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "aggregate:median"]
+}

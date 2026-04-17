@@ -1,0 +1,16 @@
+{
+  "name": "temporal_7d_window",
+  "question": "Heart rate measurements in the first 7 days of ICU stay",
+  "llm_response": "{\"original_question\": \"Heart rate measurements in the first 7 days of ICU stay\", \"clinical_concepts\": [{\"name\": \"heart rate\", \"concept_type\": \"vital\"}], \"temporal_constraints\": [{\"relation\": \"within\", \"reference_event\": \"ICU stay\", \"time_window\": \"7d\"}], \"return_type\": \"visualization\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Heart rate measurements in the first 7 days of ICU stay",
+    "clinical_concepts": [{"name": "heart rate", "concept_type": "vital", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [{"relation": "within", "reference_event": "ICU stay", "time_window": "7d"}],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "visualization",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "vital", "temporal:within", "time_window:7d", "return_type_visualization"]
+}

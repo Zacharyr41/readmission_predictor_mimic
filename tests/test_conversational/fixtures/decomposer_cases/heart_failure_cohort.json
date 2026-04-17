@@ -1,0 +1,16 @@
+{
+  "name": "heart_failure_cohort",
+  "question": "What is the average LOS for heart failure patients?",
+  "llm_response": "{\"original_question\": \"What is the average LOS for heart failure patients?\", \"clinical_concepts\": [], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"heart failure\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What is the average LOS for heart failure patients?",
+    "clinical_concepts": [],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "heart failure"}],
+    "aggregation": "mean",
+    "return_type": "text",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "no_concept", "los", "filter:diagnosis", "aggregate:mean"]
+}

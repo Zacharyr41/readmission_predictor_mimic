@@ -1,0 +1,16 @@
+{
+  "name": "icd_code_filter",
+  "question": "Show creatinine for patients with ICD I63",
+  "llm_response": "{\"original_question\": \"Show creatinine for patients with ICD I63\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"I63\"}], \"return_type\": \"text_and_table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Show creatinine for patients with ICD I63",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "I63"}],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "filter:diagnosis", "icd_code"]
+}

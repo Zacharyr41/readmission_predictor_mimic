@@ -1,0 +1,16 @@
+{
+  "name": "mrsa_culture",
+  "question": "How many MRSA cultures did we see?",
+  "llm_response": "{\"original_question\": \"How many MRSA cultures did we see?\", \"clinical_concepts\": [{\"name\": \"MRSA\", \"concept_type\": \"microbiology\"}], \"aggregation\": \"count\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "How many MRSA cultures did we see?",
+    "clinical_concepts": [{"name": "MRSA", "concept_type": "microbiology", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "count",
+    "return_type": "text",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "microbiology", "organism:MRSA", "count"]
+}

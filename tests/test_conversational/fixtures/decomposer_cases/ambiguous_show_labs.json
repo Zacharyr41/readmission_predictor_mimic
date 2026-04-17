@@ -1,0 +1,18 @@
+{
+  "name": "ambiguous_show_labs",
+  "question": "Show me the labs.",
+  "llm_response": "{\"original_question\": \"Show me the labs.\", \"clinical_concepts\": [], \"return_type\": \"text_and_table\", \"scope\": \"cohort\", \"interpretation_summary\": \"Unclear: no specific lab, cohort, or time window provided.\", \"clarifying_question\": \"Which lab(s) would you like to see, and for which patients or time window?\"}",
+  "expected_cq": {
+    "original_question": "Show me the labs.",
+    "clinical_concepts": [],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "interpretation_summary": "Unclear: no specific lab, cohort, or time window provided.",
+    "clarifying_question": "Which lab(s) would you like to see, and for which patients or time window?"
+  },
+  "tags": ["ambiguous", "clarifying_question", "phase4"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "comparison_discharge_location",
+  "question": "Compare mortality rates between patients discharged to home versus hospice",
+  "llm_response": "{\"original_question\": \"Compare mortality rates between patients discharged to home versus hospice\", \"clinical_concepts\": [{\"name\": \"mortality\", \"concept_type\": \"outcome\"}], \"aggregation\": \"count\", \"return_type\": \"text_and_table\", \"scope\": \"comparison\", \"comparison_field\": \"discharge_location\"}",
+  "expected_cq": {
+    "original_question": "Compare mortality rates between patients discharged to home versus hospice",
+    "clinical_concepts": [{"name": "mortality", "concept_type": "outcome", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "count",
+    "return_type": "text_and_table",
+    "scope": "comparison",
+    "comparison_field": "discharge_location"
+  },
+  "tags": ["comparison", "outcome", "comparison_field:discharge_location"]
+}

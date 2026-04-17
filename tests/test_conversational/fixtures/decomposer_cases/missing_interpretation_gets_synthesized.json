@@ -1,0 +1,16 @@
+{
+  "name": "missing_interpretation_gets_synthesized",
+  "question": "Average lactate for septic patients",
+  "llm_response": "{\"original_question\": \"Average lactate for septic patients\", \"clinical_concepts\": [{\"name\": \"lactate\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"sepsis\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Average lactate for septic patients",
+    "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "sepsis"}],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "synthesis_required", "no_interpretation_in_llm_response"]
+}

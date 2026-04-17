@@ -1,0 +1,16 @@
+{
+  "name": "max_heart_rate",
+  "question": "What was the maximum heart rate in septic shock patients?",
+  "llm_response": "{\"original_question\": \"What was the maximum heart rate in septic shock patients?\", \"clinical_concepts\": [{\"name\": \"heart rate\", \"concept_type\": \"vital\"}], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"septic shock\"}], \"aggregation\": \"max\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What was the maximum heart rate in septic shock patients?",
+    "clinical_concepts": [{"name": "heart rate", "concept_type": "vital", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "septic shock"}],
+    "aggregation": "max",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "vital", "aggregate:max", "filter:diagnosis"]
+}

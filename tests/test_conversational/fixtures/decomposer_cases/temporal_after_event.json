@@ -1,0 +1,16 @@
+{
+  "name": "temporal_after_event",
+  "question": "Which vasopressors were given after ICU discharge?",
+  "llm_response": "{\"original_question\": \"Which vasopressors were given after ICU discharge?\", \"clinical_concepts\": [{\"name\": \"vasopressors\", \"concept_type\": \"drug\"}], \"temporal_constraints\": [{\"relation\": \"after\", \"reference_event\": \"ICU discharge\"}], \"return_type\": \"text_and_table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Which vasopressors were given after ICU discharge?",
+    "clinical_concepts": [{"name": "vasopressors", "concept_type": "drug", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [{"relation": "after", "reference_event": "ICU discharge", "time_window": null}],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "drug", "temporal:after", "category_concept"]
+}

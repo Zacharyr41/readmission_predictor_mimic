@@ -1,0 +1,20 @@
+{
+  "name": "multi_concept_biomarkers",
+  "question": "Show creatinine, lactate, and sodium for sepsis patients",
+  "llm_response": "{\"original_question\": \"Show creatinine, lactate, and sodium for sepsis patients\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}, {\"name\": \"lactate\", \"concept_type\": \"biomarker\"}, {\"name\": \"sodium\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"sepsis\"}], \"return_type\": \"text_and_table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Show creatinine, lactate, and sodium for sepsis patients",
+    "clinical_concepts": [
+      {"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false},
+      {"name": "lactate", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false},
+      {"name": "sodium", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}
+    ],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "sepsis"}],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "multi_concept", "filter:diagnosis"]
+}

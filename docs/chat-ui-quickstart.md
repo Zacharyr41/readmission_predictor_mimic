@@ -1,5 +1,13 @@
 # NeuroGraph Chat UI — Quickstart
 
+> **See also:**
+> - [`e2e-bigquery-testing.md`](./e2e-bigquery-testing.md) — detailed
+>   step-by-step guide for testing the full pipeline against MIMIC-IV on
+>   BigQuery, with sample questions covering the single-CQ, clarifying,
+>   and multi-CQ "big question" paths.
+> - [`decomposer-refactor-changelog.md`](./decomposer-refactor-changelog.md)
+>   — what changed across Phases 0–6 and why.
+
 ## Prerequisites
 
 ```bash

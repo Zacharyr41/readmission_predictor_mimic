@@ -1,0 +1,16 @@
+{
+  "name": "readmitted_60d_filter",
+  "question": "What is the average sodium for patients readmitted within 60 days?",
+  "llm_response": "{\"original_question\": \"What is the average sodium for patients readmitted within 60 days?\", \"clinical_concepts\": [{\"name\": \"sodium\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"readmitted_60d\", \"operator\": \"=\", \"value\": \"1\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What is the average sodium for patients readmitted within 60 days?",
+    "clinical_concepts": [{"name": "sodium", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "readmitted_60d", "operator": "=", "value": "1"}],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "filter:readmitted_60d"]
+}

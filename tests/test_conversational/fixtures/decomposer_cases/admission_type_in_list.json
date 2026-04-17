@@ -1,0 +1,16 @@
+{
+  "name": "admission_type_in_list",
+  "question": "What is the average lactate for emergency or urgent admissions?",
+  "llm_response": "{\"original_question\": \"What is the average lactate for emergency or urgent admissions?\", \"clinical_concepts\": [{\"name\": \"lactate\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"admission_type\", \"operator\": \"in\", \"value\": [\"EMERGENCY\", \"URGENT\"]}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What is the average lactate for emergency or urgent admissions?",
+    "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "admission_type", "operator": "in", "value": ["EMERGENCY", "URGENT"]}],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "filter:admission_type", "operator:in", "list_value"]
+}

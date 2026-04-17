@@ -1,0 +1,17 @@
+{
+  "name": "interpretation_summary_pinned",
+  "question": "Mean hemoglobin for readmitted patients",
+  "llm_response": "{\"original_question\": \"Mean hemoglobin for readmitted patients\", \"clinical_concepts\": [{\"name\": \"hemoglobin\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"readmitted_30d\", \"operator\": \"=\", \"value\": \"1\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\", \"interpretation_summary\": \"Mean hemoglobin across admissions flagged readmitted_30d = 1.\"}",
+  "expected_cq": {
+    "original_question": "Mean hemoglobin for readmitted patients",
+    "clinical_concepts": [{"name": "hemoglobin", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "readmitted_30d", "operator": "=", "value": "1"}],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "interpretation_summary": "Mean hemoglobin across admissions flagged readmitted_30d = 1."
+  },
+  "tags": ["cohort", "biomarker", "interpretation_pinned", "phase4"]
+}

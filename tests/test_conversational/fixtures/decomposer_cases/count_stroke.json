@@ -1,0 +1,16 @@
+{
+  "name": "count_stroke",
+  "question": "How many stroke admissions did we have?",
+  "llm_response": "{\"original_question\": \"How many stroke admissions did we have?\", \"clinical_concepts\": [{\"name\": \"stroke\", \"concept_type\": \"diagnosis\"}], \"aggregation\": \"count\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "How many stroke admissions did we have?",
+    "clinical_concepts": [{"name": "stroke", "concept_type": "diagnosis", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "count",
+    "return_type": "text",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "diagnosis", "count", "return_type_text_preserved"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "temporal_before_event",
+  "question": "What were the creatinine levels before ICU admission?",
+  "llm_response": "{\"original_question\": \"What were the creatinine levels before ICU admission?\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}], \"temporal_constraints\": [{\"relation\": \"before\", \"reference_event\": \"ICU admission\"}], \"return_type\": \"text_and_table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What were the creatinine levels before ICU admission?",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [{"relation": "before", "reference_event": "ICU admission", "time_window": null}],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "temporal:before"]
+}

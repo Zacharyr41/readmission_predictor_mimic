@@ -1,0 +1,18 @@
+{
+  "name": "ambiguous_show_patients",
+  "question": "Show me the patients.",
+  "llm_response": "{\"original_question\": \"Show me the patients.\", \"clinical_concepts\": [], \"return_type\": \"table\", \"scope\": \"cohort\", \"interpretation_summary\": \"Unclear: no cohort criteria provided.\", \"clarifying_question\": \"Which patients — by diagnosis, age, admission type, or something else?\"}",
+  "expected_cq": {
+    "original_question": "Show me the patients.",
+    "clinical_concepts": [],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "interpretation_summary": "Unclear: no cohort criteria provided.",
+    "clarifying_question": "Which patients — by diagnosis, age, admission type, or something else?"
+  },
+  "tags": ["ambiguous", "clarifying_question", "no_cohort"]
+}

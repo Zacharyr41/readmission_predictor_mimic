@@ -28,6 +28,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov",
+    "hypothesis>=6.0",
 ]
 graph = [
     "neo4j>=5.0",
@@ -60,5 +61,6 @@ markers = [
     "integration: marks tests as integration tests",
     "bigquery: marks tests that require gcloud auth and BigQuery access (run with '-m bigquery')",
     "bigquery_e2e: full BigQuery loader test, ~$0.35 per run (run with '-m bigquery_e2e')",
+    "live_llm: tests that hit the real Anthropic API (skip by default; run with '-m live_llm')",
 ]
-addopts = "-v -m 'not bigquery_e2e'"
+addopts = "-v -m 'not bigquery_e2e and not live_llm'"
