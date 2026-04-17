@@ -75,6 +75,19 @@ with st.sidebar:
                 "Lower if you hit BigQuery parameter limits; higher for fewer round-trips."
             ),
         )
+        max_concurrent_batches = st.number_input(
+            "Concurrent batches",
+            min_value=1,
+            max_value=32,
+            value=8,
+            step=1,
+            help=(
+                "Phase 7b. Graph-path extraction runs this many batch "
+                "fetches in parallel via a thread pool. BigQuery benefits "
+                "most (network-bound); local DuckDB also benefits via "
+                "per-thread cursors. Drop to 1 for sequential debugging."
+            ),
+        )
         cohort_strategy = st.selectbox(
             "Cohort strategy",
             options=["recent", "random"],
@@ -114,6 +127,7 @@ with st.sidebar:
                     extraction_config=ExtractionConfig(
                         batch_size=batch_size,
                         cohort_strategy=cohort_strategy,
+                        max_concurrent_batches=max_concurrent_batches,
                     ),
                     max_workers=max_workers,
                 )

@@ -61,11 +61,28 @@ class ExtractionConfig(BaseModel):
     now returns every matching admission. ``batch_size`` bounds the width of
     the ``hadm_id IN (...)`` clauses downstream fetchers send to the
     database — a performance knob, not a semantic one.
+
+    Phase 7b: ``max_concurrent_batches`` controls how many batch fetches run
+    in parallel. BigQuery and DuckDB are both fine with modest concurrency;
+    each batch fires 3-N independent queries so 8 workers overlap ~30-40
+    queries at once. Drop to 1 to run sequentially (legacy behaviour);
+    raise to 16 if the database isn't your bottleneck.
     """
 
     model_config = {"extra": "forbid"}
     batch_size: int = 2000
     cohort_strategy: Literal["recent", "random"] = "recent"
+    max_concurrent_batches: int = 8
+
+    @field_validator("max_concurrent_batches")
+    @classmethod
+    def _positive_concurrency(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(
+                f"max_concurrent_batches must be >= 1 (got {v}); use 1 for "
+                "sequential execution"
+            )
+        return v
 
 
 class ExtractionResult(BaseModel):

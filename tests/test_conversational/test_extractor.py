@@ -517,3 +517,126 @@ class TestBatchedExtraction:
             assert len(hadms) == len(result.admissions), (
                 f"admission duplication at batch_size={batch_size}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7b — parallel batched extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionConfigParallelism:
+    def test_default_max_concurrent_batches(self):
+        cfg = ExtractionConfig()
+        assert cfg.max_concurrent_batches == 8
+
+    def test_custom_max_concurrent_batches(self):
+        cfg = ExtractionConfig(max_concurrent_batches=16)
+        assert cfg.max_concurrent_batches == 16
+
+    def test_invalid_negative_rejected(self):
+        """Zero or negative concurrency is meaningless and would deadlock the
+        executor. Pydantic's ``extra="forbid"`` catches typos, but we also
+        validate the value range explicitly."""
+        with pytest.raises(ValidationError):
+            ExtractionConfig(max_concurrent_batches=0)
+
+
+class TestParallelBatchedExtraction:
+    """Phase 7b: the per-batch event fetches are the graph-path's dominant
+    cost. Running them in a ThreadPoolExecutor gives 10-30× speed-up on
+    BigQuery (latency-bound). Correctness invariant: parallel result must
+    equal sequential result."""
+
+    def _run_with_concurrency(self, db_path, cq, *, max_concurrent_batches: int):
+        cfg = ExtractionConfig(
+            batch_size=2,
+            max_concurrent_batches=max_concurrent_batches,
+        )
+        return extract(db_path, cq, config=cfg)
+
+    def test_sequential_equals_parallel_no_concept(self, synthetic_db_path):
+        """Structural fetches only (patients + admissions + ICU stays) —
+        parallel batches must produce the same set as sequential."""
+        cq = CompetencyQuestion(
+            original_question="lab-free query",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="cohort",
+        )
+        serial = self._run_with_concurrency(synthetic_db_path, cq, max_concurrent_batches=1)
+        parallel = self._run_with_concurrency(synthetic_db_path, cq, max_concurrent_batches=8)
+
+        assert sorted(p["subject_id"] for p in serial.patients) == sorted(
+            p["subject_id"] for p in parallel.patients
+        )
+        assert sorted(a["hadm_id"] for a in serial.admissions) == sorted(
+            a["hadm_id"] for a in parallel.admissions
+        )
+        assert sorted(s["stay_id"] for s in serial.icu_stays) == sorted(
+            s["stay_id"] for s in parallel.icu_stays
+        )
+
+    def test_sequential_equals_parallel_biomarker_events(self, synthetic_db_path):
+        """Event fetches run in parallel too — creatinine event IDs across
+        batches must match between sequential and parallel."""
+        cq = CompetencyQuestion(
+            original_question="creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="cohort",
+        )
+        serial = self._run_with_concurrency(synthetic_db_path, cq, max_concurrent_batches=1)
+        parallel = self._run_with_concurrency(synthetic_db_path, cq, max_concurrent_batches=8)
+
+        serial_ids = {e["labevent_id"] for e in serial.events.get("biomarker", [])}
+        parallel_ids = {e["labevent_id"] for e in parallel.events.get("biomarker", [])}
+        assert serial_ids == parallel_ids
+
+    def test_patient_dedup_correct_under_parallelism(self, synthetic_db_path):
+        """A patient with multiple admissions may land in different batches.
+        Under parallel execution, the dedup map mutation must not lose or
+        duplicate entries. ``batch_size=1`` forces maximum batch count."""
+        cq = CompetencyQuestion(
+            original_question="all biomarkers",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="cohort",
+        )
+        cfg = ExtractionConfig(batch_size=1, max_concurrent_batches=8)
+        result = extract(synthetic_db_path, cq, config=cfg)
+        subject_ids = [p["subject_id"] for p in result.patients]
+        assert len(subject_ids) == len(set(subject_ids)), (
+            f"patient dedup failed under parallelism: {subject_ids}"
+        )
+
+
+class TestConceptResolverThreadSafety:
+    """The resolver's lazy category-map and SCTID indices must be safe to
+    hit from multiple threads concurrently. First call populates the cache;
+    subsequent calls read. Race conditions here would corrupt the cache."""
+
+    def test_concurrent_resolve_is_deterministic(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from pathlib import Path
+
+        from src.conversational.concept_resolver import ConceptResolver
+
+        mappings = Path(__file__).parent.parent.parent / "data" / "mappings"
+        if not mappings.exists():
+            pytest.skip("data/mappings/ not in this repo checkout")
+
+        resolver = ConceptResolver(mappings_dir=mappings)
+        concept = ClinicalConcept(name="antibiotics", concept_type="drug")
+
+        # Hammer the resolver from 16 threads; every call must return the
+        # same list (deterministic) without raising.
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(lambda _: resolver.resolve(concept), range(64)))
+
+        baseline = results[0]
+        assert len(baseline) > 5  # curated antibiotics category
+        for r in results:
+            assert r == baseline

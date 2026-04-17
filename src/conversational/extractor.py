@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -60,16 +61,40 @@ def _get_bigquery_module():
 
 
 class _DuckDBBackend:
-    """Thin wrapper around a read-only DuckDB connection."""
+    """Thin wrapper around a read-only DuckDB connection.
+
+    Phase 7b: supports concurrent ``execute`` from multiple threads by
+    giving each thread its own cursor via ``self._conn.cursor()``. DuckDB
+    connections are thread-safe for opening cursors but NOT for direct
+    concurrent ``execute`` calls on the same connection object — without
+    this, parallel extraction deadlocks on DuckDB's internal mutex.
+    """
 
     def __init__(self, db_path: Path) -> None:
         self._conn = duckdb.connect(str(db_path), read_only=True)
+        # Thread-local cursor storage. Each worker thread gets its own
+        # cursor on first ``execute`` call; cursors are created lazily so
+        # single-threaded callers pay no cost.
+        self._local = threading.local()
+
+    def _cursor(self):
+        # Lazy-init the thread-local storage so test subclasses that bypass
+        # __init__ (e.g. to wrap an existing connection) still work.
+        local = getattr(self, "_local", None)
+        if local is None:
+            local = threading.local()
+            self._local = local
+        cur = getattr(local, "cursor", None)
+        if cur is None:
+            cur = self._conn.cursor()
+            local.cursor = cur
+        return cur
 
     def table(self, name: str) -> str:
         return name
 
     def execute(self, sql: str, params: list) -> list[tuple]:
-        return self._conn.execute(sql, params).fetchall()
+        return self._cursor().execute(sql, params).fetchall()
 
     @staticmethod
     def ilike(column: str) -> str:
@@ -84,9 +109,10 @@ class _DuckDBBackend:
         """Return a table expression for readmission labels.
 
         Uses the materialized table if it exists, otherwise computes on the fly.
+        Route through ``self._cursor()`` so concurrent threads don't collide.
         """
         try:
-            self._conn.execute("SELECT 1 FROM readmission_labels LIMIT 0")
+            self._cursor().execute("SELECT 1 FROM readmission_labels LIMIT 0")
             return "readmission_labels"
         except Exception:
             return self._readmission_cte()
@@ -228,23 +254,29 @@ def _extract(
     config: ExtractionConfig | None = None,
     resolver: ConceptResolver | None = None,
 ) -> ExtractionResult:
+    """Extract patient/admission/ICU/event rows for a CompetencyQuestion.
+
+    Flow:
+      1. Cohort query → ``hadm_ids`` (single round-trip, Phase 2; no LIMIT).
+      2. Chunk ``hadm_ids`` into ``batch_size`` batches.
+      3. Pre-resolve every clinical concept once (category → concrete names).
+      4. Per batch run structural fetches + per-concept event fetches. Phase
+         7b: batches run concurrently via a ThreadPoolExecutor
+         (``max_concurrent_batches`` workers) since BigQuery and DuckDB are
+         both fine with modest concurrency. Result merging is sequential so
+         dedup maps are never touched from multiple threads.
+    """
     cfg = config or ExtractionConfig()
     hadm_ids = _get_filtered_hadm_ids(backend, cq.patient_filters, config=cfg)
     if not hadm_ids:
         return ExtractionResult()
 
-    # Phase 2: the cohort query now returns every matching admission (no LIMIT),
-    # so here we chunk it into ``batch_size`` pieces before sending to
-    # downstream fetchers. Each fetcher is called once per batch and results
-    # are concatenated; patients are deduped by subject_id since a single
-    # patient can appear in multiple admission batches.
     batch_size = cfg.batch_size
-    patients_by_subject: dict = {}
-    admissions: list[dict] = []
-    icu_stays: list[dict] = []
-    events: dict[str, list[dict]] = {}
+    max_workers = cfg.max_concurrent_batches
 
-    # Pre-resolve concept name expansion once; the resolved names are batch-independent.
+    # Pre-resolve concept name expansion once — batch-independent. Resolver
+    # state is initialised here on the main thread before workers read it,
+    # so the lazy ``_load_category_map`` cache is populated without racing.
     resolved_concepts: list[tuple[str, ClinicalConcept]] = []
     for concept in cq.clinical_concepts:
         names = resolver.resolve(concept) if resolver else [concept.name]
@@ -260,19 +292,48 @@ def _extract(
             )
             resolved_concepts.append((concept.concept_type, resolved_concept))
 
-    for batch in _iter_hadm_batches(hadm_ids, batch_size):
-        # Patients: dedupe by subject_id across batches.
-        for p in _fetch_patients(backend, batch):
-            patients_by_subject.setdefault(p["subject_id"], p)
-        admissions.extend(_fetch_admissions(backend, batch))
-        icu_stays.extend(_fetch_icu_stays(backend, batch))
-
-        for concept_type, resolved_concept in resolved_concepts:
-            rows = _extract_concept(
-                backend, resolved_concept, batch, cq.temporal_constraints,
-            )
+    batches = list(_iter_hadm_batches(hadm_ids, batch_size))
+    # Per-batch worker: runs all queries for its batch, returns a dict the
+    # main thread merges. No shared mutable state inside the worker.
+    def _run_batch(batch: list[int]) -> dict:
+        out: dict = {
+            "patients": _fetch_patients(backend, batch),
+            "admissions": _fetch_admissions(backend, batch),
+            "icu_stays": _fetch_icu_stays(backend, batch),
+            "events": {},
+        }
+        for concept_type, rc in resolved_concepts:
+            rows = _extract_concept(backend, rc, batch, cq.temporal_constraints)
             if rows:
-                events.setdefault(concept_type, []).extend(rows)
+                out["events"].setdefault(concept_type, []).extend(rows)
+        return out
+
+    # One ThreadPoolExecutor per call. BigQuery's Client and DuckDB's
+    # Connection are thread-safe for concurrent query execution in the
+    # patterns we use here (no shared cursor; each execute() holds its own).
+    patients_by_subject: dict = {}
+    admissions: list[dict] = []
+    icu_stays: list[dict] = []
+    events: dict[str, list[dict]] = {}
+
+    if max_workers == 1 or len(batches) <= 1:
+        # Sequential fallback — preserves pre-7b behaviour for debugging.
+        batch_results = (_run_batch(b) for b in batches)
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            batch_results = list(pool.map(_run_batch, batches))
+
+    # Merge sequentially on the main thread — dedup maps are never
+    # concurrently mutated.
+    for out in batch_results:
+        for p in out["patients"]:
+            patients_by_subject.setdefault(p["subject_id"], p)
+        admissions.extend(out["admissions"])
+        icu_stays.extend(out["icu_stays"])
+        for kind, rows in out["events"].items():
+            events.setdefault(kind, []).extend(rows)
 
     return ExtractionResult(
         patients=list(patients_by_subject.values()),
