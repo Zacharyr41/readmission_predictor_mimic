@@ -213,7 +213,21 @@ def _resolve_event_to_stay(
     if hadm_id is None or charttime is None:
         return None
     for stay in hadm_stay_index.get(hadm_id, []):
-        if stay["intime"] <= charttime <= stay["outtime"]:
+        intime = stay.get("intime")
+        outtime = stay.get("outtime")
+        if intime is None:
+            # No intime = malformed record; skip rather than crash.
+            continue
+        if outtime is None:
+            # Open ICU stay (patient still admitted at extract time). Accept
+            # any event at or after intime; otherwise skip to next candidate.
+            if intime <= charttime:
+                stay_id = stay["stay_id"]
+                if stay_id in stay_meta:
+                    uri, meta = stay_meta[stay_id]
+                    return stay_id, uri, meta
+            continue
+        if intime <= charttime <= outtime:
             stay_id = stay["stay_id"]
             if stay_id in stay_meta:
                 uri, meta = stay_meta[stay_id]
