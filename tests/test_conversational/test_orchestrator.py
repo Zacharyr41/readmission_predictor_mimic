@@ -15,6 +15,7 @@ from src.conversational.models import (
     ClinicalConcept,
     CompetencyQuestion,
     ExtractionResult,
+    PatientFilter,
     TemporalConstraint,
 )
 from src.conversational.orchestrator import ConversationalPipeline
@@ -54,18 +55,27 @@ def _make_reasoning() -> ReasoningResult:
 def _patch_all(fn):
     """Stack all 5 stage patches needed for orchestrator tests.
 
-    Phase 4.5: the orchestrator calls ``decompose_question`` (returns a
-    ``DecompositionResult``) instead of the legacy single-CQ ``decompose``.
-    Tests keep their argument name ``mock_decompose`` but what they mock is
-    now the question-level entrypoint; ``_setup_mocks`` wraps the returned
-    CQ in a single-CQ DecompositionResult so legacy test bodies work
-    unchanged.
+    Phase 4.5: ``decompose_question`` returns ``DecompositionResult``;
+    legacy test bodies get the wrapping done by ``_setup_mocks``.
+
+    Phase 7a: the orchestrator now calls ``_extract(backend, cq, …)`` with
+    a backend it opens itself. Patch the backend classes so the opener
+    returns a mock instead of trying to hit a real DB.
     """
     fn = patch("src.conversational.orchestrator.decompose_question")(fn)
-    fn = patch("src.conversational.orchestrator.extract")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
     fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    # Use MagicMock *instances* (not the class) so calling e.g.
+    # ``_DuckDBBackend(path)`` returns the mock's ``return_value`` — itself a
+    # MagicMock with auto-generated attributes (``.close()``, ``.execute()``).
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
     return fn
 
 
@@ -118,8 +128,11 @@ class TestAsk:
         )
         mock_extract.assert_called_once()
         extract_args = mock_extract.call_args
-        assert extract_args[0] == (_DB_PATH, cq)
-        assert extract_args[1]["config"] is None
+        # Phase 7a: orchestrator calls the internal ``_extract(backend, cq, ...)``
+        # with a backend it opens itself. First positional is the backend (a
+        # MagicMock in tests); second is the CQ. We only assert on the CQ here.
+        assert extract_args.args[1] is cq
+        assert extract_args.kwargs.get("config") is None
         mock_build.assert_called_once()
         mock_reason.assert_called_once()
         mock_answer.assert_called_once_with(
@@ -375,16 +388,22 @@ class TestPhase4InterpretationAndClarify:
 def _patch_all_multi(fn):
     """Stack patches for the multi-CQ orchestrator path.
 
-    ``decompose_question`` is the new entrypoint; ``merge_extractions`` is the
-    new helper. Both need to be patchable so we can verify the multi-CQ flow
-    without a real graph or real LLM.
+    Phase 4.5: ``decompose_question``, ``merge_extractions`` patched.
+    Phase 7a: ``extract`` replaced with ``_extract`` (backend-taking
+    internal); backends patched so ``_open_backend`` returns a mock.
     """
     fn = patch("src.conversational.orchestrator.decompose_question")(fn)
-    fn = patch("src.conversational.orchestrator.extract")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
     fn = patch("src.conversational.orchestrator.merge_extractions")(fn)
     fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
     return fn
 
 
@@ -561,3 +580,223 @@ class TestMultiCQOrchestration:
 
         assert result.clarifying_question == "Which cohort exactly?"
         assert result.text_summary == "Which cohort exactly?"
+
+
+# ---------------------------------------------------------------------------
+# Phase 7a — planner routing: SQL fast-path vs graph path
+# ---------------------------------------------------------------------------
+
+
+def _patch_fastpath(fn):
+    """Stack patches for tests that exercise the SQL fast-path in isolation.
+
+    Graph-path stages are booby-trapped so any bleed-through fails loud.
+    Backend shims + SQL compilation itself are mocked so we don't need a
+    live DB.
+    """
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
+    fn = patch("src.conversational.orchestrator.merge_extractions")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch("src.conversational.orchestrator.compile_sql")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
+    return fn
+
+
+class TestSqlFastpathRouting:
+    """Phase 7a: a CQ classified as SQL_FAST must bypass extract, graph
+    build, reason, and merge entirely. Only ``compile_sql`` +
+    ``backend.execute`` + ``generate_answer`` run."""
+
+    @_patch_fastpath
+    def test_sql_fast_skips_graph_stages(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+        mock_compile,
+    ):
+        """Single-CQ fast-path: ``_extract``, ``build_query_graph``,
+        ``reason`` all booby-trapped. The fast-path SQL helper and the
+        answerer run exactly once."""
+        cq = CompetencyQuestion(
+            original_question="avg creatinine over 65",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean",
+            scope="cohort",
+        )
+        from src.conversational.models import DecompositionResult
+
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+
+        # Every graph-path stage fails loud if it runs.
+        mock_extract.side_effect = AssertionError("_extract must NOT run on fast-path")
+        mock_merge.side_effect = AssertionError("merge must NOT run on fast-path")
+        mock_build.side_effect = AssertionError("build_query_graph must NOT run on fast-path")
+        mock_reason.side_effect = AssertionError("reason must NOT run on fast-path")
+
+        # compile_sql returns a minimal valid query shape.
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT AVG(x) AS mean_value FROM t",
+            params=[],
+            columns=["mean_value"],
+        )
+        mock_answer.return_value = _make_answer("Mean creatinine was 1.1")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("average creatinine for patients over 65")
+
+        mock_compile.assert_called_once()
+        mock_answer.assert_called_once()
+        assert result.text_summary == "Mean creatinine was 1.1"
+
+    @_patch_fastpath
+    def test_mixed_multi_cq_routes_per_cq(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+        mock_compile,
+    ):
+        """A big-question decomposition where one sub-CQ is fast-path and
+        the other is graph-path: build_query_graph runs ONCE (for the
+        graph-path sub-CQ only); compile_sql runs once (for the fast-path
+        sub-CQ). Both sub-answers are wrapped under the narrative."""
+        # Sub-CQ 1: fast-path (biomarker mean, no temporal).
+        cq_fast = CompetencyQuestion(
+            original_question="mean creatinine for sepsis",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            patient_filters=[
+                PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+            ],
+            aggregation="mean",
+            scope="cohort",
+        )
+        # Sub-CQ 2: graph path (temporal constraint).
+        cq_graph = CompetencyQuestion(
+            original_question="creatinine during ICU stay for sepsis",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            temporal_constraints=[
+                TemporalConstraint(relation="during", reference_event="ICU stay"),
+            ],
+            patient_filters=[
+                PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+            ],
+            scope="cohort",
+        )
+        from src.conversational.models import DecompositionResult
+
+        mock_decompose_q.return_value = DecompositionResult(
+            narrative="Break down: cohort mean, then temporal distribution.",
+            competency_questions=[cq_fast, cq_graph],
+        )
+
+        # Graph-path mocks produce normal returns (not booby-trapped here).
+        mock_extract.return_value = ExtractionResult()
+        mock_merge.return_value = ExtractionResult()
+        mock_build.return_value = (MagicMock(), {"triples": 42})
+        mock_reason.return_value = _make_reasoning()
+        mock_answer.side_effect = [
+            _make_answer("fast-path answer"),
+            _make_answer("graph-path answer"),
+        ]
+
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT 1", params=[], columns=["count_value"],
+        )
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("mixed multi-cq question")
+
+        # Fast-path helper ran exactly once (for cq_fast).
+        mock_compile.assert_called_once()
+        # Extract ran once (for cq_graph only); merge did NOT run
+        # because there's only one graph-path extraction to merge.
+        assert mock_extract.call_count == 1
+        mock_merge.assert_not_called()
+        # Exactly one graph was built.
+        mock_build.assert_called_once()
+        # One reason call, matching the one graph-path sub-CQ.
+        assert mock_reason.call_count == 1
+        # Two sub-answers wrapped under the narrative.
+        assert result.sub_answers is not None
+        assert len(result.sub_answers) == 2
+        assert "Break down" in (result.text_summary or "")
+
+    @_patch_fastpath
+    def test_all_cqs_fastpath_never_builds_graph(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+        mock_compile,
+    ):
+        """Multi-CQ turn where EVERY sub-CQ is fast-path. No graph is
+        built at all — ``build_query_graph``, ``_extract``, ``merge``,
+        ``reason`` are all booby-trapped."""
+        cq_a = CompetencyQuestion(
+            original_question="mean creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        cq_b = CompetencyQuestion(
+            original_question="count sepsis",
+            clinical_concepts=[
+                ClinicalConcept(name="sepsis", concept_type="diagnosis"),
+            ],
+            aggregation="count", scope="cohort",
+        )
+        from src.conversational.models import DecompositionResult
+
+        mock_decompose_q.return_value = DecompositionResult(
+            narrative="two aggregates",
+            competency_questions=[cq_a, cq_b],
+        )
+        mock_extract.side_effect = AssertionError("no extract on all-fastpath")
+        mock_merge.side_effect = AssertionError("no merge on all-fastpath")
+        mock_build.side_effect = AssertionError("no graph build on all-fastpath")
+        mock_reason.side_effect = AssertionError("no reason on all-fastpath")
+
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT 1", params=[], columns=["count_value"],
+        )
+        mock_answer.side_effect = [_make_answer("a"), _make_answer("b")]
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("multi fast-path question")
+
+        assert mock_compile.call_count == 2
+        assert result.sub_answers is not None
+        assert len(result.sub_answers) == 2

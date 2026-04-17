@@ -8,6 +8,7 @@ history management.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,9 @@ from src.conversational.answerer import generate_answer
 from src.conversational.concept_resolver import ConceptResolver
 from src.conversational.decomposer import decompose_question
 from src.conversational.extractor import (
+    _BigQueryBackend,
+    _DuckDBBackend,
+    _extract,
     extract,
     extract_bigquery,
     merge_extractions,
@@ -26,7 +30,10 @@ from src.conversational.models import (
     DecompositionResult,
     ExtractionConfig,
 )
+from src.conversational.operations import get_default_registry
+from src.conversational.planner import QueryPlan, QueryPlanner
 from src.conversational.reasoner import reason
+from src.conversational.sql_fastpath import compile_sql
 
 if TYPE_CHECKING:
     import anthropic
@@ -72,6 +79,8 @@ class ConversationalPipeline:
             mappings_dir=repo_root / "data" / "mappings",
             hierarchy=hierarchy,
         )
+        self._registry = get_default_registry()
+        self._planner = QueryPlanner(registry=self._registry)
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
         self.max_history: int = 10
@@ -79,24 +88,23 @@ class ConversationalPipeline:
     def ask(self, question: str) -> AnswerResult:
         """Run the full pipeline for a natural-language question.
 
-        Phase 4.5: the decomposer may return a single CompetencyQuestion
-        (Shape A, the common case) OR a big-question decomposition (Shape B:
-        narrative + N sub-CQs that share ONE downstream knowledge graph).
+        Phase 4.5 + Phase 7a: the decomposer returns one or more
+        CompetencyQuestions. Each sub-CQ is independently classified by
+        the planner:
 
-        Flow:
-          1. decompose_question → DecompositionResult
-          2. If ANY sub-CQ has a clarifying_question, short-circuit and
-             surface that question — skipping extract / graph / reason / answer.
-          3. Otherwise extract per sub-CQ, then merge into one
-             ExtractionResult. For a single-CQ decomposition, merging is a
-             no-op and is skipped.
-          4. Build exactly ONE RDF graph from the merged extraction. Allen
-             relations are built if ANY sub-CQ has temporal constraints.
-          5. Reason once per sub-CQ against the shared graph.
-          6. Generate per-CQ answers. For single-CQ: return that answer
-             directly. For multi-CQ: wrap in a top-level AnswerResult whose
-             ``text_summary`` is the narrative and whose ``sub_answers``
-             carries the per-CQ details.
+          - **SQL fast-path** (``QueryPlan.SQL_FAST``) — single-concept
+            aggregate / comparison / diagnosis list / mortality. Skips
+            extract + graph + SPARQL; one direct SQL call.
+          - **Graph path** (``QueryPlan.GRAPH``) — anything needing the
+            RDF knowledge graph (temporal Allen relations, time-series
+            viz, median, multi-concept).
+
+        Graph-path sub-CQs share ONE graph for the turn (Phase 4.5
+        contract preserved). SQL-fast sub-CQs skip merge+build+reason
+        entirely but still contribute to the final multi-CQ AnswerResult.
+
+        Clarify short-circuit: if ANY sub-CQ has ``clarifying_question``,
+        no downstream stages run.
         """
         try:
             decomp = decompose_question(
@@ -123,57 +131,88 @@ class ConversationalPipeline:
                 self._remember(decomp.competency_questions[0], answer)
                 return answer
 
-            # Mark category-resolved concepts across every sub-CQ. This is
-            # per-concept, idempotent, and cheap — safe to do before extraction.
+            # Pre-resolve concepts once per CQ. SQL fast-path needs the
+            # resolved name list for OR-matching (category → concrete names);
+            # graph path's ``extract`` re-resolves internally but benefits
+            # from the ``resolved_from_category`` marker being set here.
+            per_cq_resolved: list[list[list[str]]] = []  # per CQ, per concept
             for cq in decomp.competency_questions:
+                per_concept: list[list[str]] = []
                 for concept in cq.clinical_concepts:
                     resolved = self._resolver.resolve(concept)
                     if len(resolved) > 1 or (
                         len(resolved) == 1 and resolved[0] != concept.name
                     ):
                         concept.resolved_from_category = True
+                    per_concept.append(resolved)
+                per_cq_resolved.append(per_concept)
 
-            # Per-CQ extract; single-CQ fast path skips the merge step.
-            extractions = [self._extract_one(cq) for cq in decomp.competency_questions]
-            merged_extraction = (
-                extractions[0] if len(extractions) == 1
-                else merge_extractions(extractions)
-            )
-
-            # Build ONE graph. Allen relations iff any sub-CQ needs them.
-            any_temporal = any(
-                bool(cq.temporal_constraints) for cq in decomp.competency_questions
-            )
-            graph, graph_stats = build_query_graph(
-                self._ontology_dir, merged_extraction,
-                skip_allen_relations=not any_temporal,
-                max_workers=self._max_workers,
-            )
-
-            # Reason + answer per sub-CQ against the shared graph.
-            sub_answers: list[AnswerResult] = []
-            all_sparql: list[str] = []
-            for cq in decomp.competency_questions:
-                reasoning = reason(graph, cq)
-                all_sparql.extend(reasoning.sparql_queries)
-                sub = generate_answer(
-                    self._client, cq, reasoning.rows,
-                    graph_stats, reasoning.sparql_queries,
+            # Open one backend for the whole turn so SQL fast-path and
+            # graph-path extractions share the same connection/client.
+            with self._open_backend() as backend:
+                sub_answers: list[AnswerResult | None] = [None] * len(
+                    decomp.competency_questions
                 )
-                sub.interpretation_summary = cq.interpretation_summary
-                sub_answers.append(sub)
+                graph_cqs: list[tuple[int, CompetencyQuestion]] = []
+                graph_extractions: list = []
+                fastpath_sparql: list[str] = []
+
+                for idx, cq in enumerate(decomp.competency_questions):
+                    plan = self._planner.classify(cq)
+                    if plan == QueryPlan.SQL_FAST:
+                        sub, sql_used = self._run_sql_fastpath(
+                            cq, backend, resolved_names=per_cq_resolved[idx][0],
+                        )
+                        sub.interpretation_summary = cq.interpretation_summary
+                        sub_answers[idx] = sub
+                        fastpath_sparql.extend(sql_used)  # stash for aggregation
+                    else:
+                        graph_cqs.append((idx, cq))
+                        graph_extractions.append(
+                            _extract(
+                                backend, cq,
+                                config=self._extraction_config,
+                                resolver=self._resolver,
+                            )
+                        )
+
+                graph_stats: dict = {}
+                graph_sparql: list[str] = []
+                if graph_cqs:
+                    merged = (
+                        graph_extractions[0] if len(graph_extractions) == 1
+                        else merge_extractions(graph_extractions)
+                    )
+                    any_temporal = any(
+                        bool(cq.temporal_constraints) for _, cq in graph_cqs
+                    )
+                    graph, graph_stats = build_query_graph(
+                        self._ontology_dir, merged,
+                        skip_allen_relations=not any_temporal,
+                        max_workers=self._max_workers,
+                    )
+                    for idx, cq in graph_cqs:
+                        reasoning = reason(graph, cq)
+                        graph_sparql.extend(reasoning.sparql_queries)
+                        sub = generate_answer(
+                            self._client, cq, reasoning.rows,
+                            graph_stats, reasoning.sparql_queries,
+                        )
+                        sub.interpretation_summary = cq.interpretation_summary
+                        sub_answers[idx] = sub
+
+            # All slots filled now (planner produces exactly one plan per CQ).
+            completed: list[AnswerResult] = [a for a in sub_answers if a is not None]
 
             if not decomp.is_multi:
-                # Single-CQ: return the one sub-answer directly (legacy shape).
-                answer = sub_answers[0]
+                answer = completed[0]
             else:
-                # Multi-CQ: wrap sub-answers under a narrative-led top-level.
                 answer = AnswerResult(
                     text_summary=decomp.narrative or "Multi-part answer:",
                     interpretation_summary=decomp.narrative,
                     graph_stats=graph_stats,
-                    sparql_queries_used=all_sparql,
-                    sub_answers=sub_answers,
+                    sparql_queries_used=list(fastpath_sparql) + list(graph_sparql),
+                    sub_answers=completed,
                 )
 
             self._remember(decomp.competency_questions[0], answer)
@@ -188,8 +227,54 @@ class ConversationalPipeline:
                 ),
             )
 
+    # -- internal helpers --------------------------------------------------
+
+    @contextmanager
+    def _open_backend(self):
+        """Open the right backend for this pipeline's data source.
+
+        Used once per ``ask()`` call; both SQL fast-path and graph-path
+        extractions share the connection/client to avoid repeated setup
+        cost. Close is guaranteed by the contextmanager.
+        """
+        if self._data_source == "bigquery":
+            backend = _BigQueryBackend(self._bigquery_project)
+        else:
+            backend = _DuckDBBackend(self._db_path)
+        try:
+            yield backend
+        finally:
+            backend.close()
+
+    def _run_sql_fastpath(
+        self,
+        cq: CompetencyQuestion,
+        backend,
+        *,
+        resolved_names: list[str],
+    ) -> tuple[AnswerResult, list[str]]:
+        """Compile and execute a SQL fast-path CQ; wrap in AnswerResult.
+
+        Returns (answer, [sql_text]) so the top-level aggregation of
+        ``sparql_queries_used`` across a multi-CQ turn can include the
+        SQL we ran on the fast-path (the Query Details expander shows it).
+        """
+        query = compile_sql(
+            cq, backend, self._registry, resolved_names=resolved_names,
+        )
+        raw_rows = backend.execute(query.sql, query.params)
+        rows = [dict(zip(query.columns, r)) for r in raw_rows]
+        answer = generate_answer(
+            self._client, cq, rows,
+            {},  # no graph_stats on the fast-path
+            [query.sql],  # surface the SQL alongside any SPARQL
+        )
+        return answer, [query.sql]
+
     def _extract_one(self, cq: CompetencyQuestion):
-        """Dispatch to the right extractor backend for a single CQ."""
+        """Legacy single-CQ extractor kept for external callers. Modern
+        code inside ``ask()`` uses ``_extract(backend, cq, ...)`` directly
+        so the backend is shared across sub-CQs."""
         if self._data_source == "bigquery":
             return extract_bigquery(
                 cq, project=self._bigquery_project,

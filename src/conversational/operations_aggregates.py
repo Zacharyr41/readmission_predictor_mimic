@@ -46,12 +46,16 @@ def register_default_aggregates(registry: OperationRegistry) -> None:
         name="mean",
         description="arithmetic mean over numeric values",
         template="aggregation_mean",
+        sql_fn="AVG",
     ))
     registry.register(AggregateOperation(
         name="avg",
         description='alias for "mean"',
         template="aggregation_mean",
+        sql_fn="AVG",
     ))
+    # Median needs Python post-processing; no portable SQL primitive today.
+    # Leaving sql_fn=None keeps it on the graph path via the planner.
     registry.register(AggregateOperation(
         name="median",
         description="middle value (computed in Python post-SPARQL)",
@@ -62,21 +66,27 @@ def register_default_aggregates(registry: OperationRegistry) -> None:
         name="max",
         description="largest value",
         template="aggregation_max",
+        sql_fn="MAX",
     ))
     registry.register(AggregateOperation(
         name="min",
         description="smallest value",
         template="aggregation_min",
+        sql_fn="MIN",
     ))
     registry.register(AggregateOperation(
         name="count",
         description="row count (admissions / events matching the concept)",
         template="aggregation_count",
+        sql_fn="COUNT",
     ))
     # ``sum`` and ``exists`` are named in the decomposer prompt but have no
     # SPARQL template today. Register them with the same fallback template as
     # count so the LLM can still emit them without triggering a retry; this
-    # can be tightened once dedicated templates exist.
+    # can be tightened once dedicated templates exist. No sql_fn yet — a
+    # ``sum`` of lab values over a cohort doesn't match any clinically
+    # useful aggregation, so we keep it on the graph path until a real
+    # template lands.
     registry.register(AggregateOperation(
         name="sum",
         description="total over numeric values (uses count template today)",

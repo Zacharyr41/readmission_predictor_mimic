@@ -181,12 +181,23 @@ class AggregateOperation:
     so the compile input is just the CQ. If we later add aggregates with
     parameters (e.g. ``percentile(0.95)``), this signature is the natural
     place to extend.
+
+    Phase 7a: ``sql_fn`` lets the aggregate participate in the SQL fast-path.
+    When set (e.g. ``"AVG"``, ``"MAX"``, ``"MIN"``, ``"COUNT"``) the planner
+    routes single-concept non-temporal CQs using this aggregate around the
+    graph entirely — one direct SQL aggregate call instead of extract +
+    build_query_graph + SPARQL. Set to ``None`` for aggregates that require
+    Python post-processing (median) or BigQuery-specific primitives that
+    aren't portable (percentile).
     """
 
     name: str
     description: str
     template: str
     post_processor: Callable[[list[dict]], dict] | None = None
+    sql_fn: str | None = None
+    """SQL aggregate function name used by the fast-path. ``None`` means
+    this aggregate must go through the graph/SPARQL path."""
     kind: str = field(default="aggregate", init=False)
 
     def describe_for_prompt(self) -> str:
@@ -210,12 +221,21 @@ class ComparisonOperation:
 
     Preserves the shape of the existing ``_COMPARISON_FIELD_MAP`` 2-tuple
     (patient clause, admission clause) — most axes use only one of the two.
+
+    Phase 7a: ``sql_group_by`` lets the axis participate in the SQL fast-path.
+    It names the fully-qualified column (e.g. ``"p.gender"``,
+    ``"a.admission_type"``) that the fast-path compiler emits in the
+    ``GROUP BY`` clause. ``None`` means this axis is SPARQL-only today;
+    a comparison CQ using such an axis is routed through the graph path.
     """
 
     name: str
     description: str
     patient_clause: str = ""
     admission_clause: str = ""
+    sql_group_by: str | None = None
+    """Fully-qualified SQL column for the SQL fast-path's ``GROUP BY``. ``None``
+    means this axis isn't SQL-compilable yet."""
     kind: str = field(default="comparison_axis", init=False)
 
     def describe_for_prompt(self) -> str:
