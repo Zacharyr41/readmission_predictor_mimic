@@ -1,0 +1,41 @@
+{
+  "_metadata": {
+    "description": "Tiny SNOMED hierarchy for ConceptResolver fallback tests. Antibiotic subtree with two branches: vancomycin (specific drug, no children) and cephalosporin (category with ceftriaxone + cefepime children).",
+    "generated_at": "2026-04-16T00:00:00Z"
+  },
+  "372532007": {
+    "term": "Antibacterial agent",
+    "parents": [],
+    "ancestors": []
+  },
+  "372756006": {
+    "term": "Cephalosporin",
+    "parents": ["372532007"],
+    "ancestors": ["372532007"]
+  },
+  "396065004": {
+    "term": "Ceftriaxone",
+    "parents": ["372756006"],
+    "ancestors": ["372756006", "372532007"]
+  },
+  "395985004": {
+    "term": "Cefepime",
+    "parents": ["372756006"],
+    "ancestors": ["372756006", "372532007"]
+  },
+  "372735009": {
+    "term": "Vancomycin",
+    "parents": ["372532007"],
+    "ancestors": ["372532007"]
+  },
+  "387467008": {
+    "term": "Piperacillin",
+    "parents": ["372532007"],
+    "ancestors": ["372532007"]
+  },
+  "999999999": {
+    "term": "Not in MIMIC (testing reverse-lookup filter)",
+    "parents": ["372532007"],
+    "ancestors": ["372532007"]
+  }
+}

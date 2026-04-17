@@ -56,8 +56,21 @@ class ConversationalPipeline:
         self._bigquery_project = bigquery_project
         self._extraction_config = extraction_config
         self._max_workers = max_workers
+        repo_root = Path(__file__).parent.parent.parent
+        # Phase 5: wire SNOMED hierarchy if the cached JSON is present.
+        # The SnomedHierarchy class itself degrades gracefully on missing
+        # files, but constructing one when the file is absent produces
+        # spurious warnings — so we only instantiate when the file exists.
+        hierarchy = None
+        hierarchy_path = repo_root / "data" / "ontology_cache" / "snomed_hierarchy.json"
+        if hierarchy_path.exists():
+            from src.graph_construction.terminology.snomed_hierarchy import (
+                SnomedHierarchy,
+            )
+            hierarchy = SnomedHierarchy(hierarchy_path)
         self._resolver = ConceptResolver(
-            mappings_dir=Path(__file__).parent.parent.parent / "data" / "mappings",
+            mappings_dir=repo_root / "data" / "mappings",
+            hierarchy=hierarchy,
         )
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
