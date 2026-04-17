@@ -18,6 +18,11 @@ LLM/UX integration (8i). Input-side schema
 ``CompetencyQuestion`` extension surface, not the compute pipeline.
 """
 
+from src.causal.interventions import (
+    InterventionResolutionError,
+    InterventionResolver,
+    ResolvedIntervention,
+)
 from src.causal.models import (
     AssumptionClaim,
     CausalEffectResult,
@@ -25,11 +30,22 @@ from src.causal.models import (
     UncertaintyInterval,
 )
 from src.causal.run import run_causal
+from src.causal.treatment_assignment import (
+    InsufficientInterventionsError,
+    TreatmentAssignment,
+    assign_treatments,
+)
 
 __all__ = [
     "AssumptionClaim",
     "CausalEffectResult",
     "DiagnosticReport",
+    "InsufficientInterventionsError",
+    "InterventionResolutionError",
+    "InterventionResolver",
+    "ResolvedIntervention",
+    "TreatmentAssignment",
     "UncertaintyInterval",
+    "assign_treatments",
     "run_causal",
 ]
