@@ -7,5 +7,6 @@
     {"relation": "within", "reference_event": "ICU admission", "time_window": "48h"}
   ],
   "return_type": "text_and_table",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Antibiotic prescriptions whose start time falls within 48h of ICU admission."
 }

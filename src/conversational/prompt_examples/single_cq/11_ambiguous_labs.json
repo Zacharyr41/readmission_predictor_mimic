@@ -1,0 +1,8 @@
+{
+  "original_question": "Show me the labs.",
+  "clinical_concepts": [],
+  "return_type": "text_and_table",
+  "scope": "cohort",
+  "interpretation_summary": "Unclear: no specific lab, cohort, or time window was provided.",
+  "clarifying_question": "Which lab(s) would you like to see, and for which patients or time window?"
+}

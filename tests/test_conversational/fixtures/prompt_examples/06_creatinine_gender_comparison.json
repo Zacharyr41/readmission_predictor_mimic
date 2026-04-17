@@ -6,5 +6,6 @@
   "aggregation": "mean",
   "return_type": "text_and_table",
   "scope": "comparison",
-  "comparison_field": "gender"
+  "comparison_field": "gender",
+  "interpretation_summary": "Mean creatinine, grouped by patient gender."
 }

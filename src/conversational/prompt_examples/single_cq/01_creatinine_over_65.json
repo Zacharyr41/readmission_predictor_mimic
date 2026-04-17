@@ -8,5 +8,6 @@
   ],
   "aggregation": "mean",
   "return_type": "text",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Mean serum creatinine across admissions where patient anchor_age > 65."
 }

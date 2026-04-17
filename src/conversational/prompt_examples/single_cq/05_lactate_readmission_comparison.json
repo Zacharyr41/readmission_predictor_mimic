@@ -6,5 +6,6 @@
   "aggregation": "mean",
   "return_type": "text_and_table",
   "scope": "comparison",
-  "comparison_field": "readmitted_30d"
+  "comparison_field": "readmitted_30d",
+  "interpretation_summary": "Mean lactate, grouped by 30-day readmission status."
 }

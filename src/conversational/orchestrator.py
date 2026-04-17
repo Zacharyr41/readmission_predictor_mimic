@@ -55,12 +55,34 @@ class ConversationalPipeline:
         self.max_history: int = 10
 
     def ask(self, question: str) -> AnswerResult:
-        """Run the full pipeline for a natural-language question."""
+        """Run the full pipeline for a natural-language question.
+
+        Phase 4 wiring:
+          - If the decomposer sets ``cq.clarifying_question``, we short-circuit
+            here: no extract/graph/reason/answer runs. The UI surfaces the
+            follow-up question to the user and waits for their next turn.
+          - Otherwise, ``cq.interpretation_summary`` is propagated onto the
+            ``AnswerResult`` so the UI can render "this is what I answered"
+            above the summary.
+        """
         try:
             cq = decompose(
                 self._client, question,
                 conversation_history=list(self.conversation_history) or None,
             )
+
+            # Clarify short-circuit: skip the expensive downstream pipeline
+            # and return a stub AnswerResult whose body IS the clarifying
+            # question. The conversation history still records this turn so
+            # follow-up questions can reference it.
+            if cq.clarifying_question and cq.clarifying_question.strip():
+                answer = AnswerResult(
+                    text_summary=cq.clarifying_question,
+                    interpretation_summary=cq.interpretation_summary,
+                    clarifying_question=cq.clarifying_question,
+                )
+                self._remember(cq, answer)
+                return answer
 
             # Mark concepts that were resolved from categories
             for concept in cq.clinical_concepts:
@@ -92,11 +114,10 @@ class ConversationalPipeline:
                 self._client, cq, reasoning.rows,
                 graph_stats, reasoning.sparql_queries,
             )
+            # Propagate the decomposer's interpretation echo onto the answer.
+            answer.interpretation_summary = cq.interpretation_summary
 
-            self.conversation_history.append((cq, answer))
-            if len(self.conversation_history) > self.max_history:
-                self.conversation_history = self.conversation_history[-self.max_history:]
-
+            self._remember(cq, answer)
             return answer
 
         except Exception:
@@ -107,6 +128,12 @@ class ConversationalPipeline:
                     "Please try rephrasing."
                 ),
             )
+
+    def _remember(self, cq: CompetencyQuestion, answer: AnswerResult) -> None:
+        """Append to conversation_history, enforcing ``max_history``."""
+        self.conversation_history.append((cq, answer))
+        if len(self.conversation_history) > self.max_history:
+            self.conversation_history = self.conversation_history[-self.max_history:]
 
     def reset(self) -> None:
         """Clear conversation history."""

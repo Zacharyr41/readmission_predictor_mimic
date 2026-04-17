@@ -93,10 +93,14 @@ Return ONLY valid JSON matching this schema (no extra text):
   "aggregation": "<see Supported Operations / aggregate; or null>",
   "return_type": "<text|table|text_and_table|visualization>",
   "scope": "<single_patient|cohort|comparison>",
-  "comparison_field": "<see Supported Operations / comparison_axis; or null>"
+  "comparison_field": "<see Supported Operations / comparison_axis; or null>",
+  "interpretation_summary": "<one-sentence restatement of what the pipeline will actually compute, in clinician-readable language; always required>",
+  "clarifying_question": "<question to ask the user when a field above would otherwise be a guess; null/omitted when confident>"
 }
 
 Omit empty arrays and null fields — Pydantic defaults will fill them.
+``interpretation_summary`` is the one field you must always populate; it's
+what the clinician sees echoed back before the answer.
 
 # Supported Operations
 
@@ -163,6 +167,43 @@ When scope is "comparison", set comparison_field to the dimension being compared
 (see "Supported Operations / comparison_axis" below). If not clear, default to
 "readmitted_30d".
 
+# When to Ask a Clarifying Question
+
+Populate ``clarifying_question`` (instead of producing a full CompetencyQuestion)
+ONLY when a well-formed structured answer would require you to guess. Typical
+triggers:
+
+  - The user names a concept you cannot map to any supported concept_type
+    (e.g. "show me the signals" — which signals?).
+  - The cohort is wide-open and the question is not clearly population-level
+    (e.g. "show me the labs" — for which patients? which lab?).
+  - scope is clearly "comparison" but no comparison axis is hinted at.
+  - A specific patient is referenced but no subject_id is given.
+
+Prefer answering with the closest supported structured CompetencyQuestion over
+asking a clarifying question when the user's intent is reasonably recoverable.
+Clarifying questions are a last resort — they cost the clinician a round trip.
+
+When you do set ``clarifying_question``, still populate
+``interpretation_summary`` with what you interpreted so far (e.g. "unclear which
+lab or cohort is meant") so the UI can explain why it's asking.
+
+# Self-check Before Responding
+
+Before you emit JSON, verify:
+
+  1. Every ``clinical_concepts[].name`` is either a concrete concept or a
+     category listed under "Concept Types".
+  2. Every ``patient_filters[].field`` appears in "Supported Operations / filter",
+     and the operator is allowed for that field.
+  3. ``aggregation``, if set, appears in "Supported Operations / aggregate".
+  4. If ``scope == "comparison"``, ``comparison_field`` is set and appears in
+     "Supported Operations / comparison_axis".
+  5. ``interpretation_summary`` is populated and restates the user's question
+     in one clinician-readable sentence using the structured fields you chose.
+  6. If any of (1)-(4) would otherwise force you to guess, set
+     ``clarifying_question`` and leave the ambiguous field empty.
+
 # Examples
 
 Question: "What is the average creatinine for patients over 65?"
@@ -184,7 +225,8 @@ Question: "What is the average creatinine for patients over 65?"
   ],
   "aggregation": "mean",
   "return_type": "text",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Mean serum creatinine across admissions where patient anchor_age > 65."
 }
 ```
 
@@ -200,7 +242,8 @@ Question: "How many patients had a positive blood culture?"
   ],
   "aggregation": "count",
   "return_type": "text",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Count of admissions with at least one blood culture event."
 }
 ```
 
@@ -215,7 +258,8 @@ Question: "List all patients diagnosed with cerebral infarction"
     }
   ],
   "return_type": "table",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Tabular list of admissions carrying a cerebral infarction diagnosis."
 }
 ```
 
@@ -243,7 +287,8 @@ Question: "What are the creatinine levels during ICU stay for sepsis patients?"
     }
   ],
   "return_type": "text_and_table",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Creatinine values measured during the ICU stay of admissions with a sepsis diagnosis."
 }
 ```
 
@@ -260,7 +305,8 @@ Question: "Compare mean lactate between readmitted and non-readmitted patients"
   "aggregation": "mean",
   "return_type": "text_and_table",
   "scope": "comparison",
-  "comparison_field": "readmitted_30d"
+  "comparison_field": "readmitted_30d",
+  "interpretation_summary": "Mean lactate, grouped by 30-day readmission status."
 }
 ```
 
@@ -277,7 +323,8 @@ Question: "Compare creatinine between male and female patients"
   "aggregation": "mean",
   "return_type": "text_and_table",
   "scope": "comparison",
-  "comparison_field": "gender"
+  "comparison_field": "gender",
+  "interpretation_summary": "Mean creatinine, grouped by patient gender."
 }
 ```
 
@@ -300,7 +347,8 @@ Question: "What is the average creatinine for patients readmitted within 30 days
   ],
   "aggregation": "mean",
   "return_type": "text",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Mean creatinine across admissions flagged readmitted_30d = 1."
 }
 ```
 
@@ -322,7 +370,8 @@ Question: "Which antibiotics were prescribed during the first 48 hours of ICU ad
     }
   ],
   "return_type": "text_and_table",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Antibiotic prescriptions whose start time falls within 48h of ICU admission."
 }
 ```
 
@@ -344,7 +393,8 @@ Question: "Plot the lactate trend over time for patient 12345"
     }
   ],
   "return_type": "visualization",
-  "scope": "single_patient"
+  "scope": "single_patient",
+  "interpretation_summary": "Time-series plot of lactate measurements for subject_id 12345."
 }
 ```
 
@@ -365,6 +415,19 @@ Question: "How did the heart rate change over the ICU stay?"
     }
   ],
   "return_type": "visualization",
-  "scope": "single_patient"
+  "scope": "single_patient",
+  "interpretation_summary": "Time-series plot of heart rate over the ICU stay."
+}
+```
+
+Question: "Show me the labs."
+```json
+{
+  "original_question": "Show me the labs.",
+  "clinical_concepts": [],
+  "return_type": "text_and_table",
+  "scope": "cohort",
+  "interpretation_summary": "Unclear: no specific lab, cohort, or time window was provided.",
+  "clarifying_question": "Which lab(s) would you like to see, and for which patients or time window?"
 }
 ```

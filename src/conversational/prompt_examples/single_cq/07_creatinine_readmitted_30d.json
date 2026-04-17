@@ -8,5 +8,6 @@
   ],
   "aggregation": "mean",
   "return_type": "text",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Mean creatinine across admissions flagged readmitted_30d = 1."
 }

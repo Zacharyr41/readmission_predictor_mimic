@@ -7,5 +7,6 @@
     {"relation": "during", "reference_event": "ICU stay"}
   ],
   "return_type": "visualization",
-  "scope": "single_patient"
+  "scope": "single_patient",
+  "interpretation_summary": "Time-series plot of heart rate over the ICU stay."
 }

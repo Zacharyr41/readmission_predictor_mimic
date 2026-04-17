@@ -7,5 +7,6 @@
     {"field": "subject_id", "operator": "=", "value": "12345"}
   ],
   "return_type": "visualization",
-  "scope": "single_patient"
+  "scope": "single_patient",
+  "interpretation_summary": "Time-series plot of lactate measurements for subject_id 12345."
 }

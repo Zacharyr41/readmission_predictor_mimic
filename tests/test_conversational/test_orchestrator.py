@@ -250,3 +250,89 @@ class TestAllenRelationsPassthrough:
         mock_build.assert_called_once()
         _, kwargs = mock_build.call_args
         assert kwargs.get("skip_allen_relations") is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: interpretation echo + clarifying-question short-circuit
+# ---------------------------------------------------------------------------
+
+
+class TestPhase4InterpretationAndClarify:
+    @_patch_all
+    def test_clarifying_question_short_circuits_pipeline(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """When the decomposer sets ``clarifying_question``, extract / graph /
+        reason / answer must NOT run. The returned AnswerResult's body is the
+        clarifying question verbatim."""
+        cq = _make_cq("show me the labs")
+        cq.clinical_concepts = []
+        cq.interpretation_summary = "Unclear: no specific lab or cohort provided."
+        cq.clarifying_question = "Which lab and which patients?"
+        mock_decompose.return_value = cq
+
+        # Booby-trap: if downstream stages run, these will raise.
+        mock_extract.side_effect = AssertionError("extract must not run on clarify short-circuit")
+        mock_build.side_effect = AssertionError("graph build must not run on clarify short-circuit")
+        mock_reason.side_effect = AssertionError("reason must not run on clarify short-circuit")
+        mock_answer.side_effect = AssertionError("answer must not run on clarify short-circuit")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("show me the labs")
+
+        assert result.clarifying_question == "Which lab and which patients?"
+        assert result.interpretation_summary == "Unclear: no specific lab or cohort provided."
+        assert result.text_summary == "Which lab and which patients?"
+        # The turn is still recorded so follow-ups can reference it.
+        assert len(pipeline.conversation_history) == 1
+
+    @_patch_all
+    def test_empty_clarifying_question_runs_full_pipeline(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """``clarifying_question=None`` and ``clarifying_question=""`` must both
+        fall through to the full pipeline — the short-circuit only fires on
+        a non-empty string."""
+        _setup_mocks(mock_decompose, mock_extract, mock_build, mock_reason, mock_answer)
+        # Decomposer returned CQ with no clarifying_question (None).
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("avg creatinine")
+
+        mock_extract.assert_called_once()
+        mock_build.assert_called_once()
+        mock_reason.assert_called_once()
+        mock_answer.assert_called_once()
+
+    @_patch_all
+    def test_whitespace_only_clarifying_question_does_not_trigger_short_circuit(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """LLMs sometimes emit ``"   "`` when "no clarifying question" is meant.
+        The orchestrator's ``.strip()`` guard means whitespace-only values
+        fall through to the full pipeline."""
+        cq, _, _ = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        cq.clarifying_question = "   \n  "
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("avg creatinine")
+
+        mock_extract.assert_called_once()
+
+    @_patch_all
+    def test_interpretation_summary_propagated_to_answer(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """The decomposer's interpretation must flow onto the AnswerResult
+        before the answerer returns, so the UI can echo it above the summary."""
+        _setup_mocks(mock_decompose, mock_extract, mock_build, mock_reason, mock_answer)
+        returned_cq = mock_decompose.return_value
+        returned_cq.interpretation_summary = "Mean serum creatinine over the cohort."
+        # answerer returns a fresh AnswerResult — no interpretation on it yet.
+        fresh_answer = AnswerResult(text_summary="1.1 mg/dL mean.")
+        mock_answer.return_value = fresh_answer
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("avg creatinine")
+
+        assert result.interpretation_summary == "Mean serum creatinine over the cohort."

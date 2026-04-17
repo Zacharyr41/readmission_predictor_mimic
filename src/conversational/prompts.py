@@ -137,10 +137,14 @@ Return ONLY valid JSON matching this schema (no extra text):
   "aggregation": "<see Supported Operations / aggregate; or null>",
   "return_type": "<text|table|text_and_table|visualization>",
   "scope": "<single_patient|cohort|comparison>",
-  "comparison_field": "<see Supported Operations / comparison_axis; or null>"
+  "comparison_field": "<see Supported Operations / comparison_axis; or null>",
+  "interpretation_summary": "<one-sentence restatement of what the pipeline will actually compute, in clinician-readable language; always required>",
+  "clarifying_question": "<question to ask the user when a field above would otherwise be a guess; null/omitted when confident>"
 }
 
 Omit empty arrays and null fields — Pydantic defaults will fill them.
+``interpretation_summary`` is the one field you must always populate; it's
+what the clinician sees echoed back before the answer.
 """
 
 
@@ -178,6 +182,49 @@ _SCOPE_INFERENCE = """\
 When scope is "comparison", set comparison_field to the dimension being compared
 (see "Supported Operations / comparison_axis" below). If not clear, default to
 "readmitted_30d".
+"""
+
+
+_WHEN_TO_CLARIFY = """\
+# When to Ask a Clarifying Question
+
+Populate ``clarifying_question`` (instead of producing a full CompetencyQuestion)
+ONLY when a well-formed structured answer would require you to guess. Typical
+triggers:
+
+  - The user names a concept you cannot map to any supported concept_type
+    (e.g. "show me the signals" — which signals?).
+  - The cohort is wide-open and the question is not clearly population-level
+    (e.g. "show me the labs" — for which patients? which lab?).
+  - scope is clearly "comparison" but no comparison axis is hinted at.
+  - A specific patient is referenced but no subject_id is given.
+
+Prefer answering with the closest supported structured CompetencyQuestion over
+asking a clarifying question when the user's intent is reasonably recoverable.
+Clarifying questions are a last resort — they cost the clinician a round trip.
+
+When you do set ``clarifying_question``, still populate
+``interpretation_summary`` with what you interpreted so far (e.g. "unclear which
+lab or cohort is meant") so the UI can explain why it's asking.
+"""
+
+
+_SELF_CHECK = """\
+# Self-check Before Responding
+
+Before you emit JSON, verify:
+
+  1. Every ``clinical_concepts[].name`` is either a concrete concept or a
+     category listed under "Concept Types".
+  2. Every ``patient_filters[].field`` appears in "Supported Operations / filter",
+     and the operator is allowed for that field.
+  3. ``aggregation``, if set, appears in "Supported Operations / aggregate".
+  4. If ``scope == "comparison"``, ``comparison_field`` is set and appears in
+     "Supported Operations / comparison_axis".
+  5. ``interpretation_summary`` is populated and restates the user's question
+     in one clinician-readable sentence using the structured fields you chose.
+  6. If any of (1)-(4) would otherwise force you to guess, set
+     ``clarifying_question`` and leave the ambiguous field empty.
 """
 
 
@@ -287,6 +334,8 @@ def build_system_prompt(registry: OperationRegistry) -> str:
         _operations_section(registry),
         _RETURN_TYPE_INFERENCE,
         _SCOPE_INFERENCE,
+        _WHEN_TO_CLARIFY,
+        _SELF_CHECK,
         _examples_section(),
     ])
 
@@ -347,7 +396,7 @@ def build_decomposition_messages(
     messages: list[dict] = []
 
     if conversation_history:
-        for cq, _answer in conversation_history[-5:]:
+        for cq, _ in conversation_history[-5:]:
             messages.append({"role": "user", "content": cq.original_question})
             messages.append({"role": "assistant", "content": json.dumps(
                 cq.model_dump(mode="json"), separators=(",", ":"),

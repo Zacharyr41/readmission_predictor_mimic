@@ -62,6 +62,30 @@ def _normalise_cq_dict(cq: CompetencyQuestion) -> dict:
     return d
 
 
+# Phase 4 added synthesised / optional fields to CompetencyQuestion. Fixtures
+# authored before Phase 4 don't pin these values, so the runner drops them
+# from both sides of the comparison unless the fixture's ``expected_cq``
+# explicitly sets them. A fixture that pins e.g. a specific
+# ``clarifying_question`` string still gets strict equality; a fixture that
+# omits them accepts whatever the decomposer synthesised.
+_OPTIONAL_PHASE4_FIELDS = ("interpretation_summary", "clarifying_question")
+
+
+def _drop_unpinned_optional_fields(actual: dict, expected: dict) -> tuple[dict, dict]:
+    """Return (actual, expected) with optional Phase-4 fields stripped from
+    the actual side when the expected fixture didn't pin them.
+
+    Both dicts are returned as fresh copies — never mutate the inputs.
+    """
+    actual = dict(actual)
+    expected = dict(expected)
+    for field in _OPTIONAL_PHASE4_FIELDS:
+        if field not in expected or expected.get(field) is None:
+            actual.pop(field, None)
+            expected.pop(field, None)
+    return actual, expected
+
+
 @pytest.mark.parametrize("case", load_decomposer_cases())
 def test_decomposer_case(case: dict):
     """Run the case's ``llm_response`` through ``decompose`` and compare.
@@ -73,6 +97,7 @@ def test_decomposer_case(case: dict):
 
     expected = _normalise_cq_dict(CompetencyQuestion.model_validate(case["expected_cq"]))
     actual = _normalise_cq_dict(result)
+    actual, expected = _drop_unpinned_optional_fields(actual, expected)
 
     assert actual == expected, (
         f"Case {case['name']!r} tagged {case.get('tags', [])}:\n"

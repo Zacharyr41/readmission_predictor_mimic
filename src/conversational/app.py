@@ -179,7 +179,25 @@ def _render_plotly(spec: dict, data: list[dict]) -> None:
 
 
 def _render_answer(answer: AnswerResult) -> None:
-    """Display an AnswerResult inside the current chat message context."""
+    """Display an AnswerResult inside the current chat message context.
+
+    Phase 4 rendering:
+      - ``interpretation_summary`` (when present) surfaces as an info block
+        *above* the summary so the clinician can verify what was actually
+        answered before reading the content.
+      - ``clarifying_question`` replaces the normal body: when the pipeline
+        short-circuits on ambiguity, the UI renders the follow-up question
+        prominently and shows a hint that a reply is expected.
+    """
+    if answer.interpretation_summary:
+        st.info(f"**Interpreting as:** {answer.interpretation_summary}")
+
+    if answer.clarifying_question:
+        # Short-circuit: no data to render, only the question.
+        st.markdown(f"**{answer.clarifying_question}**")
+        st.caption("Reply with more detail and I'll re-run the analysis.")
+        return
+
     st.markdown(answer.text_summary)
 
     if answer.data_table:

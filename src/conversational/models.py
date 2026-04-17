@@ -43,6 +43,15 @@ class CompetencyQuestion(BaseModel):
     return_type: ReturnType = ReturnType.TEXT_AND_TABLE
     scope: Literal["single_patient", "cohort", "comparison"] = "single_patient"
     comparison_field: str | None = None
+    # Phase 4: clinician-facing echo + optional clarifying-question short-circuit.
+    # ``interpretation_summary`` is always populated before the CQ reaches the
+    # orchestrator — synthesised by the decomposer from the structured fields
+    # when the LLM omits it — so the UI can show "this is what I'm answering"
+    # on every turn. ``clarifying_question`` is only set when the LLM detects
+    # ambiguity it cannot resolve; the orchestrator then short-circuits the
+    # downstream pipeline and surfaces the question back to the user.
+    interpretation_summary: str | None = None
+    clarifying_question: str | None = None
 
 
 class ExtractionConfig(BaseModel):
@@ -73,3 +82,11 @@ class AnswerResult(BaseModel):
     visualization_spec: dict | None = None
     graph_stats: dict = {}
     sparql_queries_used: list[str] = []
+    # Phase 4: carry the decomposer's interpretation into the UI so the
+    # clinician can verify "this is what I'm actually answering" before
+    # reading the summary. Propagated by the orchestrator from
+    # ``CompetencyQuestion.interpretation_summary``.
+    interpretation_summary: str | None = None
+    # Truthy when the pipeline short-circuited on a clarifying question; the
+    # UI renders this as a follow-up prompt to the user instead of an answer.
+    clarifying_question: str | None = None

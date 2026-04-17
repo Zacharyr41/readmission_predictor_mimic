@@ -62,6 +62,61 @@ def _validate_return_type(cq: CompetencyQuestion) -> CompetencyQuestion:
     return cq
 
 
+def _synthesise_interpretation(cq: CompetencyQuestion) -> str:
+    """Build a one-sentence echo of the CQ's structured fields.
+
+    Called when the LLM omits ``interpretation_summary``. The goal is that the
+    clinician-facing "this is what I'm answering" echo is NEVER blank — if the
+    LLM forgets, we reconstruct a serviceable restatement from the structured
+    fields alone. Prose is intentionally mechanical; the LLM normally writes
+    something better, this is the fallback.
+    """
+    # Lead with the aggregate verb if present, else a generic verb per return_type.
+    verb_map = {
+        "mean": "Mean",
+        "avg": "Mean",
+        "median": "Median",
+        "max": "Maximum",
+        "min": "Minimum",
+        "count": "Count of",
+        "sum": "Total",
+        "exists": "Whether any",
+    }
+    if cq.aggregation:
+        verb = verb_map.get(cq.aggregation, cq.aggregation.capitalize())
+    elif cq.return_type.value in ("table", "text_and_table"):
+        verb = "Listing of"
+    elif cq.return_type == ReturnType.VISUALIZATION:
+        verb = "Plot of"
+    else:
+        verb = "Lookup of"
+
+    concepts = ", ".join(c.name for c in cq.clinical_concepts) or "records"
+
+    filter_parts: list[str] = []
+    for f in cq.patient_filters:
+        if isinstance(f.value, list):
+            val = "[" + ", ".join(str(v) for v in f.value) + "]"
+        else:
+            val = str(f.value)
+        filter_parts.append(f"{f.field} {f.operator} {val}")
+    filter_clause = f" for admissions where {' and '.join(filter_parts)}" if filter_parts else ""
+
+    temporal_parts = [
+        f"{tc.relation} {tc.reference_event}"
+        + (f" within {tc.time_window}" if tc.time_window and tc.relation == "within" else "")
+        for tc in cq.temporal_constraints
+    ]
+    temporal_clause = f" ({', '.join(temporal_parts)})" if temporal_parts else ""
+
+    if cq.scope == "comparison" and cq.comparison_field:
+        tail = f", grouped by {cq.comparison_field}"
+    else:
+        tail = ""
+
+    return f"{verb} {concepts}{filter_clause}{temporal_clause}{tail}.".replace(" ,", ",")
+
+
 def decompose(
     client: anthropic.Anthropic,
     question: str,
@@ -167,4 +222,13 @@ def decompose(
         data["original_question"] = question
         cq = CompetencyQuestion.model_validate(data)
 
-    return _validate_return_type(cq)
+    cq = _validate_return_type(cq)
+
+    # Phase 4: interpretation_summary is clinician-facing; make sure it's never
+    # blank. The prompt always asks the LLM to populate it, but if it forgets
+    # or returns whitespace we synthesise a mechanical restatement from the
+    # structured fields so the UI has something to echo.
+    if not cq.interpretation_summary or not cq.interpretation_summary.strip():
+        cq.interpretation_summary = _synthesise_interpretation(cq)
+
+    return cq

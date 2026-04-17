@@ -10,5 +10,6 @@
     {"field": "diagnosis", "operator": "contains", "value": "sepsis"}
   ],
   "return_type": "text_and_table",
-  "scope": "cohort"
+  "scope": "cohort",
+  "interpretation_summary": "Creatinine values measured during the ICU stay of admissions with a sepsis diagnosis."
 }

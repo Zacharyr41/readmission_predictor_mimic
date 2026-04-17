@@ -473,3 +473,142 @@ class TestPromptExampleLocation:
                 f"Example {path.name!r} with question {q!r} did not make it "
                 f"into the rendered prompt."
             )
+
+
+# ---------------------------------------------------------------------------
+# 10. Phase 4 — interpretation echo + clarifying-question
+# ---------------------------------------------------------------------------
+
+
+class TestPhase4PromptSections:
+    """The two Phase-4 prompt sections must name their trigger conditions and
+    checklists so the LLM actually follows them. Structural guards only —
+    no substring matching on prose that might get reworded."""
+
+    @pytest.mark.parametrize("section_header", [
+        "# When to Ask a Clarifying Question",
+        "# Self-check Before Responding",
+    ])
+    def test_section_present_in_prompt(self, section_header: str):
+        from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
+
+        assert section_header in DECOMPOSITION_SYSTEM_PROMPT, (
+            f"Section {section_header!r} missing from prompt"
+        )
+
+    def test_output_schema_lists_new_fields(self):
+        """Phase 4 adds interpretation_summary (required) and clarifying_question
+        (optional) to the output schema. The LLM needs both named in the
+        schema block or it won't emit them."""
+        from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT
+
+        schema_start = DECOMPOSITION_SYSTEM_PROMPT.find("# Output Schema")
+        schema_end = DECOMPOSITION_SYSTEM_PROMPT.find("# ", schema_start + 1)
+        schema_block = DECOMPOSITION_SYSTEM_PROMPT[schema_start:schema_end]
+        assert "interpretation_summary" in schema_block
+        assert "clarifying_question" in schema_block
+
+
+class TestInterpretationSynthesis:
+    """When the LLM omits interpretation_summary, the decomposer fills in a
+    mechanical restatement so the clinician-facing echo is never blank."""
+
+    def test_llm_omits_interpretation_decomposer_synthesises_one(self):
+        from src.conversational.decomposer import decompose
+
+        # Mock returns a CQ JSON without interpretation_summary.
+        cq_json = json.dumps({
+            "original_question": "avg creatinine over 65",
+            "clinical_concepts": [
+                {"name": "creatinine", "concept_type": "biomarker"},
+            ],
+            "patient_filters": [
+                {"field": "age", "operator": ">", "value": "65"},
+            ],
+            "aggregation": "mean",
+            "return_type": "text",
+            "scope": "cohort",
+        })
+        client = mock_anthropic([cq_json])
+        result = decompose(client, "avg creatinine over 65")
+
+        assert result.interpretation_summary, (
+            "Decomposer must synthesise interpretation_summary when the LLM omits it"
+        )
+        # Structural properties of the synthesised string: mentions the
+        # concept name and the aggregation verb.
+        assert "creatinine" in result.interpretation_summary.lower()
+        assert "mean" in result.interpretation_summary.lower()
+
+    def test_whitespace_only_interpretation_is_treated_as_missing(self):
+        """If the LLM returns ``"   "`` we treat it as missing and synthesise."""
+        from src.conversational.decomposer import decompose
+
+        cq_json = json.dumps({
+            "original_question": "count sepsis",
+            "clinical_concepts": [
+                {"name": "sepsis", "concept_type": "diagnosis"},
+            ],
+            "aggregation": "count",
+            "return_type": "text",
+            "scope": "cohort",
+            "interpretation_summary": "   ",
+        })
+        client = mock_anthropic([cq_json])
+        result = decompose(client, "count sepsis")
+        assert result.interpretation_summary
+        assert result.interpretation_summary.strip()
+
+    def test_llm_supplied_interpretation_is_preserved(self):
+        """If the LLM writes a good interpretation, we keep it verbatim —
+        no silent rewriting."""
+        from src.conversational.decomposer import decompose
+
+        pinned = "Mean creatinine over admissions with anchor_age > 65."
+        cq_json = json.dumps({
+            "original_question": "avg creatinine over 65",
+            "clinical_concepts": [
+                {"name": "creatinine", "concept_type": "biomarker"},
+            ],
+            "patient_filters": [
+                {"field": "age", "operator": ">", "value": "65"},
+            ],
+            "aggregation": "mean",
+            "return_type": "text",
+            "scope": "cohort",
+            "interpretation_summary": pinned,
+        })
+        client = mock_anthropic([cq_json])
+        result = decompose(client, "avg creatinine over 65")
+        assert result.interpretation_summary == pinned
+
+    def test_clarifying_question_passes_through_when_set(self):
+        """Decomposer must not clobber a clarifying_question produced by the LLM."""
+        from src.conversational.decomposer import decompose
+
+        cq_json = json.dumps({
+            "original_question": "show me the labs",
+            "clinical_concepts": [],
+            "return_type": "text_and_table",
+            "scope": "cohort",
+            "interpretation_summary": "Unclear request.",
+            "clarifying_question": "Which labs, for which patients?",
+        })
+        client = mock_anthropic([cq_json])
+        result = decompose(client, "show me the labs")
+        assert result.clarifying_question == "Which labs, for which patients?"
+
+
+class TestSynthesisCoversEveryFixture:
+    """Every fixture case, after decomposition, must yield a non-empty
+    interpretation_summary — either from the fixture's pinned value or from
+    the synthesiser fallback."""
+
+    @pytest.mark.parametrize("case", load_decomposer_cases())
+    def test_fixture_yields_nonempty_interpretation(self, case):
+        from src.conversational.decomposer import decompose
+
+        client = mock_anthropic([case["llm_response"]])
+        result = decompose(client, case["question"])
+        assert result.interpretation_summary
+        assert result.interpretation_summary.strip()
