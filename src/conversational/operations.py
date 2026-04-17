@@ -372,12 +372,20 @@ def get_default_registry() -> OperationRegistry:
     """
     global _default_registry
     if _default_registry is None:
-        # Imported here to avoid a top-level circular import: operations_filters
-        # imports operations (for the base classes) and operations (for this
-        # factory) transitively imports operations_filters.
+        # Imported here to avoid a top-level circular import: operations_*
+        # modules import from operations (for base classes); operations
+        # transitively imports them here only when the factory is called.
+        from src.conversational.operations_aggregates import (
+            register_default_aggregates,
+        )
+        from src.conversational.operations_comparison import (
+            register_default_comparisons,
+        )
         from src.conversational.operations_filters import register_default_filters
 
         registry = OperationRegistry()
         register_default_filters(registry)
+        register_default_aggregates(registry)
+        register_default_comparisons(registry)
         _default_registry = registry
     return _default_registry

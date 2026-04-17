@@ -63,6 +63,20 @@ def _compile_diagnosis(f: PatientFilter, ctx: FilterCompileContext) -> FilterFra
 
 def _compile_admission_type(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
     # Existing: single predicate on admissions.admission_type.
+    # New: ``in`` operator accepts a list of allowed values and emits ``IN (?, ?, ...)``.
+    # The ``in`` path is the template for how list-valued filters compile —
+    # more fields can adopt it by adding "in" to their operator set.
+    if f.operator == "in":
+        values = f.value if isinstance(f.value, list) else [f.value]
+        if not values:
+            # Empty IN list would be invalid SQL; emit a predicate that
+            # matches nothing so the cohort ends up empty rather than erroring.
+            return FilterFragment(where=["1 = 0"])
+        placeholders = ", ".join(["?"] * len(values))
+        return FilterFragment(
+            where=[f"{ctx.admission_alias}.admission_type IN ({placeholders})"],
+            params=list(values),
+        )
     return FilterFragment(
         where=[f"{ctx.admission_alias}.admission_type = ?"],
         params=[f.value],
@@ -126,9 +140,12 @@ def register_default_filters(registry: OperationRegistry) -> None:
     ))
     registry.register(FilterOperation(
         name="admission_type",
-        operators=frozenset({"="}),
-        value_type="scalar",
-        description='admission type (e.g. "EMERGENCY", "ELECTIVE", "URGENT")',
+        operators=frozenset({"=", "in"}),
+        value_type="scalar_or_list",
+        description=(
+            'admission type (e.g. "EMERGENCY", "ELECTIVE", "URGENT"); '
+            'use operator "in" with a list value to match multiple'
+        ),
         compile_fn=_compile_admission_type,
     ))
     registry.register(FilterOperation(

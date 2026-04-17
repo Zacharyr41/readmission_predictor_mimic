@@ -332,3 +332,184 @@ class TestAggregateAndComparisonProtocol:
         assert isinstance(frag, ComparisonFragment)
         assert "?group_value" in frag.patient_clause
         assert frag.admission_clause == ""
+
+
+# ---------------------------------------------------------------------------
+# 5. Default-registry wiring (Phase 1b)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultRegistry:
+    def test_default_registry_seeded_with_all_kinds(self):
+        from src.conversational.operations import get_default_registry
+
+        r = get_default_registry()
+        assert r.supported_names("filter") == frozenset({
+            "age", "gender", "diagnosis", "admission_type",
+            "subject_id", "readmitted_30d", "readmitted_60d",
+        })
+        assert r.supported_names("aggregate") == frozenset({
+            "mean", "avg", "median", "max", "min", "count", "sum", "exists",
+        })
+        assert r.supported_names("comparison_axis") == frozenset({
+            "gender", "age", "readmitted_30d", "readmitted_60d",
+            "admission_type", "discharge_location",
+        })
+
+    def test_default_registry_is_idempotent(self):
+        from src.conversational.operations import get_default_registry
+
+        assert get_default_registry() is get_default_registry()
+
+
+class TestAggregateRegistrySemantics:
+    def test_median_has_post_processor(self):
+        from src.conversational.operations import get_default_registry
+
+        median_op = get_default_registry().require("aggregate", "median")
+        assert median_op.post_processor is not None
+        # Smoke: median of [1, 2, 3] = 2
+        rows, cols = median_op.post_processor(
+            [{"value": 1}, {"value": 2}, {"value": 3}]
+        )
+        assert rows == [{"median_value": 2}]
+        assert cols == ["median_value"]
+
+    def test_median_post_processor_handles_empty(self):
+        from src.conversational.operations import get_default_registry
+
+        median_op = get_default_registry().require("aggregate", "median")
+        rows, _ = median_op.post_processor([])
+        assert rows == [{"median_value": None}]
+
+    def test_avg_and_mean_resolve_to_same_template(self):
+        """``avg`` is an alias for ``mean``; both must select the same template
+        so the reasoner behaves identically for either keyword."""
+        from src.conversational.operations import get_default_registry
+
+        r = get_default_registry()
+        assert r.require("aggregate", "avg").template == \
+            r.require("aggregate", "mean").template
+
+    def test_all_aggregates_reference_an_existing_template(self):
+        """Catch dispatch drift: every registered aggregate's template must
+        exist in reasoner.TEMPLATES, or executing that aggregate will crash
+        at query build time."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.reasoner import TEMPLATES
+
+        r = get_default_registry()
+        for name in r.supported_names("aggregate"):
+            op = r.require("aggregate", name)
+            assert op.template in TEMPLATES, (
+                f"aggregate {name!r} references template {op.template!r} "
+                f"which does not exist in reasoner.TEMPLATES"
+            )
+
+
+class TestComparisonRegistrySemantics:
+    def test_every_comparison_axis_has_at_least_one_clause(self):
+        """An axis with neither a patient nor admission clause would produce
+        malformed SPARQL."""
+        from src.conversational.operations import get_default_registry
+
+        r = get_default_registry()
+        for name in r.supported_names("comparison_axis"):
+            op = r.require("comparison_axis", name)
+            frag = op.compile()
+            assert frag.patient_clause or frag.admission_clause, (
+                f"comparison axis {name!r} contributes no graph-pattern clause"
+            )
+
+    def test_comparison_axes_match_prior_map(self):
+        """Registry must expose the same axes the pre-refactor
+        _COMPARISON_FIELD_MAP did, so the reasoner's GROUP BY behaviour is
+        preserved unchanged."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.reasoner import _COMPARISON_FIELD_MAP
+
+        r = get_default_registry()
+        assert r.supported_names("comparison_axis") == frozenset(_COMPARISON_FIELD_MAP.keys())
+        # Clause text parity.
+        for name, (patient, admission) in _COMPARISON_FIELD_MAP.items():
+            op = r.require("comparison_axis", name)
+            frag = op.compile()
+            assert frag.patient_clause == patient
+            assert frag.admission_clause == admission
+
+
+# ---------------------------------------------------------------------------
+# 6. List-valued filters ("in" operator)
+# ---------------------------------------------------------------------------
+
+
+class TestListValuedFilters:
+    def test_admission_type_in_list_compiles_to_in_clause(self, duckdb_backend):
+        """``admission_type in [...]`` emits an SQL ``IN (?, ?, ...)`` clause
+        and returns the union of matches."""
+        from src.conversational.operations import (
+            FilterCompileContext,
+            get_default_registry,
+        )
+
+        config = ExtractionConfig(max_cohort_size=100, cohort_strategy="recent")
+        r = get_default_registry()
+        ctx = FilterCompileContext(backend=duckdb_backend)
+
+        # Single-value = case (baseline).
+        eq_filter = [PatientFilter(field="admission_type", operator="=", value="EMERGENCY")]
+        eq_rows = _run_registry_query(duckdb_backend, eq_filter, config)
+
+        # Two-value "in" case must return a superset when the second value
+        # also matches rows, strictly equal when it adds nothing.
+        in_filter = [PatientFilter(
+            field="admission_type",
+            operator="in",
+            value=["EMERGENCY", "ELECTIVE"],
+        )]
+        in_rows = _run_registry_query(duckdb_backend, in_filter, config)
+
+        assert set(eq_rows).issubset(set(in_rows))
+        # Fragment shape: single ``IN (?, ?)`` predicate, two params.
+        frag = r.compile_filters(in_filter, ctx)
+        assert len(frag.where) == 1
+        assert "IN (?, ?)" in frag.where[0]
+        assert frag.params == ["EMERGENCY", "ELECTIVE"]
+
+    def test_empty_in_list_matches_nothing(self, duckdb_backend):
+        """``in []`` must not produce invalid SQL; emit a predicate that
+        matches zero rows so the cohort is simply empty."""
+        from src.conversational.operations import (
+            FilterCompileContext,
+            get_default_registry,
+        )
+
+        r = get_default_registry()
+        ctx = FilterCompileContext(backend=duckdb_backend)
+        frag = r.compile_filters(
+            [PatientFilter(field="admission_type", operator="in", value=[])],
+            ctx,
+        )
+        assert frag.where == ["1 = 0"]
+        assert frag.params == []
+
+    def test_patient_filter_accepts_list_values(self):
+        """Schema-level: PatientFilter.value is now str | list[str]."""
+        f = PatientFilter(
+            field="admission_type",
+            operator="in",
+            value=["EMERGENCY", "URGENT"],
+        )
+        assert f.value == ["EMERGENCY", "URGENT"]
+
+    def test_in_operator_rejected_for_fields_that_dont_support_it(self):
+        """The ``in`` operator should only be accepted for fields that register
+        it. age doesn't, so validate must flag it."""
+        from src.conversational.operations import get_default_registry
+
+        age = get_default_registry().require("filter", "age")
+        violations = age.validate(
+            PatientFilter(field="age", operator="in", value=["65", "75"])
+        )
+        assert violations
+        assert "operator" in violations[0]

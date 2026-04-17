@@ -75,16 +75,6 @@ def _result_to_dicts(result) -> tuple[list[dict[str, Any]], list[str]]:
     return rows, columns
 
 
-def _compute_median(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """Compute median from value_lookup rows."""
-    from statistics import median
-
-    values = [float(r["value"]) for r in rows if r.get("value") is not None]
-    if not values:
-        return [{"median_value": None}], ["median_value"]
-    return [{"median_value": median(values)}], ["median_value"]
-
-
 # ---------------------------------------------------------------------------
 # SPARQL template library
 # ---------------------------------------------------------------------------
@@ -458,7 +448,16 @@ _COMPARISON_FIELD_MAP: dict[str, tuple[str, str]] = {
 
 
 def select_templates(cq: CompetencyQuestion) -> list[str]:
-    """Map a CompetencyQuestion to the SPARQL template names to execute."""
+    """Map a CompetencyQuestion to the SPARQL template names to execute.
+
+    Aggregate and comparison-axis dispatch delegates to the ``OperationRegistry``
+    (``aggregate`` and ``comparison_axis`` kinds) — those keyword lists are
+    defined once there, not duplicated here. Concept-type fallbacks and the
+    no-concept path remain inline because they aren't registry concerns.
+    """
+    from src.conversational.operations import get_default_registry
+
+    registry = get_default_registry()
     templates: list[str] = []
 
     if not cq.clinical_concepts:
@@ -471,26 +470,23 @@ def select_templates(cq: CompetencyQuestion) -> list[str]:
             templates.append("admission_details")
         return templates
 
+    aggregate_op = (
+        registry.get("aggregate", cq.aggregation) if cq.aggregation else None
+    )
+
     for concept in cq.clinical_concepts:
         # Outcome has its own template regardless of aggregation
         if concept.concept_type == "outcome":
             templates.append("mortality_count")
         elif cq.scope == "comparison":
-            if cq.comparison_field and cq.comparison_field in _COMPARISON_FIELD_MAP:
+            if cq.comparison_field and registry.get(
+                "comparison_axis", cq.comparison_field
+            ):
                 templates.append("comparison_by_field")
             else:
                 templates.append("comparison_two_groups")
-        elif cq.aggregation == "median":
-            # No SPARQL MEDIAN — fetch raw values for Python post-processing
-            templates.append("value_lookup")
-        elif cq.aggregation in ("mean", "avg"):
-            templates.append("aggregation_mean")
-        elif cq.aggregation == "max":
-            templates.append("aggregation_max")
-        elif cq.aggregation == "min":
-            templates.append("aggregation_min")
-        elif cq.aggregation == "count":
-            templates.append("aggregation_count")
+        elif aggregate_op is not None:
+            templates.append(aggregate_op.template)
         elif concept.concept_type in ("biomarker", "vital"):
             templates.append("value_with_timestamps")
         elif concept.concept_type == "drug":
@@ -601,9 +597,19 @@ def reason(graph: Graph, cq: CompetencyQuestion) -> ReasoningResult:
 
                 rows, columns = _result_to_dicts(result)
 
-                # Median post-processing
-                if cq.aggregation == "median" and tname == "value_lookup" and rows:
-                    rows, columns = _compute_median(rows)
+                # Aggregate-registered post-processing (e.g. median).
+                # The aggregate op is the single source of truth: if it has a
+                # post_processor and the current template matches its template,
+                # we invoke it. New aggregates plug in here without edits.
+                if cq.aggregation and rows:
+                    from src.conversational.operations import get_default_registry
+                    agg_op = get_default_registry().get("aggregate", cq.aggregation)
+                    if (
+                        agg_op is not None
+                        and agg_op.post_processor is not None
+                        and tname == agg_op.template
+                    ):
+                        rows, columns = agg_op.post_processor(rows)
 
                 if columns and not all_columns:
                     all_columns = columns

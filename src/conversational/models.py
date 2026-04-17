@@ -24,7 +24,7 @@ class TemporalConstraint(BaseModel):
 class PatientFilter(BaseModel):
     field: str
     operator: Literal[">", "<", "=", ">=", "<=", "contains", "in"]
-    value: str
+    value: str | list[str]
 
 
 class ReturnType(str, Enum):
