@@ -32,6 +32,38 @@ the real test of whether the system is useful, not just fast.
 | 7 | **What is the mean heart rate in admissions with sepsis?** | `SQL_FAST` (vital AVG w/ diagnosis filter) | <30s |
 | 8 | **Why do our sepsis patients keep getting readmitted within 30 days?** | mixed big-Q (3 sub-CQs) | <1 min |
 
+### Graph-complex questions (Phase 7b's real target)
+
+These are where the graph is the computation — not just SQL in disguise.
+They all take the **graph path** (temporal Allen relations, time-series
+rendering, median with Python post-processor, or multi-event relational
+reasoning). Phase 7b's parallel batched extraction is designed to make
+these viable on BigQuery where they were previously painful.
+
+| # | Question | Why it's graph-complex | Target |
+|---|---|---|---|
+| G1 | **Plot the creatinine trajectory over time for patients admitted with sepsis.** | Time-series viz (`value_with_timestamps`). Graph owns timestamp+interval semantics. Parallel batches matter a lot. | <3 min |
+| G2 | **What was the median ICU length of stay for patients readmitted within 30 days?** | `aggregation=median` forces graph path (no portable SQL percentile). Python post-processor. | <2 min |
+| G3 | **Which antibiotics were prescribed during the first 24 hours of ICU admission for sepsis patients?** | Temporal `within 24h` + `drug_lookup` — Allen relations on ICU intervals. | <3 min |
+| G4 | **What were the creatinine levels before intubation for septic patients?** | Temporal `before` relation on a clinical event. **SQL genuinely can't answer this cleanly** — the killer graph use case. | <3 min |
+| G5 | **Plot how heart rate changed over the first 48 hours of ICU admission for sepsis patients.** | Time-series viz + temporal `within 48h` + filter. Demonstrates multi-patient aggregate trajectory. | <3 min |
+| G6 | **How does the lactate trajectory differ between patients who survived and those who died from sepsis?** | Big-Q that likely decomposes into survivor vs non-survivor cohorts, both with time-series. Exercises Phase 4.5 (ONE graph) + Phase 7b (parallel batches) together. | <5 min |
+| G7 | **Which medications were given in the 12 hours before a positive blood culture in sepsis patients?** | Temporal `before` + drug concept + microbiology concept + diagnosis filter. Multi-concept, multi-temporal — exactly what the graph is for. | <5 min |
+| G8 | **Compare the distribution of ICU length of stay between patients who received vasopressors and those who didn't.** | Drug exposure as a cohort definer (not a comparison axis — the LLM has to emit a filter) + LOS distribution. Stretches what the system can do. | <5 min |
+
+### How to interpret graph-path latency
+
+Graph-path time breaks down as: **cohort query** (≤10s) · **parallel
+batched event fetches** (Phase 7b target — 30s-2min) · **graph
+construction** (scales with events; 30s-5min) · **SPARQL reason** (seconds).
+
+The remaining bottleneck post-7b is **graph construction** for very
+wide cohorts. If G1/G3/G5 take 3-5 minutes, that's expected until a
+future Phase 7c adds graph-builder parallelism / lazy event placement.
+The fact they finish AT ALL on BigQuery in <5 min is the Phase 7b win —
+pre-7b, the sequential batched extraction alone would be 10-20 min
+before the graph build even started.
+
 ### Why these hypothesis-style questions matter
 
 - **Q4** — classic research hook: lactate is a sepsis-severity marker.
@@ -155,6 +187,54 @@ Q8 (sepsis readmission big-Q):
   narrative shown:
   # of sub-answer expanders:
   Query Details — mix of SQL + SPARQL?:
+  notes:
+
+--- Graph-complex questions ---
+
+G1 (creatinine trajectory, sepsis):
+  wall-clock:
+  Query Details — SPARQL present?:
+  plot rendered? (y/n):
+  notes:
+
+G2 (median ICU LOS, readmitted):
+  wall-clock:
+  Query Details — SPARQL + median post-processor?:
+  numeric answer (days):
+  notes:
+
+G3 (antibiotics first 24h ICU, sepsis):
+  wall-clock:
+  Query Details — SPARQL + temporal_during/within?:
+  table rendered? (y/n):
+  notes:
+
+G4 (creatinine before intubation):
+  wall-clock:
+  Query Details — SPARQL + temporal_before?:
+  intuitively sensible values? (y/n):
+  notes:
+
+G5 (heart rate trajectory first 48h):
+  wall-clock:
+  plot rendered? (y/n):
+  notes:
+
+G6 (lactate survivor vs non-survivor, big-Q):
+  wall-clock (total):
+  # of sub-CQs:
+  graph built once? (check Query Details for single graph_stats):
+  notes:
+
+G7 (meds before positive blood culture):
+  wall-clock:
+  Query Details — SPARQL multi-event?:
+  rows returned:
+  notes:
+
+G8 (LOS by vasopressor exposure):
+  wall-clock:
+  did the LLM clarify? (expected — "received X" isn't a comparison axis):
   notes:
 ```
 
