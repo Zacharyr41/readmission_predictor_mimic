@@ -166,6 +166,16 @@ class ConversationalPipeline:
                         sub.interpretation_summary = cq.interpretation_summary
                         sub_answers[idx] = sub
                         fastpath_sparql.extend(sql_used)  # stash for aggregation
+                    elif plan == QueryPlan.CAUSAL:
+                        # Phase 8a: wired to a stub that returns a
+                        # well-shaped but NaN-valued CausalEffectResult so
+                        # the UI can be built against the real contract
+                        # before estimators land in 8d. When the stub fires
+                        # in a live session, the summary text makes it
+                        # obvious we're not returning a real estimate.
+                        sub = self._run_causal(cq)
+                        sub.interpretation_summary = cq.interpretation_summary
+                        sub_answers[idx] = sub
                     else:
                         graph_cqs.append((idx, cq))
                         graph_extractions.append(
@@ -270,6 +280,53 @@ class ConversationalPipeline:
             [query.sql],  # surface the SQL alongside any SPARQL
         )
         return answer, [query.sql]
+
+    def _run_causal(self, cq: CompetencyQuestion) -> AnswerResult:
+        """Phase 8a: wrap a ``CausalEffectResult`` into an ``AnswerResult``.
+
+        The wrapping is deliberately minimal — just enough so the existing
+        Streamlit UI renders *something* recognisable on a CAUSAL plan.
+        Phase 8i replaces this with a proper causal-effect panel (pairwise
+        τ heatmap, per-outcome breakdown, diagnostic block, mode badge).
+        The stub-vs-real distinction is surfaced to the user via the
+        ``is_stub`` flag bleeding into the text summary so no one mistakes
+        8a output for a real estimate.
+        """
+        from src.causal.run import run_causal
+
+        result = run_causal(cq)
+        if result.is_stub:
+            summary = (
+                "Causal-inference pipeline is wired (Phase 8a). Schema and "
+                "routing are in place, but the estimator itself lands in "
+                "Phase 8d — this result is a shape-only placeholder with "
+                "NaN point estimates. The final system will return μ_c "
+                "point estimates + uncertainty intervals + pairwise τ "
+                "contrasts + diagnostics here."
+            )
+        else:
+            # Phase 8d+ summary; 8a never reaches this branch.
+            summary = (
+                f"Causal-effect estimates for {len(result.mu_c)} interventions "
+                f"(mode={result.mode}). See the causal panel for pairwise "
+                f"contrasts and diagnostics."
+            )
+
+        # Flatten mu_c into a data_table the existing UI can render.
+        data_table = [
+            {
+                "intervention": label,
+                "mu_point": ui.point,
+                "mu_lower": ui.lower,
+                "mu_upper": ui.upper,
+            }
+            for label, ui in result.mu_c.items()
+        ]
+        return AnswerResult(
+            text_summary=summary,
+            data_table=data_table,
+            table_columns=["intervention", "mu_point", "mu_lower", "mu_upper"],
+        )
 
     def _extract_one(self, cq: CompetencyQuestion):
         """Legacy single-CQ extractor kept for external callers. Modern

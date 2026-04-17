@@ -41,7 +41,7 @@ from src.conversational.operations import OperationRegistry, get_default_registr
 
 
 class QueryPlan(Enum):
-    """The two execution paths a CQ can take."""
+    """The execution paths a CQ can take."""
 
     SQL_FAST = "sql_fast"
     """Answered by a single SQL query. Skip extract + graph + SPARQL."""
@@ -49,6 +49,12 @@ class QueryPlan(Enum):
     GRAPH = "graph"
     """Requires the RDF knowledge graph (Allen relations, median, time-series,
     multi-event reasoning, or an aggregate/axis that isn't SQL-compilable)."""
+
+    CAUSAL = "causal"
+    """Phase 8: routed to ``src.causal.run_causal``. A well-formed causal CQ
+    carries ``scope="causal_effect"`` plus an intervention set of size
+    |I| ≥ 2. Degenerate shapes (no intervention set, |I| < 2) fall back to
+    the SQL_FAST / GRAPH dispatch above."""
 
 
 # Concept types whose events live in a single MIMIC table the fast-path can
@@ -73,6 +79,17 @@ class QueryPlanner:
         Pure; does not mutate state. Called once per sub-CQ in the
         orchestrator.
         """
+        # Phase 8a: causal route takes priority when the CQ is well-formed
+        # for causal inference. A causal CQ with |I| < 2 is degenerate
+        # (only one "intervention") — fall through to the non-causal path
+        # so the system still answers *something* instead of erroring.
+        if cq.scope == "causal_effect":
+            interventions = cq.intervention_set or []
+            if len(interventions) >= 2:
+                return QueryPlan.CAUSAL
+            # Degenerate: drop through to the legacy classifier so the
+            # existing aggregate / graph branches can still handle it.
+
         # Temporal constraints always require the graph.
         if cq.temporal_constraints:
             return QueryPlan.GRAPH

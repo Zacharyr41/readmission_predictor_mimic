@@ -51,6 +51,53 @@ these viable on BigQuery where they were previously painful.
 | G7 | **Which medications were given in the 12 hours before a positive blood culture in sepsis patients?** | Temporal `before` + drug concept + microbiology concept + diagnosis filter. Multi-concept, multi-temporal — exactly what the graph is for. | <5 min |
 | G8 | **Compare the distribution of ICU length of stay between patients who received vasopressors and those who didn't.** | Drug exposure as a cohort definer (not a comparison axis — the LLM has to emit a filter) + LOS distribution. Stretches what the system can do. | <5 min |
 
+### Clinician intervention-effect scenarios (I1–I6)
+
+The demo target. A clinician with a patient just presenting (stroke, seizure,
+septic shock, AFib+CKD) wants to know: **for a cohort of similar patients,
+what is the effect of intervention I on outcome O, comparing historical
+exposure vs non-exposure (or across $C \ge 2$ alternatives)?** This is the
+Neyman–Rubin potential-outcomes shape the tool is ultimately built for.
+
+Each scenario is tagged with its formal-spec shape $(C, n, g)$ where
+$C = |\mathcal{I}|$ is the intervention arity, $n$ is the number of outcome
+dimensions, and $g$ is the aggregation function over the outcome vector.
+I3, I5, I6 are **expected to clarify or graph-misroute today** — that is
+the demo's "Phase 8 unlocks this" moment.
+
+| # | Question | $(C, n, g)$ | Today | Phase 8 target |
+|---|---|---|---|---|
+| I1 | **Among sepsis patients over 65 with a history of diabetes, what was the mean peak creatinine?** | $(1, 1, \mathrm{id})$ — comorbidity phenotype baseline, no intervention axis | `SQL_FAST`, <30s | n/a (already works) |
+| I2 | **How many stroke patients who received tPA were readmitted within 30 days?** then **...who did NOT receive tPA...** | $(C=2$ as two separate CQs$)$ — the documented 2-CQ workaround | `SQL_FAST` × 2, manual compare | Replaced by I3 routing |
+| I3 | **Compare 30-day readmission between ischemic-stroke patients who received tPA and those who didn't.** | $(2, 1, \mathrm{id})$ — binary intervention, single outcome, identity | clarify / misrouted → GRAPH | Phase 8a: `CAUSAL` route → $\mu_{\text{tPA}}, \mu_{\neg\text{tPA}}, \tau$ with intervals |
+| I4 | **Among seizure patients with epilepsy history and a genetic-disorder diagnosis, how many received levetiracetam during their ICU stay?** | $(1, 1)$ count with temporal `during` | GRAPH (temporal) | n/a — exercises comorbidity + temporal composition |
+| I5 | **Among septic-shock patients, compare 28-day mortality across three empiric-antibiotic regimens: vanc+pip-tazo, vanc+cefepime, vanc+meropenem.** | $(3, 1, \mathrm{id})$ — N-ary intervention, single outcome | clarify / misrouted | Phase 8b: `CAUSAL` → $\{\mu_c\}_{c=1}^3$ + pairwise $\tau$ matrix + ranking |
+| I6 | **For a 72-year-old with AFib, new stroke, and CKD stage 3, compare warfarin vs DOAC vs no-anticoagulation across a composite of 30-day stroke recurrence, major bleeding, and 90-day mortality.** | $(3, 3, \text{weighted})$ — full personalized composite | clarify / misrouted | Phase 8c: per-outcome $\mu_{c,k}$ + composite $\mu_c$ + pairwise $\tau_{c,c'}$ + diagnostics |
+
+### Known limitation — intervention-exposure axis (Phase 8 in flight)
+
+I3, I5, I6 are **not answerable today** through the single-CQ routing path;
+they either clarify, route to graph, or return a nonsense aggregate. The
+existing "How does drug X affect outcome Y?" limitation documented in
+the *"Limitation worth knowing"* subsection above is the same gap —
+I3/I5/I6 are just the clinician-voice generalizations of it across
+binary → N-ary → multi-outcome-composite shapes.
+
+**Phase 8** is a general personalized causal/associative inference tool
+matching a formal Neyman–Rubin potential-outcomes spec. It is
+parametric over population, intervention arity $C \ge 2$, outcome
+dimension $n \ge 1$, aggregation $g$, estimator family (S/T/X-learner,
+AIPW, TMLE, causal forest, …), data regime, and uncertainty method —
+the same machinery handles I3, I5, I6, and arbitrary new clinical
+questions of the same shape without code changes. See
+`/Users/zacharyrothstein/.claude/plans/delegated-skipping-matsumoto.md`
+for the approved sub-phase breakdown (8a–8i).
+
+Until Phase 8 lands, the RED-stage xfail tests in
+`tests/test_conversational/test_intervention_effect.py` specify the
+target behaviour; each sub-phase PR flips a defined subset from
+xfail to plain assert.
+
 ### How to interpret graph-path latency
 
 Graph-path time breaks down as: **cohort query** (≤10s) · **parallel
@@ -236,6 +283,47 @@ G8 (LOS by vasopressor exposure):
   wall-clock:
   did the LLM clarify? (expected — "received X" isn't a comparison axis):
   notes:
+
+--- Clinician intervention-effect scenarios (I1–I6) ---
+
+I1 (sepsis + diabetes + age>65, mean peak creatinine):
+  wall-clock:
+  interpretation:
+  Query Details — SQL or SPARQL?:
+  numeric answer (mg/dL):
+  notes:
+
+I2a (stroke + received tPA + readmitted_30d count):
+  wall-clock:
+  numeric answer:
+  notes:
+
+I2b (stroke + NOT received tPA + readmitted_30d count — may clarify):
+  wall-clock:
+  did the LLM clarify? (y/n):
+  numeric answer if produced:
+  notes:
+
+I3 (tPA vs no-tPA, 30d readmission in ischemic stroke — Phase 8a target):
+  wall-clock:
+  route (today: clarify / graph / misrouted):
+  notes on what the LLM did:
+
+I4 (seizure + epilepsy + genetic disorder + levetiracetam during ICU):
+  wall-clock:
+  Query Details — SPARQL temporal_during?:
+  numeric answer:
+  notes:
+
+I5 (vanc+ptz vs vanc+cefepime vs vanc+meropenem, 28d mortality — Phase 8b target):
+  wall-clock:
+  route (today: clarify / graph / misrouted):
+  notes on what the LLM did:
+
+I6 (AFib+stroke+CKD → warfarin vs DOAC vs none; composite of stroke/bleed/mortality — Phase 8c target):
+  wall-clock:
+  route (today: clarify / graph / misrouted):
+  notes on what the LLM did:
 ```
 
 ## If something is slow or wrong
