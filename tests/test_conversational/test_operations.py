@@ -221,6 +221,21 @@ _FILTER_PARITY_CASES = [
         PatientFilter(field="subject_id", operator="=", value="1"),
         id="subject_id_1",
     ),
+    # The synthetic fixture has patient 1 readmitted within 30 days (admissions
+    # 101 → 102, 26 days apart). Both binary values must flow through the
+    # fallback CTE that the backend's readmission_labels_expr() builds.
+    pytest.param(
+        PatientFilter(field="readmitted_30d", operator="=", value="1"),
+        id="readmitted_30d_eq_1",
+    ),
+    pytest.param(
+        PatientFilter(field="readmitted_30d", operator="=", value="0"),
+        id="readmitted_30d_eq_0",
+    ),
+    pytest.param(
+        PatientFilter(field="readmitted_60d", operator="=", value="1"),
+        id="readmitted_60d_eq_1",
+    ),
 ]
 
 
@@ -513,3 +528,136 @@ class TestListValuedFilters:
         )
         assert violations
         assert "operator" in violations[0]
+
+
+# ---------------------------------------------------------------------------
+# 7. select_templates integration — registry is the dispatch source of truth
+# ---------------------------------------------------------------------------
+#
+# These tests exercise reasoner.select_templates END to END with every
+# registered aggregate. If an aggregate is added to the registry with a
+# template not in reasoner.TEMPLATES, both this and test_all_aggregates_*
+# trip. If select_templates regresses to a hand-rolled elif, adding a new
+# aggregate to the registry without editing the reasoner will silently
+# fail — this test would be the one to flag it.
+
+
+class TestSelectTemplatesDispatch:
+    @pytest.mark.parametrize("aggregation_keyword", sorted(
+        {"mean", "avg", "median", "max", "min", "count", "sum", "exists"}
+    ))
+    def test_every_registered_aggregate_produces_its_registered_template(
+        self, aggregation_keyword: str
+    ):
+        """A biomarker CQ with each aggregation keyword must route to exactly
+        the template the registry declares for that keyword."""
+        from src.conversational.models import ClinicalConcept, CompetencyQuestion
+        from src.conversational.operations import get_default_registry
+        from src.conversational.reasoner import select_templates
+
+        cq = CompetencyQuestion(
+            original_question=f"{aggregation_keyword} creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation=aggregation_keyword,
+            scope="cohort",
+        )
+        expected = get_default_registry().require(
+            "aggregate", aggregation_keyword
+        ).template
+        assert expected in select_templates(cq)
+
+    def test_comparison_scope_uses_registry_for_axis_validation(self):
+        """A comparison CQ whose axis is registered picks ``comparison_by_field``;
+        one with an unregistered axis falls back to ``comparison_two_groups``.
+        """
+        from src.conversational.models import ClinicalConcept, CompetencyQuestion
+        from src.conversational.reasoner import select_templates
+
+        registered = CompetencyQuestion(
+            original_question="compare by gender",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="comparison",
+            comparison_field="gender",
+        )
+        assert "comparison_by_field" in select_templates(registered)
+
+        unknown = CompetencyQuestion(
+            original_question="compare by made-up-axis",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            scope="comparison",
+            comparison_field="not_a_real_axis",
+        )
+        assert "comparison_two_groups" in select_templates(unknown)
+
+    def test_unknown_aggregation_falls_through_to_concept_type_path(self):
+        """An aggregation keyword the registry doesn't know should not crash —
+        select_templates falls through to the concept_type dispatch. This
+        guards against the LLM inventing a novel aggregation keyword."""
+        from src.conversational.models import ClinicalConcept, CompetencyQuestion
+        from src.conversational.reasoner import select_templates
+
+        cq = CompetencyQuestion(
+            original_question="whatever creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="nonexistent_keyword",
+            scope="cohort",
+        )
+        # biomarker fallback is value_with_timestamps
+        assert "value_with_timestamps" in select_templates(cq)
+
+
+# ---------------------------------------------------------------------------
+# 8. Compile contract — every registered filter yields SOMETHING
+# ---------------------------------------------------------------------------
+#
+# A compile_fn that silently returns an empty FilterFragment would reduce the
+# cohort to "everyone" without anyone noticing. This test ensures every
+# registered filter contributes at least a WHERE predicate for a plausible
+# filter — a low bar, but catches "no-op compile" regressions that the
+# parity tests can miss if a field isn't in the parity fixture list.
+
+
+class TestFilterCompileContract:
+    @pytest.mark.parametrize("field_name", sorted({
+        "age", "gender", "diagnosis", "admission_type",
+        "subject_id", "readmitted_30d", "readmitted_60d",
+    }))
+    def test_every_registered_filter_contributes_a_where_clause(
+        self, field_name: str, duckdb_backend
+    ):
+        from src.conversational.operations import (
+            FilterCompileContext,
+            get_default_registry,
+        )
+
+        plausible_values = {
+            "age": ("age", ">", "50"),
+            "gender": ("gender", "=", "M"),
+            "diagnosis": ("diagnosis", "contains", "sepsis"),
+            "admission_type": ("admission_type", "=", "EMERGENCY"),
+            "subject_id": ("subject_id", "=", "1"),
+            "readmitted_30d": ("readmitted_30d", "=", "1"),
+            "readmitted_60d": ("readmitted_60d", "=", "0"),
+        }
+        field, op, value = plausible_values[field_name]
+        flt = PatientFilter(field=field, operator=op, value=value)
+
+        registry = get_default_registry()
+        ctx = FilterCompileContext(backend=duckdb_backend)
+        frag = registry.compile_filters([flt], ctx)
+
+        # Every filter must contribute at least one predicate; most also add joins.
+        assert frag.where, f"filter {field_name!r} produced no WHERE clause"
+        # The predicate should reference something SQL-like — not just an
+        # empty string.
+        assert all(p.strip() for p in frag.where), (
+            f"filter {field_name!r} produced a blank WHERE clause"
+        )
