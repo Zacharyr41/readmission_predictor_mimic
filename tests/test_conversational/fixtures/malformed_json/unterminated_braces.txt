@@ -1,0 +1,1 @@
+{"original_question": "What is the average creatinine?", "clinical_concepts": [{"name": "creatinine"

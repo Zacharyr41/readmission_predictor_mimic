@@ -1,0 +1,16 @@
+{
+  "name": "lactate_plot_single_patient",
+  "question": "Plot the lactate trend over time for patient 12345",
+  "llm_response": "{\"original_question\": \"Plot the lactate trend over time for patient 12345\", \"clinical_concepts\": [{\"name\": \"lactate\", \"concept_type\": \"biomarker\"}], \"patient_filters\": [{\"field\": \"subject_id\", \"operator\": \"=\", \"value\": \"12345\"}], \"return_type\": \"visualization\", \"scope\": \"single_patient\"}",
+  "expected_cq": {
+    "original_question": "Plot the lactate trend over time for patient 12345",
+    "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "subject_id", "operator": "=", "value": "12345"}],
+    "aggregation": null,
+    "return_type": "visualization",
+    "scope": "single_patient",
+    "comparison_field": null
+  },
+  "tags": ["single_patient", "biomarker", "filter:subject_id", "return_type_visualization"]
+}

@@ -1,0 +1,1 @@
+The JSON with nested content: {"original_question": "What about {patient X}?", "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker"}], "return_type": "text", "scope": "single_patient"}

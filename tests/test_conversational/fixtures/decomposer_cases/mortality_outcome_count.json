@@ -1,0 +1,16 @@
+{
+  "name": "mortality_outcome_count",
+  "question": "How many sepsis patients died in the ICU?",
+  "llm_response": "{\"original_question\": \"How many sepsis patients died in the ICU?\", \"clinical_concepts\": [{\"name\": \"mortality\", \"concept_type\": \"outcome\"}], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"sepsis\"}], \"aggregation\": \"count\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "How many sepsis patients died in the ICU?",
+    "clinical_concepts": [{"name": "mortality", "concept_type": "outcome", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "sepsis"}],
+    "aggregation": "count",
+    "return_type": "text",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "outcome", "filter:diagnosis", "count"]
+}

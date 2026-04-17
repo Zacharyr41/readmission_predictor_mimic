@@ -1,0 +1,18 @@
+{
+  "original_question": "Which antibiotics were prescribed during the first 48 hours of ICU admission?",
+  "clinical_concepts": [
+    {
+      "name": "antibiotics",
+      "concept_type": "drug"
+    }
+  ],
+  "temporal_constraints": [
+    {
+      "relation": "within",
+      "reference_event": "ICU admission",
+      "time_window": "48h"
+    }
+  ],
+  "return_type": "text_and_table",
+  "scope": "cohort"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "blood_culture_attribute",
+  "question": "What is the average creatinine in blood for patients over 70?",
+  "llm_response": "{\"original_question\": \"What is the average creatinine in blood for patients over 70?\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\", \"attributes\": [\"blood\"]}], \"patient_filters\": [{\"field\": \"age\", \"operator\": \">\", \"value\": \"70\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What is the average creatinine in blood for patients over 70?",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": ["blood"], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [{"field": "age", "operator": ">", "value": "70"}],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "attribute_blood", "filter:age"]
+}

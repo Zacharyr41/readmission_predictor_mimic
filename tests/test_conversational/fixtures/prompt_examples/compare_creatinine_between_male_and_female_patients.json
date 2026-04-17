@@ -1,0 +1,13 @@
+{
+  "original_question": "Compare creatinine between male and female patients",
+  "clinical_concepts": [
+    {
+      "name": "creatinine",
+      "concept_type": "biomarker"
+    }
+  ],
+  "aggregation": "mean",
+  "return_type": "text_and_table",
+  "scope": "comparison",
+  "comparison_field": "gender"
+}

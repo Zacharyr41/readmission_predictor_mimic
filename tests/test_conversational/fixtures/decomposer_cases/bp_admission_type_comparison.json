@@ -1,0 +1,16 @@
+{
+  "name": "bp_admission_type_comparison",
+  "question": "Compare systolic BP between emergency and elective admissions",
+  "llm_response": "{\"original_question\": \"Compare systolic BP between emergency and elective admissions\", \"clinical_concepts\": [{\"name\": \"systolic BP\", \"concept_type\": \"vital\"}], \"aggregation\": \"mean\", \"return_type\": \"text_and_table\", \"scope\": \"comparison\", \"comparison_field\": \"admission_type\"}",
+  "expected_cq": {
+    "original_question": "Compare systolic BP between emergency and elective admissions",
+    "clinical_concepts": [{"name": "systolic BP", "concept_type": "vital", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "comparison",
+    "comparison_field": "admission_type"
+  },
+  "tags": ["comparison", "vital", "comparison_field:admission_type"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "list_cerebral_infarction",
+  "question": "List all patients diagnosed with cerebral infarction",
+  "llm_response": "{\"original_question\": \"List all patients diagnosed with cerebral infarction\", \"clinical_concepts\": [{\"name\": \"cerebral infarction\", \"concept_type\": \"diagnosis\"}], \"return_type\": \"table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "List all patients diagnosed with cerebral infarction",
+    "clinical_concepts": [{"name": "cerebral infarction", "concept_type": "diagnosis", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "diagnosis", "return_type_table"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "creatinine_during_icu_sepsis",
+  "question": "What are the creatinine levels during ICU stay for sepsis patients?",
+  "llm_response": "{\"original_question\": \"What are the creatinine levels during ICU stay for sepsis patients?\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}], \"temporal_constraints\": [{\"relation\": \"during\", \"reference_event\": \"ICU stay\"}], \"patient_filters\": [{\"field\": \"diagnosis\", \"operator\": \"contains\", \"value\": \"sepsis\"}], \"return_type\": \"text_and_table\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What are the creatinine levels during ICU stay for sepsis patients?",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [{"relation": "during", "reference_event": "ICU stay", "time_window": null}],
+    "patient_filters": [{"field": "diagnosis", "operator": "contains", "value": "sepsis"}],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "filter:diagnosis", "temporal"]
+}

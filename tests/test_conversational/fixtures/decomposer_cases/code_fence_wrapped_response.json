@@ -1,0 +1,16 @@
+{
+  "name": "code_fence_wrapped_response",
+  "question": "What is the average creatinine?",
+  "llm_response": "Sure, here's the structured output:\n```json\n{\n  \"original_question\": \"What is the average creatinine?\",\n  \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}],\n  \"aggregation\": \"mean\",\n  \"return_type\": \"text_and_table\",\n  \"scope\": \"cohort\"\n}\n```\nLet me know if you'd like to refine.",
+  "expected_cq": {
+    "original_question": "What is the average creatinine?",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["extraction", "code_fence_with_prose"]
+}

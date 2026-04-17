@@ -1,0 +1,5 @@
+Here is what I came up with, after thinking about it carefully:
+
+{"original_question": "avg creatinine", "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker"}], "aggregation": "mean", "return_type": "text", "scope": "cohort"}
+
+Hope that helps.

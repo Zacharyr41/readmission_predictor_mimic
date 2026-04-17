@@ -1,0 +1,16 @@
+{
+  "name": "heart_rate_icu_viz",
+  "question": "How did the heart rate change over the ICU stay?",
+  "llm_response": "{\"original_question\": \"How did the heart rate change over the ICU stay?\", \"clinical_concepts\": [{\"name\": \"heart rate\", \"concept_type\": \"vital\"}], \"temporal_constraints\": [{\"relation\": \"during\", \"reference_event\": \"ICU stay\"}], \"return_type\": \"visualization\", \"scope\": \"single_patient\"}",
+  "expected_cq": {
+    "original_question": "How did the heart rate change over the ICU stay?",
+    "clinical_concepts": [{"name": "heart rate", "concept_type": "vital", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [{"relation": "during", "reference_event": "ICU stay", "time_window": null}],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "visualization",
+    "scope": "single_patient",
+    "comparison_field": null
+  },
+  "tags": ["single_patient", "vital", "temporal", "viz_preserved_trend_keyword"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "blood_culture_count",
+  "question": "How many patients had a positive blood culture?",
+  "llm_response": "{\"original_question\": \"How many patients had a positive blood culture?\", \"clinical_concepts\": [{\"name\": \"blood culture\", \"concept_type\": \"microbiology\"}], \"aggregation\": \"count\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "How many patients had a positive blood culture?",
+    "clinical_concepts": [{"name": "blood culture", "concept_type": "microbiology", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "count",
+    "return_type": "text",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "microbiology", "count", "return_type_text_preserved"]
+}

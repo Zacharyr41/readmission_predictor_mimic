@@ -1,0 +1,16 @@
+{
+  "name": "viz_downgraded_no_signal",
+  "question": "Show creatinine values for ICU patients",
+  "llm_response": "{\"original_question\": \"Show creatinine values for ICU patients\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\"}], \"return_type\": \"visualization\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "Show creatinine values for ICU patients",
+    "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "viz_downgrade_no_signal"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "count_text_preserved",
+  "question": "How many patients had sepsis?",
+  "llm_response": "{\"original_question\": \"How many patients had sepsis?\", \"clinical_concepts\": [{\"name\": \"sepsis\", \"concept_type\": \"diagnosis\"}], \"aggregation\": \"count\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "How many patients had sepsis?",
+    "clinical_concepts": [{"name": "sepsis", "concept_type": "diagnosis", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "count",
+    "return_type": "text",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "diagnosis", "count", "return_type_text_preserved"]
+}

@@ -1,0 +1,1 @@
+{'original_question': 'avg creatinine', 'return_type': 'text', 'scope': 'cohort'}

@@ -1,0 +1,1 @@
+{"original_question": "avg creatinine", "clinical_concepts": [{"name": "creatinine", "concept_type": "biomarker",}], "return_type": "text", "scope": "cohort",}

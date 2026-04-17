@@ -1,0 +1,16 @@
+{
+  "name": "lactate_readmitted_comparison",
+  "question": "Compare mean lactate between readmitted and non-readmitted patients",
+  "llm_response": "{\"original_question\": \"Compare mean lactate between readmitted and non-readmitted patients\", \"clinical_concepts\": [{\"name\": \"lactate\", \"concept_type\": \"biomarker\"}], \"aggregation\": \"mean\", \"return_type\": \"text_and_table\", \"scope\": \"comparison\", \"comparison_field\": \"readmitted_30d\"}",
+  "expected_cq": {
+    "original_question": "Compare mean lactate between readmitted and non-readmitted patients",
+    "clinical_concepts": [{"name": "lactate", "concept_type": "biomarker", "attributes": [], "resolved_from_category": false}],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "comparison",
+    "comparison_field": "readmitted_30d"
+  },
+  "tags": ["comparison", "biomarker", "aggregate:mean"]
+}
