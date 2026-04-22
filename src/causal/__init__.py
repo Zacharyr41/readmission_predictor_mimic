@@ -18,6 +18,12 @@ LLM/UX integration (8i). Input-side schema
 ``CompetencyQuestion`` extension surface, not the compute pipeline.
 """
 
+from src.causal.cohort import CausalCohortError, CohortFrame, build_cohort_frame
+from src.causal.covariates import (
+    CovariateProfile,
+    UnknownCovariateProfileError,
+    build_covariate_matrix,
+)
 from src.causal.interventions import (
     InterventionResolutionError,
     InterventionResolver,
@@ -29,6 +35,12 @@ from src.causal.models import (
     DiagnosticReport,
     UncertaintyInterval,
 )
+from src.causal.outcomes import (
+    OutcomeExtractionError,
+    OutcomeExtractor,
+    OutcomeRegistry,
+    get_default_registry as get_default_outcome_registry,
+)
 from src.causal.run import run_causal
 from src.causal.treatment_assignment import (
     InsufficientInterventionsError,
@@ -38,14 +50,24 @@ from src.causal.treatment_assignment import (
 
 __all__ = [
     "AssumptionClaim",
+    "CausalCohortError",
     "CausalEffectResult",
+    "CohortFrame",
+    "CovariateProfile",
     "DiagnosticReport",
     "InsufficientInterventionsError",
     "InterventionResolutionError",
     "InterventionResolver",
+    "OutcomeExtractionError",
+    "OutcomeExtractor",
+    "OutcomeRegistry",
     "ResolvedIntervention",
     "TreatmentAssignment",
     "UncertaintyInterval",
+    "UnknownCovariateProfileError",
     "assign_treatments",
+    "build_cohort_frame",
+    "build_covariate_matrix",
+    "get_default_outcome_registry",
     "run_causal",
 ]

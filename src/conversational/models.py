@@ -114,8 +114,13 @@ class OutcomeSpec(BaseModel):
     outcome fits a logistic learner; continuous fits a regression
     learner; ordinal uses a proportional-odds variant; time_to_event
     uses the survival branch landing in 8c.
-    ``extractor_key`` is the lookup key into the forthcoming
-    OutcomeRegistry (phase 8c); 8a only stores it.
+    ``extractor_key`` is the lookup key into the ``OutcomeRegistry``
+    (phase 8c); ``extractor_params`` carries the per-call configuration
+    for parametric extractors (e.g. ``{"icd_prefixes": ["I60", "I61"]}``
+    for a bleeding-diagnosis outcome). Parameters live on the spec so
+    the outcome definition travels with the CQ — reviewers don't have
+    to chase a side-channel registry to see how "major bleeding" was
+    defined for a given study.
 
     ``censoring_clock`` is consulted by the survival extractor to decide
     t=0 (admission vs. discharge vs. ICU-out). Default ``"admission"``
@@ -128,6 +133,7 @@ class OutcomeSpec(BaseModel):
     name: str
     outcome_type: Literal["continuous", "binary", "ordinal", "time_to_event"]
     extractor_key: str
+    extractor_params: dict = Field(default_factory=dict)
     higher_is_better: bool = Field(
         default=False,
         description="if False (default), lower values are clinically preferred; drives ranking direction",

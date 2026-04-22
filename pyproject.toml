@@ -50,6 +50,14 @@ conversational = [
     "streamlit>=1.40",
     "plotly>=5.0",
 ]
+# Phase 8 causal-inference pipeline. Deps are lazy-imported by the
+# estimator + survival modules; the base install stays slim. Install
+# with `uv pip install --python .venv/bin/python -e .[causal]` when
+# running the Phase 8d+ estimators or 8h/8i diagnostics.
+causal = [
+    "econml>=0.14",
+    "lifelines>=0.27",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
