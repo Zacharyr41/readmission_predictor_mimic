@@ -27,9 +27,9 @@ def test_s_learner_produces_non_nan_mu_per_arm():
     )
     result = runner.run()
 
-    for arm in range(3):
-        assert arm in result.mu_c
-        ui = result.mu_c[arm]
+    for label in cf.intervention_labels:
+        assert label in result.mu_c
+        ui = result.mu_c[label]
         assert not math.isnan(ui.point)
         assert ui.lower <= ui.point <= ui.upper
 

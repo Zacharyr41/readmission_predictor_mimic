@@ -36,8 +36,8 @@ class TestBootstrapReproducibility:
         )
         a = runner_a.run()
         b = runner_b.run()
-        for c in a.mu_c:
-            assert a.mu_c[c].point == pytest.approx(b.mu_c[c].point)
+        for label in a.mu_c:
+            assert a.mu_c[label].point == pytest.approx(b.mu_c[label].point)
 
 
 class TestStratifiedResample:
@@ -71,13 +71,13 @@ class TestBootstrapUncertaintyScales:
             TLearnerAdapter, cf, outcome_name="Y",
             B=200, random_state=0, alpha=0.05,
         ).run()
-        # Width of the interval for arm 0. With the same seed the
+        # Width of the interval for arm "arm0". With the same seed the
         # center should be similar; the tail quantiles at B=20 are much
         # noisier, so on average width is larger. This is a statistical
         # claim — assert weakly (≥ 0.5× the larger-B width; both should
         # be finite).
-        small_width = small.mu_c[0].upper - small.mu_c[0].lower
-        large_width = large.mu_c[0].upper - large.mu_c[0].lower
+        small_width = small.mu_c["arm0"].upper - small.mu_c["arm0"].lower
+        large_width = large.mu_c["arm0"].upper - large.mu_c["arm0"].lower
         assert np.isfinite(small_width) and np.isfinite(large_width)
         assert small_width >= 0.5 * large_width
 
@@ -98,8 +98,8 @@ class TestPairedTauCi:
         assert len(result.tau_cc_prime) == 1
         tau_key = next(iter(result.tau_cc_prime))
         tau_ui = result.tau_cc_prime[tau_key]
-        mu0 = result.mu_c[0]
-        mu1 = result.mu_c[1]
+        mu0 = result.mu_c["arm0"]
+        mu1 = result.mu_c["arm1"]
         paired_width = tau_ui.upper - tau_ui.lower
         naive_width = (mu1.upper - mu1.lower) + (mu0.upper - mu0.lower)
         # Paired should be narrower or equal; allow small numerical slop.

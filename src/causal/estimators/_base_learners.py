@@ -54,10 +54,10 @@ def make_base_learner(outcome_type: str, random_state: int = 0):
         from sklearn.linear_model import LogisticRegression
 
         # sklearn 1.5+ picks multinomial automatically when classes > 2;
-        # we still set it explicitly so the behaviour is pinned.
+        # the explicit ``multi_class="multinomial"`` kwarg was deprecated.
+        # Default behaviour is correct for ordinal-as-multinomial here.
         return LogisticRegression(
             max_iter=1000,
-            multi_class="multinomial",
             random_state=random_state,
         )
 

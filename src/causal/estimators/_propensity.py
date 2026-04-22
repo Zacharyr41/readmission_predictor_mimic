@@ -41,8 +41,10 @@ def fit_propensity(
     """
     from sklearn.linear_model import LogisticRegression
 
+    # Note: sklearn >= 1.5 auto-selects multinomial for multiclass targets;
+    # the explicit ``multi_class="multinomial"`` kwarg is deprecated there.
+    # We rely on the default, which is correct across sklearn 1.3–1.7.
     model = LogisticRegression(
-        multi_class="multinomial",
         max_iter=1000,
         random_state=random_state,
     )

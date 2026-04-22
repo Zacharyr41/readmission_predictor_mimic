@@ -22,7 +22,7 @@ def test_three_arm_mu_c_all_non_nan():
     )
     result = runner.run()
     assert len(result.mu_c) == 3
-    for arm, ui in result.mu_c.items():
+    for label, ui in result.mu_c.items():
         assert not math.isnan(ui.point)
 
 

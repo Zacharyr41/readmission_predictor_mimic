@@ -26,26 +26,70 @@ class TLearnerAdapter:
     This is the default estimator selected when
     ``CompetencyQuestion.estimator_family`` is unset (see
     ``src/conversational/models.py:212``).
+
+    Implementation: the "metalearner" aspect is trivial — just fit one
+    sklearn/xgboost learner per arm via
+    ``_base_learners.make_base_learner`` (decision #4: XGBoost for
+    continuous). The heavier econml metalearners in 8g (DRLearner /
+    CausalForestDML) will come in via ``econml.dml`` / ``econml.dr``.
     """
 
     key = "t_learner"
     supported_outcome_types = ("binary", "continuous", "ordinal")
 
-    def __init__(self, cohort, random_state: int = 0) -> None:
-        raise NotImplementedError(
-            "TLearnerAdapter — fleshed out in commit 3 of the 8d TDD trail. "
-            "See /Users/zacharyrothstein/.claude/plans/vivid-knitting-forest.md"
-        )
+    def __init__(
+        self, cohort, random_state: int = 0, outcome_type: str = "continuous",
+    ) -> None:
+        self._cohort = cohort
+        self._random_state = random_state
+        self._outcome_type = outcome_type
+        self._n_arms = len(cohort.intervention_labels)
+        self._models: list | None = None
 
     def fit(self, cohort, outcome_name: str) -> None:
-        raise NotImplementedError
+        from src.causal.estimators._base_learners import make_base_learner
 
-    def predict_mu_per_arm(self, X: pd.DataFrame) -> dict[int, np.ndarray]:
-        raise NotImplementedError
+        X = cohort.df[cohort.covariate_columns].to_numpy(dtype=float)
+        T = cohort.df[cohort.treatment_column].to_numpy(dtype=int)
+        Y = cohort.df[outcome_name].to_numpy()
+
+        models: list = []
+        for c in range(self._n_arms):
+            mask = T == c
+            if not mask.any():
+                raise ValueError(
+                    f"TLearnerAdapter.fit: arm {c} "
+                    f"({cohort.intervention_labels[c]!r}) has no rows in the "
+                    "cohort; per-arm fit impossible. Check cohort assembly / "
+                    "bootstrap stratification."
+                )
+            learner = make_base_learner(
+                self._outcome_type,
+                random_state=self._random_state + c,
+            )
+            learner.fit(X[mask], Y[mask])
+            models.append(learner)
+        self._models = models
+
+    def predict_mu_per_arm(self, X_df: pd.DataFrame) -> dict[int, np.ndarray]:
+        if self._models is None:
+            raise RuntimeError(
+                "TLearnerAdapter.fit must be called before predict_mu_per_arm"
+            )
+        cols = self._cohort.covariate_columns
+        X = X_df[cols].to_numpy(dtype=float)
+        out: dict[int, np.ndarray] = {}
+        for c, model in enumerate(self._models):
+            if self._outcome_type == "binary" and hasattr(model, "predict_proba"):
+                # μ_c = P(Y=1 | X, T=c) for binary outcomes.
+                out[c] = model.predict_proba(X)[:, 1]
+            else:
+                out[c] = np.asarray(model.predict(X), dtype=float)
+        return out
 
     @property
     def n_arms(self) -> int:
-        raise NotImplementedError
+        return self._n_arms
 
 
 class SLearnerAdapter:
