@@ -186,10 +186,30 @@ Infer return_type from the question's intent:
 - "cohort": Population-level questions — "all patients", "patients with X", "in our cohort"
 - "comparison": Explicit group-vs-group — "compare", "vs", "between … and …",
   "readmitted vs not readmitted"
+- "causal_effect": Treatment / intervention-effect questions — "effect of",
+  "does X affect", "outcome of giving drug Y". Populate intervention_set +
+  outcome_vector + aggregation_spec. See Phase 8d docs.
+- "patient_similarity": Phrases like "similar to patient X", "like this
+  patient", "patients matching Y", "patients with similar trajectories".
+  Populate ``similarity_spec`` with EXACTLY ONE anchor:
+    * ``anchor_hadm_id`` when a concrete admission is referenced
+      ("similar to hadm 101");
+    * ``anchor_subject_id`` when a patient (multiple admissions) is
+      referenced ("similar to subject 42");
+    * ``anchor_template`` when a profile description is given without
+      a concrete patient ("like a 68yo F with afib + CKD" — emit
+      ``{"age": 68, "gender_F": 1, "snomed_group_I48": 1, ...}``).
+  Default ``top_k`` to 30 unless the user specifies "top N".
 
 When scope is "comparison", set comparison_field to the dimension being compared
 (see "Supported Operations / comparison_axis" below). If not clear, default to
 "readmitted_30d".
+
+**Similarity + causal combination**: a question like "compare tPA vs no-tPA
+among patients similar to hadm 101" is causal-with-narrowing — set
+``scope="causal_effect"`` AND populate ``similarity_spec`` (the downstream
+pipeline treats the spec as a cohort-narrowing directive and keeps the
+full causal analysis on top).
 
 # When to Ask a Clarifying Question
 
@@ -384,6 +404,20 @@ Question: "Compare creatinine between male and female patients"
 }
 ```
 
+Question: "Show me the 30 patients most similar to hadm_id 101"
+```json
+{
+  "original_question": "Show me the 30 patients most similar to hadm_id 101",
+  "scope": "patient_similarity",
+  "similarity_spec": {
+    "anchor_hadm_id": 101,
+    "top_k": 30
+  },
+  "return_type": "table",
+  "interpretation_summary": "Rank admissions by contextual + temporal similarity to hadm 101; return the top 30 with per-group explanation breakdown."
+}
+```
+
 Question: "What is the average creatinine for patients readmitted within 30 days?"
 ```json
 {
@@ -408,6 +442,28 @@ Question: "What is the average creatinine for patients readmitted within 30 days
 }
 ```
 
+Question: "Find patients similar to a 68-year-old female with atrial fibrillation and CKD"
+```json
+{
+  "original_question": "Find patients similar to a 68-year-old female with atrial fibrillation and CKD",
+  "scope": "patient_similarity",
+  "similarity_spec": {
+    "anchor_template": {
+      "age": 68,
+      "gender_F": 1,
+      "gender_M": 0,
+      "gender_unknown": 0,
+      "admission_type_EMERGENCY": 1,
+      "snomed_group_I48": 1,
+      "snomed_group_N18": 1
+    },
+    "top_k": 30
+  },
+  "return_type": "table",
+  "interpretation_summary": "Template-anchor similarity query: no concrete patient referenced, so temporal similarity is unavailable and scoring falls back to contextual-only (demographics + comorbidity + severity + social)."
+}
+```
+
 Question: "Which antibiotics were prescribed during the first 48 hours of ICU admission?"
 ```json
 {
@@ -428,6 +484,43 @@ Question: "Which antibiotics were prescribed during the first 48 hours of ICU ad
   "return_type": "text_and_table",
   "scope": "cohort",
   "interpretation_summary": "Antibiotic prescriptions whose start time falls within 48h of ICU admission."
+}
+```
+
+Question: "Among patients similar to hadm 101, compare tPA vs no tPA on 30-day readmission"
+```json
+{
+  "original_question": "Among patients similar to hadm 101, compare tPA vs no tPA on 30-day readmission",
+  "scope": "causal_effect",
+  "similarity_spec": {
+    "anchor_hadm_id": 101,
+    "top_k": 30
+  },
+  "intervention_set": [
+    {
+      "label": "tPA",
+      "kind": "drug",
+      "rxnorm_ingredient": "8410"
+    },
+    {
+      "label": "no_tPA",
+      "kind": "drug",
+      "rxnorm_ingredient": "8410",
+      "is_control": true
+    }
+  ],
+  "outcome_vector": [
+    {
+      "name": "readmitted_30d",
+      "outcome_type": "binary",
+      "extractor_key": "readmitted_30d"
+    }
+  ],
+  "aggregation_spec": {
+    "kind": "identity"
+  },
+  "return_type": "text_and_table",
+  "interpretation_summary": "Causal effect of tPA vs. no-tPA on 30-day readmission, cohort narrowed to patients most similar to hadm 101 (top 30)."
 }
 ```
 

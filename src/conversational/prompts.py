@@ -235,10 +235,30 @@ _SCOPE_INFERENCE = """\
 - "cohort": Population-level questions — "all patients", "patients with X", "in our cohort"
 - "comparison": Explicit group-vs-group — "compare", "vs", "between … and …",
   "readmitted vs not readmitted"
+- "causal_effect": Treatment / intervention-effect questions — "effect of",
+  "does X affect", "outcome of giving drug Y". Populate intervention_set +
+  outcome_vector + aggregation_spec. See Phase 8d docs.
+- "patient_similarity": Phrases like "similar to patient X", "like this
+  patient", "patients matching Y", "patients with similar trajectories".
+  Populate ``similarity_spec`` with EXACTLY ONE anchor:
+    * ``anchor_hadm_id`` when a concrete admission is referenced
+      ("similar to hadm 101");
+    * ``anchor_subject_id`` when a patient (multiple admissions) is
+      referenced ("similar to subject 42");
+    * ``anchor_template`` when a profile description is given without
+      a concrete patient ("like a 68yo F with afib + CKD" — emit
+      ``{"age": 68, "gender_F": 1, "snomed_group_I48": 1, ...}``).
+  Default ``top_k`` to 30 unless the user specifies "top N".
 
 When scope is "comparison", set comparison_field to the dimension being compared
 (see "Supported Operations / comparison_axis" below). If not clear, default to
 "readmitted_30d".
+
+**Similarity + causal combination**: a question like "compare tPA vs no-tPA
+among patients similar to hadm 101" is causal-with-narrowing — set
+``scope="causal_effect"`` AND populate ``similarity_spec`` (the downstream
+pipeline treats the spec as a cohort-narrowing directive and keeps the
+full causal analysis on top).
 """
 
 
