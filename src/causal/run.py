@@ -184,6 +184,40 @@ def run_causal(
     for spec in outcomes:
         reg.check_outcome_type(est_cls, spec.outcome_type)
 
+    # Phase 9: similarity-based cohort narrowing. When the CQ carries
+    # a ``similarity_spec``, we compute similarity against the population
+    # first, take the top-K hadm_ids, and pass them as the causal cohort.
+    # The similarity summary is threaded into DiagnosticReport.notes so
+    # the UI + investigator can trace cohort selection. When a caller
+    # has already pre-built the cohort (``cohort_hadm_ids`` or
+    # ``cohort_frame``), we DON'T re-run similarity — but we still emit
+    # an audit note so reviewers can see the spec was honored.
+    similarity_note: str | None = None
+    if cq.similarity_spec is not None:
+        spec = cq.similarity_spec
+        anchor_desc = (
+            f"hadm_id={spec.anchor_hadm_id}" if spec.anchor_hadm_id is not None
+            else f"subject_id={spec.anchor_subject_id}" if spec.anchor_subject_id is not None
+            else "template anchor"
+        )
+        if cohort_frame is None and cohort_hadm_ids is None:
+            from src.similarity.run import run_similarity
+
+            sim_result = run_similarity(spec, backend)
+            cohort_hadm_ids = [s.hadm_id for s in sim_result.scores]
+            similarity_note = (
+                f"Phase 9 — cohort narrowed by similarity to "
+                f"{sim_result.anchor_description} "
+                f"(top_k={spec.top_k}, "
+                f"n_pool={sim_result.n_pool}, n_returned={sim_result.n_returned})."
+            )
+        else:
+            similarity_note = (
+                f"Phase 9 — similarity_spec present (anchor: {anchor_desc}, "
+                f"top_k={spec.top_k}) but the caller supplied a pre-built "
+                "cohort; narrowing skipped."
+            )
+
     # Assemble cohort via the 8c entry-point. Tests + callers with a
     # pre-computed cohort pass cohort_hadm_ids directly (mirrors the
     # escape-hatch at src/causal/cohort.py:125-128) so a thin backend
@@ -226,6 +260,8 @@ def run_causal(
     # Merge: single-outcome CausalEffectResult from the primary runner
     # + the accumulated per-outcome μ_{c,k} grid.
     merged_notes = list(primary_result.diagnostics.notes)
+    if similarity_note is not None:
+        merged_notes.insert(0, similarity_note)
     if len(outcomes) > 1:
         merged_notes.append(
             f"Phase 8d — mu_c + tau + ranking reflect the first outcome "

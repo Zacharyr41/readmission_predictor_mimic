@@ -179,9 +179,10 @@ class CompetencyQuestion(BaseModel):
     patient_filters: list[PatientFilter] = []
     aggregation: str | None = None
     return_type: ReturnType = ReturnType.TEXT_AND_TABLE
-    scope: Literal["single_patient", "cohort", "comparison", "causal_effect"] = (
-        "single_patient"
-    )
+    scope: Literal[
+        "single_patient", "cohort", "comparison", "causal_effect",
+        "patient_similarity",
+    ] = "single_patient"
     comparison_field: str | None = None
     # Phase 4: clinician-facing echo + optional clarifying-question short-circuit.
     # ``interpretation_summary`` is always populated before the CQ reaches the
@@ -218,6 +219,15 @@ class CompetencyQuestion(BaseModel):
     # reproducibility. Tests override with small B for speed.
     uncertainty_reps: int = 200
     random_state: int = 0
+    # Phase 9 — similarity spec for both standalone similarity CQs
+    # (``scope="patient_similarity"``) and cohort-narrowing on causal
+    # CQs (``scope="causal_effect"`` + ``similarity_spec``). The type
+    # is a forward ref because ``src.similarity.models.SimilaritySpec``
+    # imports ``PatientFilter`` from this module — circular if resolved
+    # here. ``src.similarity.models`` calls ``model_rebuild`` at its
+    # module bottom so the forward ref resolves as soon as anyone
+    # imports the similarity package.
+    similarity_spec: "SimilaritySpec | None" = None
 
     @model_validator(mode="after")
     def _causal_scope_requires_intervention_set(self) -> "CompetencyQuestion":

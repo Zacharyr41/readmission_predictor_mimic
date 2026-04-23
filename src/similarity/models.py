@@ -217,3 +217,19 @@ class SimilaritySpec(BaseModel):
 
 # Resolve the forward reference on ``SimilarityResult.spec``.
 SimilarityResult.model_rebuild()
+
+# Resolve the forward reference on
+# ``CompetencyQuestion.similarity_spec``. The conversational schema
+# declares the field via a string type hint to avoid a circular import
+# (``src.similarity.models`` imports ``PatientFilter`` from
+# ``src.conversational.models``). Rebuilding here makes
+# ``CompetencyQuestion(similarity_spec=SimilaritySpec(...))`` work as
+# soon as ``src.similarity`` is imported — which happens in every
+# code path that needs the field (tests, orchestrator, causal
+# narrowing, decomposer).
+from src.conversational.models import CompetencyQuestion  # noqa: E402
+
+CompetencyQuestion.model_rebuild(
+    _types_namespace={"SimilaritySpec": SimilaritySpec},
+    force=True,
+)

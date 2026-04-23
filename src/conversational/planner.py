@@ -56,6 +56,14 @@ class QueryPlan(Enum):
     |I| ≥ 2. Degenerate shapes (no intervention set, |I| < 2) fall back to
     the SQL_FAST / GRAPH dispatch above."""
 
+    SIMILARITY = "similarity"
+    """Phase 9: routed to ``src.similarity.run.run_similarity``. A CQ with
+    ``scope="patient_similarity"`` and a populated ``similarity_spec``
+    produces a ranked list of similar patients with contextual + temporal
+    explanations. A causal CQ with ``similarity_spec`` STAYS on
+    ``CAUSAL`` — ``run_causal`` then consumes the spec as a cohort-
+    narrowing directive rather than a standalone query."""
+
 
 # Concept types whose events live in a single MIMIC table the fast-path can
 # aggregate over directly. Extending this needs a matching branch in
@@ -79,6 +87,14 @@ class QueryPlanner:
         Pure; does not mutate state. Called once per sub-CQ in the
         orchestrator.
         """
+        # Phase 9: standalone similarity CQ. Takes priority over the
+        # causal check because a similarity-only CQ has no intervention
+        # set — the causal branch would fall through anyway. A CAUSAL
+        # CQ that also carries a similarity_spec stays on CAUSAL
+        # (cohort narrowing there, not standalone).
+        if cq.scope == "patient_similarity":
+            return QueryPlan.SIMILARITY
+
         # Phase 8a: causal route takes priority when the CQ is well-formed
         # for causal inference. A causal CQ with |I| < 2 is degenerate
         # (only one "intervention") — fall through to the non-causal path
