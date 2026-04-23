@@ -96,11 +96,18 @@ def anchor_features() -> dict:
 def candidate_features_df(anchor_features) -> pd.DataFrame:
     """Four candidates with a known similarity ordering relative to anchor.
 
-    Expected rank (most to least similar):
-      2001 (very similar: near-identical demographics + comorbidities)
-      2002 (moderate: shared afib, different age/CKD status)
-      2003 (different severity: same demographics, very different labs)
-      2004 (dissimilar: different gender, younger, no shared comorbidities)
+    Under the default group weights (``comorbidity_burden=0.35`` +
+    ``comorbidity_set=0.25`` ⇒ 60% weight on comorbidity), shared
+    baseline comorbidities dominate single-admission severity. Expected
+    rank:
+
+      2001 — near-identical: demographics + comorbidities + similar severity
+      2003 — chronic-profile match + acute severity gap (same demographics,
+             same Charlson / SNOMED burden, abnormal labs)
+      2002 — thinner comorbidity overlap (shared afib only, missing CKD
+             + renal), closer labs than 2003 but insufficient to outrank
+             it at default weights
+      2004 — dissimilar across every group
     """
     rows = [
         _feature_row(

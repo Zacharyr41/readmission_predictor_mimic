@@ -25,14 +25,15 @@ class TestContextualRanking:
     def test_programmed_ranking_is_monotonic(
         self, anchor_features, candidate_features_df,
     ):
-        """Fixture is programmed so rank is 2001 > 2002 > 2003 > 2004."""
+        """Under default weights (comorbidity-dominant), rank is
+        2001 > 2003 > 2002 > 2004. See ``conftest.py`` docstring."""
         out = compute_contextual_similarity(
             anchor_features=anchor_features,
             candidate_features_df=candidate_features_df,
         )
         ordered = sorted(out.items(), key=lambda kv: -kv[1].overall_score)
         hadm_ids = [h for h, _ in ordered]
-        assert hadm_ids == [2001, 2002, 2003, 2004]
+        assert hadm_ids == [2001, 2003, 2002, 2004]
 
 
 class TestContextualGroupScores:
