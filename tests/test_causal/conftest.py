@@ -103,6 +103,90 @@ def duckdb_backend(synthetic_duckdb_for_causal: duckdb.DuckDBPyConnection) -> Du
     return DuckDBAdapter(synthetic_duckdb_for_causal)
 
 
+@pytest.fixture
+def synthetic_duckdb_for_causal_binary(
+    synthetic_duckdb_for_causal: duckdb.DuckDBPyConnection,
+) -> duckdb.DuckDBPyConnection:
+    """Augment the base causal fixture with enough admissions for binary LR.
+
+    The 6-admission base fixture has ``readmitted_30d`` collapsing to
+    all-False in the no-tPA arm, which makes sklearn's LogisticRegression
+    refuse to fit (ValueError: only one class in data). This fixture adds
+    12 more admissions (hadm_ids 201–212) across 6 new subjects with a
+    deliberately mixed readmission pattern so both arms have both classes:
+
+      * tPA arm (rxnorm 8410 present):
+          201 (subj 10) → readmit (follow-up 202 within 30d)
+          203 (subj 11) → readmit (follow-up 204 within 30d)
+          205 (subj 12) → no readmit
+          206 (subj 13) → no readmit
+      * no-tPA arm:
+          207 (subj 14) → readmit (follow-up 208 within 30d)
+          209 (subj 15) → readmit (follow-up 210 within 30d)
+          211 (subj 16) → no readmit
+          212 (subj 17) → no readmit
+
+    Selection cohort for tests: hadm_ids 201, 203, 205, 206 (tPA arm) +
+    207, 209, 211, 212 (no-tPA arm) = 8 admissions with 4-4-4-4 class
+    balance. Follow-ups 202, 204, 208, 210 feed readmitted_30d but are
+    not in the cohort (the outcome extractor looks them up by subject).
+    """
+    conn = synthetic_duckdb_for_causal
+
+    # New subjects. patients schema: (subject_id, gender, anchor_age,
+    # anchor_year, dod) per tests/conftest.py:40-46.
+    conn.execute("""
+        INSERT INTO patients VALUES
+        (10, 'M', 65, 2150, NULL),
+        (11, 'F', 70, 2150, NULL),
+        (12, 'M', 55, 2151, NULL),
+        (13, 'F', 60, 2151, NULL),
+        (14, 'M', 72, 2150, NULL),
+        (15, 'F', 68, 2150, NULL),
+        (16, 'M', 58, 2151, NULL),
+        (17, 'F', 62, 2151, NULL)
+    """)
+
+    # New admissions. Pairs within 30 days trigger readmitted_30d=True on
+    # the first of each pair.
+    conn.execute("""
+        INSERT INTO admissions VALUES
+        (201, 10, '2150-03-01 08:00:00', '2150-03-05 14:00:00', 'EMERGENCY', 'HOME', 0),
+        (202, 10, '2150-03-20 09:00:00', '2150-03-24 10:00:00', 'EMERGENCY', 'HOME', 0),
+        (203, 11, '2150-04-01 10:00:00', '2150-04-04 12:00:00', 'EMERGENCY', 'HOME', 0),
+        (204, 11, '2150-04-20 11:00:00', '2150-04-23 13:00:00', 'EMERGENCY', 'HOME', 0),
+        (205, 12, '2151-05-01 08:00:00', '2151-05-05 14:00:00', 'EMERGENCY', 'HOME', 0),
+        (206, 13, '2151-06-01 10:00:00', '2151-06-04 12:00:00', 'EMERGENCY', 'HOME', 0),
+        (207, 14, '2150-07-01 08:00:00', '2150-07-05 14:00:00', 'EMERGENCY', 'HOME', 0),
+        (208, 14, '2150-07-20 09:00:00', '2150-07-24 10:00:00', 'EMERGENCY', 'HOME', 0),
+        (209, 15, '2150-08-01 10:00:00', '2150-08-04 12:00:00', 'EMERGENCY', 'HOME', 0),
+        (210, 15, '2150-08-20 11:00:00', '2150-08-23 13:00:00', 'EMERGENCY', 'HOME', 0),
+        (211, 16, '2151-09-01 08:00:00', '2151-09-05 14:00:00', 'EMERGENCY', 'HOME', 0),
+        (212, 17, '2151-10-01 10:00:00', '2151-10-04 12:00:00', 'EMERGENCY', 'HOME', 0)
+    """)
+
+    # Prescriptions: Alteplase for the tPA arm (201, 203, 205, 206 and
+    # follow-ups 202, 204), nothing for the no-tPA arm.
+    conn.execute("""
+        INSERT INTO prescriptions VALUES
+        (10, 201, '2150-03-01 09:00:00', '2150-03-01 11:00:00', 'Alteplase', 90.0, 'mg', 'IV'),
+        (10, 202, '2150-03-20 10:00:00', '2150-03-20 12:00:00', 'Alteplase', 90.0, 'mg', 'IV'),
+        (11, 203, '2150-04-01 11:00:00', '2150-04-01 13:00:00', 'Alteplase', 90.0, 'mg', 'IV'),
+        (11, 204, '2150-04-20 12:00:00', '2150-04-20 14:00:00', 'Alteplase', 90.0, 'mg', 'IV'),
+        (12, 205, '2151-05-01 09:00:00', '2151-05-01 11:00:00', 'Alteplase', 90.0, 'mg', 'IV'),
+        (13, 206, '2151-06-01 11:00:00', '2151-06-01 13:00:00', 'Alteplase', 90.0, 'mg', 'IV')
+    """)
+
+    return conn
+
+
+@pytest.fixture
+def duckdb_backend_binary(
+    synthetic_duckdb_for_causal_binary: duckdb.DuckDBPyConnection,
+) -> DuckDBAdapter:
+    return DuckDBAdapter(synthetic_duckdb_for_causal_binary)
+
+
 # ---------------------------------------------------------------------------
 # Phase 8d — synthetic CohortFrame with a programmed ATE.
 # ---------------------------------------------------------------------------
@@ -114,6 +198,7 @@ def make_synthetic_cohort_frame(
     ate: float = 2.0,
     seed: int = 0,
     outcome_names: list[str] | None = None,
+    binary_outcome: bool = False,
 ) -> CohortFrame:
     """Build a ``CohortFrame`` with known ATE.
 
@@ -175,13 +260,22 @@ def make_synthetic_cohort_frame(
     })
     # Outcome: Y = 0.05*age + 1.5*gender_M + ate*T + N(0, 1). True ATE
     # between arm c and arm 0 is c*ate (under ignorability given X).
+    # When ``binary_outcome`` is True, pass the continuous score through
+    # a logistic (centered so each arm has a usable class balance) and
+    # sample 0/1 — gives LR enough per-arm variation to converge under
+    # stratified bootstrap.
     for name in outcome_names:
-        df[name] = (
+        latent = (
             0.05 * age
             + 1.5 * gender_M
             + ate * T
             + rng.normal(0.0, 1.0, size=total)
         )
+        if binary_outcome:
+            p = 1.0 / (1.0 + np.exp(-(latent - latent.mean())))
+            df[name] = (rng.random(total) < p).astype(int)
+        else:
+            df[name] = latent
 
     per_arm_matched = {label: int((df["T"] == c).sum()) for c, label in enumerate(intervention_labels)}
     assignment = TreatmentAssignment(

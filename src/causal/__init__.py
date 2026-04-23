@@ -4,18 +4,17 @@ Implements the Neyman–Rubin potential-outcomes spec the user approved
 2026-04-17. Phase 8 delivery plan:
 ``/Users/zacharyrothstein/.claude/plans/delegated-skipping-matsumoto.md``.
 
-Phase 8a (this module):
-  * Output-side schema (``CausalEffectResult``, ``DiagnosticReport``,
-    ``AssumptionClaim``, ``UncertaintyInterval``) in ``models``.
-  * End-to-end dispatch stub (``run_causal``) so the orchestrator can
-    wire up the ``QueryPlan.CAUSAL`` branch before any real estimator
-    lands (8d+).
+Phase 8a: output schema + dispatch stub.
+Phase 8b: ontology-grounded intervention resolution + treatment assignment.
+Phase 8c: cohort-frame assembly (covariates, outcomes incl. survival).
+Phase 8d (this commit): real estimators (T/S/X-learner via econml) +
+  BootstrapRunner with stratified resample + typed guard rails
+  (``SurvivalNotYetSupported``, ``AggregationNotYetSupported``). See
+  ``/Users/zacharyrothstein/.claude/plans/vivid-knitting-forest.md``.
 
-Downstream phases add real estimators (8d/8e/8f), diagnostics (8h),
-LLM/UX integration (8i). Input-side schema
-(``InterventionSpec``, ``OutcomeSpec``, ``AggregationSpec``) lives in
-``src.conversational.models`` because it is part of the
-``CompetencyQuestion`` extension surface, not the compute pipeline.
+Downstream phases: 8f aggregation, 8g survival estimators + AIPW/TMLE/
+Causal Forest + Bayesian uncertainty, 8h full diagnostics + mode
+transitions, 8i LLM + Streamlit UX.
 """
 
 from src.causal.cohort import CausalCohortError, CohortFrame, build_cohort_frame
@@ -24,6 +23,15 @@ from src.causal.covariates import (
     UnknownCovariateProfileError,
     build_covariate_matrix,
 )
+from src.causal.estimators import (
+    AggregationNotYetSupported,
+    CausalEstimator,
+    EstimatorOutcomeTypeMismatch,
+    EstimatorRegistry,
+    SurvivalNotYetSupported,
+    get_default_registry as get_default_estimator_registry,
+)
+from src.causal.estimators.base import BootstrapRunner
 from src.causal.interventions import (
     InterventionResolutionError,
     InterventionResolver,
@@ -49,12 +57,17 @@ from src.causal.treatment_assignment import (
 )
 
 __all__ = [
+    "AggregationNotYetSupported",
     "AssumptionClaim",
+    "BootstrapRunner",
     "CausalCohortError",
     "CausalEffectResult",
+    "CausalEstimator",
     "CohortFrame",
     "CovariateProfile",
     "DiagnosticReport",
+    "EstimatorOutcomeTypeMismatch",
+    "EstimatorRegistry",
     "InsufficientInterventionsError",
     "InterventionResolutionError",
     "InterventionResolver",
@@ -62,12 +75,14 @@ __all__ = [
     "OutcomeExtractor",
     "OutcomeRegistry",
     "ResolvedIntervention",
+    "SurvivalNotYetSupported",
     "TreatmentAssignment",
     "UncertaintyInterval",
     "UnknownCovariateProfileError",
     "assign_treatments",
     "build_cohort_frame",
     "build_covariate_matrix",
+    "get_default_estimator_registry",
     "get_default_outcome_registry",
     "run_causal",
 ]

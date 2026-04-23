@@ -211,6 +211,13 @@ class CompetencyQuestion(BaseModel):
     # now lets the schema tests for 8d-h work without a second migration.
     estimator_family: str = "t_learner"
     uncertainty_method: Literal["asymptotic", "bootstrap", "bayesian"] = "bootstrap"
+    # Phase 8d — bootstrap configuration.
+    # Additive fields; non-causal CQs ignore both. ``uncertainty_reps``
+    # is the B in the plan (decision context); ``random_state`` threads
+    # through the BootstrapRunner to every estimator fit for
+    # reproducibility. Tests override with small B for speed.
+    uncertainty_reps: int = 200
+    random_state: int = 0
 
     @model_validator(mode="after")
     def _causal_scope_requires_intervention_set(self) -> "CompetencyQuestion":

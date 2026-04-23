@@ -548,46 +548,89 @@ class TestCausalEstimandOutputShape:
         missing = required - fields
         assert not missing, f"CausalEffectResult missing spec §7 fields: {missing}"
 
-    def test_stub_returns_well_shaped_result_for_binary(self):
+    def test_returns_well_shaped_result_for_binary(self):
         """I3 shape: 2 interventions × 1 outcome ⇒ |mu_c|=2, |mu_c_k|=2,
-        |tau|=1 (C(2,2)=1). Stub uses NaN points but shape must be right."""
+        |tau|=1 (C(2,2)=1).
+
+        Phase 8d rewrite: ``run_causal`` no longer returns a stub.
+        Uses ``cohort_frame=`` injection to skip the DuckDB path;
+        intervention labels in the CQ are aligned with the synthetic
+        cohort's ("arm0" / "arm1") so the label→index mapping matches.
+        """
+        from tests.test_causal.conftest import make_synthetic_cohort_frame
+
         cq = CompetencyQuestion(
-            original_question="I3 stub",
+            original_question="I3",
             scope="causal_effect",
-            intervention_set=[_ispec_tpa(), _ispec_no_tpa()],
-            outcome_vector=[_outcome_readmit30()],
+            intervention_set=[
+                InterventionSpec(label="arm0", kind="drug", rxnorm_ingredient="8410"),
+                InterventionSpec(
+                    label="arm1", kind="drug",
+                    rxnorm_ingredient="8410", is_control=True,
+                ),
+            ],
+            outcome_vector=[
+                OutcomeSpec(name="Y", outcome_type="binary", extractor_key="readmitted_30d"),
+            ],
+            uncertainty_reps=20,
         )
-        result = run_causal(cq)
+        cohort = make_synthetic_cohort_frame(
+            n_per_arm=80, n_arms=2, ate=1.0, seed=0, binary_outcome=True,
+        )
+        result = run_causal(cq, backend=None, cohort_frame=cohort)
         assert isinstance(result, CausalEffectResult)
-        assert result.is_stub is True
+        assert result.is_stub is False
         assert result.mode == "associative"
-        assert set(result.mu_c.keys()) == {"tPA", "no_tPA"}
-        assert set(result.mu_c_k.keys()) == {"tPA|readmitted_30d", "no_tPA|readmitted_30d"}
-        assert set(result.tau_cc_prime.keys()) == {"no_tPA|tPA"}  # lexicographic
-        assert math.isnan(result.mu_c["tPA"].point)
-        # Assumption ledger carries a row per spec §5 assumption — all
-        # declared in 8a because no real diagnostic ran.
+        assert set(result.mu_c.keys()) == {"arm0", "arm1"}
+        assert set(result.mu_c_k.keys()) == {"arm0|Y", "arm1|Y"}
+        assert set(result.tau_cc_prime.keys()) == {"arm0|arm1"}  # lexicographic
+        assert not math.isnan(result.mu_c["arm0"].point)
+        # Assumption ledger: 4 entries, all at "declared" — 8h owns the
+        # transitions to "passed" / "failed".
         names = {a.name for a in result.assumption_ledger}
         assert names == {"consistency", "ignorability", "positivity", "sutva"}
         assert all(a.status == "declared" for a in result.assumption_ledger)
 
-    def test_stub_tau_key_encoding_uses_lexicographic_order(self):
+    def test_tau_key_encoding_uses_lexicographic_order(self):
         """Pair identity is stable: whether the caller thinks of an arm as
         'c' or 'c_prime', the tau key is the same string."""
+        from tests.test_causal.conftest import make_synthetic_cohort_frame
+
+        # Fresh cohorts with labels that exercise ordering both ways —
+        # the lexicographic key should land on the same string regardless
+        # of InterventionSpec ordering in the CQ.
+        cohort = make_synthetic_cohort_frame(
+            n_per_arm=60, n_arms=2, ate=1.0, seed=0,
+        )
         cq1 = CompetencyQuestion(
             original_question="ordering A",
             scope="causal_effect",
-            intervention_set=[_ispec_tpa(), _ispec_no_tpa()],
-            outcome_vector=[_outcome_readmit30()],
+            intervention_set=[
+                InterventionSpec(label="arm0", kind="drug", rxnorm_ingredient="8410"),
+                InterventionSpec(label="arm1", kind="drug",
+                                 rxnorm_ingredient="8410", is_control=True),
+            ],
+            outcome_vector=[OutcomeSpec(name="Y", outcome_type="continuous",
+                                        extractor_key="biomarker_peak")],
+            uncertainty_reps=15,
         )
         cq2 = CompetencyQuestion(
             original_question="ordering B",
             scope="causal_effect",
-            intervention_set=[_ispec_no_tpa(), _ispec_tpa()],  # reversed
-            outcome_vector=[_outcome_readmit30()],
+            intervention_set=[
+                InterventionSpec(label="arm1", kind="drug", rxnorm_ingredient="8410",
+                                 is_control=True),
+                InterventionSpec(label="arm0", kind="drug", rxnorm_ingredient="8410"),
+            ],
+            outcome_vector=[OutcomeSpec(name="Y", outcome_type="continuous",
+                                        extractor_key="biomarker_peak")],
+            uncertainty_reps=15,
         )
-        result1 = run_causal(cq1)
-        result2 = run_causal(cq2)
+        # The cohort is keyed on intervention_labels in order, so ordering
+        # through the CQ matters only for the result-key formation. Re-use
+        # the same cohort for both to isolate the key-encoding invariant.
+        result1 = run_causal(cq1, backend=None, cohort_frame=cohort)
+        result2 = run_causal(cq2, backend=None, cohort_frame=cohort)
         assert set(result1.tau_cc_prime.keys()) == set(result2.tau_cc_prime.keys())
 
     def test_run_causal_rejects_non_causal_scope(self):
@@ -631,31 +674,24 @@ class TestCausalEstimandOutputShape:
             run_causal(cq)
 
     # ---- Remaining xfails for later sub-phases ------------------------
+    #
+    # Phase 8d (2026-04-22): the "Phase 8b — N-ary end-to-end" xfail
+    # that used to live here has been superseded by
+    # tests/test_causal/test_run_causal_end_to_end_nary.py which
+    # exercises the real C=3 + BootstrapRunner flow against a
+    # controlled synthetic cohort. The I5-shaped xfail here assumed
+    # ``run_causal(cq)`` could run without a backend — viable against
+    # the 8a NaN stub, not against the 8c build_cohort_frame path
+    # that the 8d rewrite now goes through.
 
     @pytest.mark.xfail(
         strict=True,
-        reason="Phase 8b — end-to-end real estimates for N-ary (stub returns NaN)",
-        raises=AssertionError,
-    )
-    def test_run_causal_returns_real_n_arms_for_c_equals_3(self):
-        """I5 shape: three antibiotic regimens with real (non-NaN) estimates."""
-        cq = CompetencyQuestion(
-            original_question="I5",
-            scope="causal_effect",
-            intervention_set=[_ispec_vanc_ptz(), _ispec_vanc_cefepime(), _ispec_vanc_meropenem()],
-            outcome_vector=[_outcome_mortality28d()],
-        )
-        result = run_causal(cq)
-        assert len(result.mu_c) == 3
-        assert len(result.tau_cc_prime) == 3  # C(3,2)
-        # Real estimator: no NaNs.
-        for ui in result.mu_c.values():
-            assert not math.isnan(ui.point)
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Phase 8c — per-outcome breakdown μ_{c,k} with real estimates (stub returns NaN)",
-        raises=AssertionError,
+        reason="Phase 8g (survival) + 8f (aggregation) — this CQ uses "
+               "time_to_event outcome and weighted_sum aggregation, both "
+               "explicitly rejected by the 8d run_causal guards. Scalar "
+               "per-outcome coverage has moved to "
+               "tests/test_causal/test_run_causal_per_outcome_breakdown.py.",
+        raises=(AssertionError, NotImplementedError),
     )
     def test_run_causal_returns_real_per_outcome_breakdown_for_n_equals_3(self):
         """I6 shape: (C=3, n=3) — μ_{c,k} has 3×3=9 real entries."""
@@ -685,8 +721,11 @@ class TestCausalEstimandOutputShape:
 
     @pytest.mark.xfail(
         strict=True,
-        reason="Phase 8h — causal/associative mode + assumption-ledger diagnostics (stub declares all)",
-        raises=AssertionError,
+        reason="Phase 8h — causal/associative mode + assumption-ledger "
+               "diagnostics. Today the positivity check isn't implemented "
+               "and the test's ``run_causal(cq)`` call (no backend, no "
+               "cohort_frame) raises on build_cohort_frame.",
+        raises=(AssertionError, AttributeError, TypeError),
     )
     def test_positivity_failure_triggers_associative_mode(self):
         """Diagnostics catch poor overlap and downgrade mode to associative,
