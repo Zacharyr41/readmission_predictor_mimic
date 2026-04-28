@@ -1,0 +1,10 @@
+{
+  "original_question": "Show me the 30 patients most similar to hadm_id 101",
+  "scope": "patient_similarity",
+  "similarity_spec": {
+    "anchor_hadm_id": 101,
+    "top_k": 30
+  },
+  "return_type": "table",
+  "interpretation_summary": "Rank admissions by contextual + temporal similarity to hadm 101; return the top 30 with per-group explanation breakdown."
+}

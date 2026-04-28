@@ -39,6 +39,9 @@ htmlcov/
 *.swo
 *~
 
+# Claude Code worktrees
+.claude/worktrees/
+
 # Environment
 .env
 
@@ -46,6 +49,7 @@ htmlcov/
 data/raw
 data/processed/*.duckdb
 data/processed/*.rdf
+data/processed/*.pt
 data/features/*.parquet
 data/features/*.csv
 

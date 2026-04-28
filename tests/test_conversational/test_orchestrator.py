@@ -800,3 +800,152 @@ class TestSqlFastpathRouting:
         assert mock_compile.call_count == 2
         assert result.sub_answers is not None
         assert len(result.sub_answers) == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 — standalone similarity branch
+# ---------------------------------------------------------------------------
+
+
+class TestSimilarityBranch:
+    """A CQ with ``scope='patient_similarity'`` must hit a dedicated
+    orchestrator branch that calls ``run_similarity`` and wraps the
+    ranked result into an ``AnswerResult`` with a 6-column data_table.
+
+    Booby-trap: if the branch is missing, the CQ falls through to the
+    graph path and the ``mock_extract`` / ``mock_build`` / ``mock_reason``
+    side-effects fire — guaranteeing the test fails loudly instead of
+    silently mis-routing.
+    """
+
+    @_patch_all
+    def test_similarity_scope_routes_to_run_similarity(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            ContextualExplanation,
+            SimilarityResult,
+            SimilarityScore,
+            SimilaritySpec,
+        )
+
+        spec = SimilaritySpec(
+            anchor_template={"age": 68, "gender_F": 1, "snomed_group_I48": 1},
+            top_k=3,
+        )
+        cq = CompetencyQuestion(
+            original_question="Find admissions similar to a 68-year-old woman with afib.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        # Booby-trap: graph path must NOT run.
+        mock_extract.side_effect = AssertionError(
+            "extract must not run on similarity scope"
+        )
+        mock_build.side_effect = AssertionError(
+            "graph build must not run on similarity scope"
+        )
+        mock_reason.side_effect = AssertionError(
+            "reason must not run on similarity scope"
+        )
+        mock_answer.side_effect = AssertionError(
+            "answerer must not run on similarity scope"
+        )
+
+        sim_result = SimilarityResult(
+            anchor_description="template anchor (age=68, snomed_group_I48=1)",
+            n_pool=2500,
+            n_returned=3,
+            scores=[
+                SimilarityScore(
+                    hadm_id=20001,
+                    subject_id=10001,
+                    combined=0.91,
+                    contextual=0.91,
+                    temporal=None,
+                    contextual_explanation=ContextualExplanation(overall_score=0.91),
+                ),
+                SimilarityScore(
+                    hadm_id=20002,
+                    subject_id=10002,
+                    combined=0.84,
+                    contextual=0.84,
+                    temporal=None,
+                    contextual_explanation=ContextualExplanation(overall_score=0.84),
+                ),
+                SimilarityScore(
+                    hadm_id=20003,
+                    subject_id=10003,
+                    combined=0.77,
+                    contextual=0.77,
+                    temporal=None,
+                    contextual_explanation=ContextualExplanation(overall_score=0.77),
+                ),
+            ],
+            spec=spec,
+        )
+
+        with patch(
+            "src.similarity.run.run_similarity", return_value=sim_result
+        ) as mock_run_sim:
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask(
+                "Find admissions similar to a 68-year-old woman with afib."
+            )
+
+        # The dedicated branch fired exactly once with the spec from the CQ.
+        assert mock_run_sim.call_count == 1
+        called_spec = mock_run_sim.call_args.args[0]
+        assert called_spec is spec
+
+        # The returned AnswerResult carries the ranked table.
+        assert isinstance(result, AnswerResult)
+        assert result.data_table is not None
+        assert len(result.data_table) == 3
+        assert result.table_columns == [
+            "rank", "hadm_id", "subject_id",
+            "combined", "contextual", "temporal",
+        ]
+        # Rank-1 row reflects the highest-scored candidate.
+        top = result.data_table[0]
+        assert top["rank"] == 1
+        assert top["hadm_id"] == 20001
+        assert top["combined"] == pytest.approx(0.91)
+        assert top["temporal"] is None  # template anchor → contextual-only
+        # Summary text mentions the anchor + counts.
+        assert "n_pool=2500" not in result.text_summary  # we render words, not literals
+        assert "3" in result.text_summary
+        assert "2500" in result.text_summary
+
+    @_patch_all
+    def test_similarity_scope_without_spec_returns_safe_message(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Defensive: if the decomposer marks scope='patient_similarity'
+        but somehow forgets the spec, the orchestrator should not crash
+        and should not silently route to the graph path."""
+        from src.conversational.models import DecompositionResult
+
+        cq = CompetencyQuestion(
+            original_question="Find similar patients.",
+            scope="patient_similarity",
+            similarity_spec=None,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        mock_extract.side_effect = AssertionError(
+            "extract must not run on similarity scope"
+        )
+        mock_build.side_effect = AssertionError(
+            "graph build must not run on similarity scope"
+        )
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("Find similar patients.")
+
+        assert isinstance(result, AnswerResult)
+        assert result.data_table is None
+        assert "similarity" in result.text_summary.lower()

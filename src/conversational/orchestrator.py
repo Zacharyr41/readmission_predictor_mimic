@@ -176,6 +176,19 @@ class ConversationalPipeline:
                         sub = self._run_causal(cq)
                         sub.interpretation_summary = cq.interpretation_summary
                         sub_answers[idx] = sub
+                    elif plan == QueryPlan.SIMILARITY:
+                        # Phase 9: standalone similarity ranking. The
+                        # decomposer marks scope='patient_similarity' and
+                        # populates ``similarity_spec``; ``_run_similarity``
+                        # calls into ``src.similarity.run.run_similarity``
+                        # and wraps the ranked output as a 6-column
+                        # ``data_table``. Causal CQs that *also* carry a
+                        # similarity_spec stay on QueryPlan.CAUSAL — the
+                        # spec is consumed there as a cohort-narrowing
+                        # directive (src/causal/run.py:187-219).
+                        sub = self._run_similarity(cq, backend)
+                        sub.interpretation_summary = cq.interpretation_summary
+                        sub_answers[idx] = sub
                     else:
                         graph_cqs.append((idx, cq))
                         graph_extractions.append(
@@ -326,6 +339,61 @@ class ConversationalPipeline:
             text_summary=summary,
             data_table=data_table,
             table_columns=["intervention", "mu_point", "mu_lower", "mu_upper"],
+        )
+
+    def _run_similarity(self, cq: CompetencyQuestion, backend) -> AnswerResult:
+        """Phase 9: wrap a ``SimilarityResult`` into an ``AnswerResult``.
+
+        Lazy import of ``run_similarity`` mirrors the ``_run_causal``
+        pattern above — keeps the heavy ``src.similarity`` graph out of
+        the orchestrator import path until a similarity CQ actually
+        arrives. The flat 6-column data_table is what the existing
+        Streamlit dataframe renderer in ``src/conversational/app.py``
+        already knows how to display; richer per-bucket breakdowns
+        ride along on ``SimilarityScore.contextual_explanation`` and
+        ``temporal_explanation`` for a future explanation panel
+        (Phase 9b).
+        """
+        from src.similarity.run import run_similarity
+
+        if cq.similarity_spec is None:
+            # Defensive: scope='patient_similarity' but no spec means the
+            # decomposer produced an underspecified CQ. Surface a plain
+            # message rather than crashing or silently mis-routing.
+            return AnswerResult(
+                text_summary=(
+                    "This question is scoped to patient similarity but no "
+                    "similarity specification was produced. Please rephrase "
+                    "with a clearer anchor (a specific patient or a "
+                    "covariate template)."
+                ),
+            )
+
+        result = run_similarity(cq.similarity_spec, backend)
+        data_table = [
+            {
+                "rank": i + 1,
+                "hadm_id": s.hadm_id,
+                "subject_id": s.subject_id,
+                "combined": s.combined,
+                "contextual": s.contextual,
+                "temporal": s.temporal,
+            }
+            for i, s in enumerate(result.scores)
+        ]
+        summary = (
+            f"Found {result.n_returned} of {result.n_pool} candidates "
+            f"similar to {result.anchor_description}. "
+            f"See the table for ranked combined / contextual / temporal "
+            f"scores."
+        )
+        return AnswerResult(
+            text_summary=summary,
+            data_table=data_table,
+            table_columns=[
+                "rank", "hadm_id", "subject_id",
+                "combined", "contextual", "temporal",
+            ],
         )
 
     def _extract_one(self, cq: CompetencyQuestion):

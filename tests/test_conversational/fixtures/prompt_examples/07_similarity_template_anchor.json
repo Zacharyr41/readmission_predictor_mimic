@@ -1,0 +1,18 @@
+{
+  "original_question": "Find patients similar to a 68-year-old female with atrial fibrillation and CKD",
+  "scope": "patient_similarity",
+  "similarity_spec": {
+    "anchor_template": {
+      "age": 68,
+      "gender_F": 1,
+      "gender_M": 0,
+      "gender_unknown": 0,
+      "admission_type_EMERGENCY": 1,
+      "snomed_group_I48": 1,
+      "snomed_group_N18": 1
+    },
+    "top_k": 30
+  },
+  "return_type": "table",
+  "interpretation_summary": "Template-anchor similarity query: no concrete patient referenced, so temporal similarity is unavailable and scoring falls back to contextual-only (demographics + comorbidity + severity + social)."
+}

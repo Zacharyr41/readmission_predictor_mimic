@@ -221,12 +221,14 @@ class CompetencyQuestion(BaseModel):
     random_state: int = 0
     # Phase 9 — similarity spec for both standalone similarity CQs
     # (``scope="patient_similarity"``) and cohort-narrowing on causal
-    # CQs (``scope="causal_effect"`` + ``similarity_spec``). The type
-    # is a forward ref because ``src.similarity.models.SimilaritySpec``
-    # imports ``PatientFilter`` from this module — circular if resolved
-    # here. ``src.similarity.models`` calls ``model_rebuild`` at its
-    # module bottom so the forward ref resolves as soon as anyone
-    # imports the similarity package.
+    # CQs (``scope="causal_effect"`` + ``similarity_spec``). The
+    # annotation is a forward-ref string because
+    # ``src.similarity.models.SimilaritySpec`` imports ``PatientFilter``
+    # from this module — a direct import here would be circular. Instead
+    # we trigger resolution at the bottom of this module (see the
+    # late import + ``model_rebuild`` below), which works because by
+    # that point ``PatientFilter`` is already defined so the circular
+    # import unwinds cleanly.
     similarity_spec: "SimilaritySpec | None" = None
 
     @model_validator(mode="after")
@@ -330,3 +332,18 @@ class DecompositionResult(BaseModel):
     def is_multi(self) -> bool:
         """True when the decomposer produced more than one CQ for this turn."""
         return len(self.competency_questions) > 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: resolve the forward reference on
+# ``CompetencyQuestion.similarity_spec`` so this module can be imported
+# standalone. At this point in the file, all local classes (in particular
+# ``PatientFilter``) are defined, so ``src.similarity.models`` can safely
+# import from here without the partial-import cycle breaking.
+# ---------------------------------------------------------------------------
+
+from src.similarity.models import SimilaritySpec  # noqa: E402
+
+CompetencyQuestion.model_rebuild(
+    _types_namespace={"SimilaritySpec": SimilaritySpec}, force=True,
+)
