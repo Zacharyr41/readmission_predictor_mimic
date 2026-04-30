@@ -13,6 +13,7 @@ class ClinicalConcept(BaseModel):
     ]
     attributes: list[str] = []
     resolved_from_category: bool = False
+    loinc_code: str | None = None
 
 
 class TemporalConstraint(BaseModel):

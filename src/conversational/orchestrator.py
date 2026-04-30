@@ -281,9 +281,28 @@ class ConversationalPipeline:
         Returns (answer, [sql_text]) so the top-level aggregation of
         ``sparql_queries_used`` across a multi-CQ turn can include the
         SQL we ran on the fast-path (the Query Details expander shows it).
+
+        Biomarker concepts that carry a LOINC code go through
+        ``ConceptResolver.resolve_biomarker`` before compilation so the
+        WHERE clause can use ``itemid IN (...)`` rather than a
+        unit-pooling ``LIKE`` filter. When grounding fails (LOINC absent
+        from the mapping table or no MIMIC labitem coverage), we fall
+        back to LIKE and surface a visible warning to the user via
+        ``AnswerResult.text_summary``.
         """
+        resolved_itemids: list[int] | None = None
+        fallback_warning: str | None = None
+        if cq.clinical_concepts:
+            concept = cq.clinical_concepts[0]
+            if concept.concept_type == "biomarker" and concept.loinc_code:
+                biom = self._resolver.resolve_biomarker(concept)
+                resolved_itemids = biom.itemids
+                fallback_warning = biom.fallback_reason
+
         query = compile_sql(
-            cq, backend, self._registry, resolved_names=resolved_names,
+            cq, backend, self._registry,
+            resolved_names=resolved_names,
+            resolved_itemids=resolved_itemids,
         )
         raw_rows = backend.execute(query.sql, query.params)
         rows = [dict(zip(query.columns, r)) for r in raw_rows]
@@ -292,6 +311,15 @@ class ConversationalPipeline:
             {},  # no graph_stats on the fast-path
             [query.sql],  # surface the SQL alongside any SPARQL
         )
+        if fallback_warning:
+            # Append a user-visible note explaining the answer may pool
+            # variants. Phase 9b proper warning surface lives behind
+            # AnswerResult; for now we co-locate with text_summary so the
+            # warning is visible in chat without a model change.
+            answer.text_summary = (
+                (answer.text_summary or "")
+                + f"\n\n⚠️ Note: {fallback_warning}"
+            ).strip()
         return answer, [query.sql]
 
     def _run_causal(self, cq: CompetencyQuestion) -> AnswerResult:

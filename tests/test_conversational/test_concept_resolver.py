@@ -236,6 +236,128 @@ class TestSnomedHierarchyFallback:
 
 
 # ---------------------------------------------------------------------------
+# Lab-resolver fix — LOINC-grounded biomarker resolution
+# ---------------------------------------------------------------------------
+#
+# These tests pin the contract for the lab-resolver fix. ``resolve_biomarker``
+# is a new method on ConceptResolver that takes a ClinicalConcept (which may
+# carry a ``loinc_code``) and returns a ``BiomarkerResolution`` describing
+# either an itemid set (success) or a name passthrough (fallback).
+#
+# The fallback distinction matters: ``loinc_code is None`` is *normal* (uncommon
+# labs, novel terms) and gets silent LIKE behavior. When a LOINC was supplied
+# but couldn't be grounded (cases 2 + 3 below), ``fallback_reason`` is set so
+# the orchestrator can surface a visible warning to the user.
+
+
+class TestBiomarkerLoincResolution:
+    """LOINC-grounded resolution path. ``resolve_biomarker`` is the new
+    method; it does not exist on ConceptResolver yet, so most of these
+    tests fail until Phase 4.1 lands the implementation. The schema-level
+    tests pass on Phase 2's ClinicalConcept addition alone.
+    """
+
+    # -- Schema (Phase 2 production change) ----------------------------------
+
+    def test_clinical_concept_accepts_loinc_code(self):
+        c = ClinicalConcept(
+            name="creatinine", concept_type="biomarker", loinc_code="2160-0",
+        )
+        assert c.loinc_code == "2160-0"
+
+    def test_clinical_concept_loinc_code_optional(self):
+        c = ClinicalConcept(name="rare_lab", concept_type="biomarker")
+        assert c.loinc_code is None
+
+    # -- Successful LOINC grounding ------------------------------------------
+
+    def test_resolve_biomarker_with_loinc_returns_itemids(self, resolver):
+        """LOINC 2160-0 (serum creatinine) resolves via SNOMED 113075003 to
+        MIMIC itemid 50912 (and any sibling itemids that also map to the
+        same SNOMED term, e.g. 51081). Urine creatinine (51082) maps to
+        a *different* LOINC (2161-8) and must be excluded."""
+        concept = ClinicalConcept(
+            name="creatinine", concept_type="biomarker", loinc_code="2160-0",
+        )
+        result = resolver.resolve_biomarker(concept)
+        assert result.itemids is not None
+        assert 50912 in result.itemids
+        assert 51082 not in result.itemids
+        assert result.loinc_code == "2160-0"
+        assert result.snomed_code == "113075003"
+        assert result.fallback_reason is None
+        # ``names`` is always populated — used by the LIKE fallback path.
+        assert "creatinine" in result.names
+
+    # -- No LOINC: silent passthrough (Case 1) -------------------------------
+
+    def test_resolve_biomarker_without_loinc_returns_name_passthrough(self, resolver):
+        """When no LOINC is supplied, ``itemids`` is None and ``fallback_reason``
+        is also None — this is the normal path for uncommon labs and shouldn't
+        produce a warning. ``names`` carries through whatever the existing
+        ``resolve()`` would return."""
+        concept = ClinicalConcept(name="creatinine", concept_type="biomarker")
+        result = resolver.resolve_biomarker(concept)
+        assert result.itemids is None
+        assert result.loinc_code is None
+        assert result.fallback_reason is None  # no grounding attempted
+        assert result.names == ["creatinine"]
+
+    # -- LOINC supplied but missing from loinc_to_snomed (Case 2) ------------
+
+    def test_resolve_biomarker_unknown_loinc_falls_back_with_reason(self, resolver):
+        """LOINC '99999-9' is not in loinc_to_snomed.json. Resolution falls
+        back to name passthrough AND sets ``fallback_reason`` so the
+        orchestrator can surface a visible warning."""
+        concept = ClinicalConcept(
+            name="some_lab", concept_type="biomarker", loinc_code="99999-9",
+        )
+        result = resolver.resolve_biomarker(concept)
+        assert result.itemids is None
+        assert result.fallback_reason is not None
+        assert "99999-9" in result.fallback_reason
+        assert result.names == ["some_lab"]
+
+    # -- Latent forward-index bug (Phase 4.5) --------------------------------
+
+    def test_forward_index_resolves_lab_name_to_sctid(self, resolver):
+        """Latent bug: ``labitem_to_snomed.json`` and ``chartitem_to_snomed.json``
+        are keyed by MIMIC itemid (e.g. "50912"), not by lab name. The forward
+        index in ``_build_sctid_indices`` keyed every entry by its outer key,
+        so ``forward["creatinine"]`` always missed and the SNOMED-hierarchy
+        fallback was structurally broken for any lab term.
+
+        Fix: for lab/chartitem files, key the forward index by ``entry['label']``
+        instead of the outer key. ``forward["creatinine"]`` should now return
+        the SNOMED concept id 113075003.
+        """
+        # Force the index to build by calling resolve on something innocuous.
+        forward, _ = resolver._build_sctid_indices()
+        assert "creatinine" in forward, (
+            "Forward index missed lab name 'creatinine' — the file is keyed "
+            "by itemid but the forward index should also accept lab names."
+        )
+        assert forward["creatinine"] == "113075003"
+
+    # -- LOINC valid, but no MIMIC labitem maps to its SNOMED (Case 3) -------
+
+    def test_resolve_biomarker_loinc_with_no_mimic_coverage(self, resolver):
+        """LOINC 10331-7 ('Rh type') is in loinc_to_snomed.json with SNOMED
+        371154000, but no entry in labitem_to_snomed.json maps to that SNOMED
+        (verified by data-mapping audit). The resolver should detect this
+        and fall back with a fallback_reason naming the SNOMED gap."""
+        concept = ClinicalConcept(
+            name="rh_type", concept_type="biomarker", loinc_code="10331-7",
+        )
+        result = resolver.resolve_biomarker(concept)
+        assert result.itemids is None
+        assert result.fallback_reason is not None
+        # The reason should mention the SNOMED code so it's diagnosable.
+        assert "371154000" in result.fallback_reason or "10331-7" in result.fallback_reason
+        assert result.names == ["rh_type"]
+
+
+# ---------------------------------------------------------------------------
 # Phase 5 — Data quality scan of production mappings
 # ---------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 {
   "original_question": "What is the average creatinine for patients over 65?",
   "clinical_concepts": [
-    {"name": "creatinine", "concept_type": "biomarker"}
+    {"name": "creatinine", "concept_type": "biomarker", "loinc_code": "2160-0"}
   ],
   "patient_filters": [
     {"field": "age", "operator": ">", "value": "65"}

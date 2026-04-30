@@ -46,6 +46,33 @@ def backend(synthetic_duckdb_with_events):
     return _ConnBackend(synthetic_duckdb_with_events)
 
 
+@pytest.fixture
+def backend_with_creatinine_variants(synthetic_duckdb_with_events):
+    """Adds urine (51082) and 24-hr (51067) creatinine to the base fixture
+    so the LIKE-pooling bug is observable end-to-end. The base fixture has
+    only itemid 50912 (serum), so without these extra rows the LIKE bug is
+    invisible at the synthetic level.
+
+    Values chosen to make the pollution unmistakable: serum is ~1.2 mg/dL,
+    urine creatinine is typically 20-300 mg/dL, 24-hr collections are
+    measured in mg/24hr (hundreds to thousands). A LIKE-pooled mean differs
+    from a serum-restricted mean by orders of magnitude, so the assertion
+    is trivially distinguishable.
+    """
+    conn = synthetic_duckdb_with_events
+    conn.execute(
+        "INSERT INTO d_labitems VALUES "
+        "(51082, 'Urine Creatinine', 'Urine', 'Chemistry'), "
+        "(51067, 'Creatinine 24-Hour', 'Urine', 'Chemistry')"
+    )
+    conn.execute(
+        "INSERT INTO labevents VALUES "
+        "(5, 1, 101, 1001, 51082, '2150-01-16 12:00:00', 100.0, 'mg/dL', NULL, NULL), "
+        "(6, 2, 103, 1002, 51067, '2151-03-04 10:00:00', 1200.0, 'mg/24hr', NULL, NULL)"
+    )
+    return _ConnBackend(conn)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -53,18 +80,31 @@ def backend(synthetic_duckdb_with_events):
 
 def _cq(
     *,
-    concepts: list[tuple[str, str]] | None = None,
+    concepts: list[tuple] | None = None,
     filters: list[tuple[str, str, str]] | None = None,
     aggregation: str | None = None,
     scope: str = "cohort",
     comparison_field: str | None = None,
     return_type: str = "text_and_table",
 ) -> CompetencyQuestion:
+    """Build a CompetencyQuestion for tests.
+
+    ``concepts`` accepts 2-tuples ``(name, concept_type)`` or 3-tuples
+    ``(name, concept_type, loinc_code)`` — the third element exercises
+    the LOINC-grounded biomarker resolution path. Mixing both shapes in
+    one list is allowed.
+    """
+    def _make_concept(c: tuple) -> ClinicalConcept:
+        name, ctype, *rest = c
+        return ClinicalConcept(
+            name=name,
+            concept_type=ctype,
+            loinc_code=rest[0] if rest else None,
+        )
+
     return CompetencyQuestion(
         original_question="test",
-        clinical_concepts=[
-            ClinicalConcept(name=n, concept_type=t) for n, t in (concepts or [])
-        ],
+        clinical_concepts=[_make_concept(c) for c in (concepts or [])],
         patient_filters=[
             PatientFilter(field=f, operator=o, value=v)
             for f, o, v in (filters or [])
@@ -173,10 +213,29 @@ class TestColumnShape:
 
 
 def _run_fastpath(backend, cq) -> list[dict]:
+    """Mirrors the orchestrator's fast-path wiring: for biomarker concepts
+    that carry a LOINC code, resolve to MIMIC itemids before compiling so
+    the WHERE clause uses ``itemid IN`` instead of ``LIKE``."""
+    from pathlib import Path
+
+    from src.conversational.concept_resolver import ConceptResolver
     from src.conversational.operations import get_default_registry
     from src.conversational.sql_fastpath import compile_sql
 
-    q = compile_sql(cq, backend, get_default_registry())
+    resolved_itemids: list[int] | None = None
+    if cq.clinical_concepts and cq.clinical_concepts[0].concept_type == "biomarker":
+        concept = cq.clinical_concepts[0]
+        if concept.loinc_code:
+            resolver = ConceptResolver(
+                mappings_dir=Path(__file__).parent.parent.parent / "data" / "mappings",
+            )
+            biom = resolver.resolve_biomarker(concept)
+            resolved_itemids = biom.itemids
+
+    q = compile_sql(
+        cq, backend, get_default_registry(),
+        resolved_itemids=resolved_itemids,
+    )
     rows = backend.execute(q.sql, q.params)
     return [dict(zip(q.columns, r)) for r in rows]
 
@@ -212,6 +271,96 @@ class TestBiomarkerAggregateCorrectness:
             assert math.isclose(actual, expected, rel_tol=1e-6)
         else:
             assert actual == expected
+
+    # -- LOINC-grounded biomarker resolution (lab-resolver fix) ----------
+    # The three tests below pin the contract for the LOINC-grounding fix.
+    # See docs/... and the lab-resolver project memory for the full bug
+    # narrative; in short: ``LIKE '%creatinine%'`` pools serum / urine /
+    # 24-hr / ratio variants into one AVG, producing clinically wrong
+    # numbers (~4.95 mg/dL instead of ~1.34). The fix threads a
+    # decomposer-supplied LOINC code through the resolver into a
+    # ``WHERE l.itemid IN (...)`` clause, restricting to serum.
+    #
+    # Test 1.1 documents the BUGGY behaviour and is deleted once the fix
+    # lands. 1.2 is the contract for the fixed behaviour. 1.3 is the
+    # regression guard for the LIKE fallback when no LOINC is supplied.
+
+    def test_creatinine_with_loinc_restricts_to_serum(
+        self, backend_with_creatinine_variants,
+    ):
+        """Contract for the fix: when the decomposer emits a LOINC code,
+        the compiler restricts to that LOINC's MIMIC itemids only — urine
+        and 24-hr variants are excluded.
+
+        Expected after fix: AVG = (1.2 + 0.9 + 1.5) / 3 = 1.2 mg/dL.
+        Expected before fix: AVG ≈ 260 mg/dL (LIKE still pools).
+        Currently fails to even import because ClinicalConcept lacks
+        ``loinc_code`` and ``_cq`` doesn't unpack a 3-tuple — those are
+        Phase 2's first production change.
+        """
+        cq = _cq(
+            concepts=[("creatinine", "biomarker", "2160-0")],
+            aggregation="mean",
+        )
+        rows = _run_fastpath(backend_with_creatinine_variants, cq)
+        serum_only_mean = (1.2 + 0.9 + 1.5) / 3
+        assert math.isclose(rows[0]["mean_value"], serum_only_mean, rel_tol=1e-2)
+
+    def test_creatinine_without_loinc_falls_back_to_like(self, backend):
+        """Backward-compat regression guard: when no LOINC is supplied,
+        the compiler must still emit the LIKE-based query, matching the
+        existing behavior. The base fixture has only itemid 50912 (serum)
+        so LIKE happens to give the right answer — this test will keep
+        passing both before and after the fix.
+        """
+        cq = _cq(concepts=[("creatinine", "biomarker")], aggregation="mean")
+        rows = _run_fastpath(backend, cq)
+        expected = (1.2 + 0.9 + 1.5) / 3
+        assert math.isclose(rows[0]["mean_value"], expected, rel_tol=1e-6)
+
+    # -- Compiler-direct tests (Phase 3) --------------------------------
+    # These test compile_sql at the unit-test layer: when given an
+    # itemid list, it emits ``WHERE l.itemid IN (?, ?, ...)``; when given
+    # only names, it preserves the existing LIKE behavior. The orchestrator
+    # is responsible for calling resolve_biomarker and threading through.
+
+    def test_compile_emits_itemid_in_when_itemids_provided(self, backend):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("creatinine", "biomarker", "2160-0")],
+            aggregation="mean",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["creatinine"],
+            resolved_itemids=[50912, 51081],
+        )
+        assert "itemid IN (" in query.sql
+        # No label-substring filter when itemids are used (backend-agnostic:
+        # DuckDB emits ``ILIKE``, BigQuery emits ``LOWER(...) LIKE LOWER(...)``).
+        assert "ILIKE" not in query.sql
+        assert "LIKE" not in query.sql
+        assert 50912 in query.params
+        assert 51081 in query.params
+
+    def test_compile_emits_like_when_no_itemids(self, backend):
+        """Backward compat at the compiler layer: no resolved_itemids → LIKE.
+        Backend-agnostic: DuckDB emits ``ILIKE``, BigQuery ``LOWER LIKE LOWER``.
+        Either form means the label-substring path fired."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(concepts=[("creatinine", "biomarker")], aggregation="mean")
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["creatinine"],
+        )
+        sql_upper = query.sql.upper()
+        assert "ILIKE" in sql_upper or "LIKE" in sql_upper
+        assert "%creatinine%" in query.params
+        assert "itemid IN (" not in query.sql
 
 
 class TestComparisonCorrectness:

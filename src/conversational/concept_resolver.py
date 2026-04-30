@@ -12,11 +12,41 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from src.conversational.models import ClinicalConcept
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BiomarkerResolution:
+    """Result of resolving a biomarker concept to MIMIC labitem identifiers.
+
+    There are three terminal shapes:
+
+    * **Grounded:** ``itemids`` is a non-empty list. The compiler emits
+      ``WHERE l.itemid IN (?, ?, …)``. ``loinc_code`` and ``snomed_code``
+      are populated; ``fallback_reason`` is ``None``.
+    * **Silent fallback (no LOINC):** ``itemids`` is ``None``,
+      ``loinc_code`` is ``None``, ``fallback_reason`` is ``None``. Compiler
+      uses ``names`` for a LIKE filter. This is the *normal* path for
+      uncommon labs where the LLM didn't emit a LOINC.
+    * **Loud fallback (LOINC supplied but couldn't be grounded):**
+      ``itemids`` is ``None``, ``loinc_code`` is set, ``fallback_reason``
+      describes why grounding failed (LOINC absent from mapping, or SNOMED
+      has no MIMIC labitem coverage). The orchestrator surfaces a
+      user-visible warning so the user knows the answer may pool variants.
+
+    ``names`` is always populated and used by the LIKE fallback path.
+    """
+
+    itemids: list[int] | None
+    names: list[str]
+    loinc_code: str | None
+    snomed_code: str | None
+    fallback_reason: str | None
 
 
 _FALLBACK_MAPPING_FILES = (
@@ -28,9 +58,23 @@ _FALLBACK_MAPPING_FILES = (
 )
 """Forward-index files consulted when ``category_to_snomed`` misses.
 
-Each file is expected to be ``{name: {snomed_code: str, ...}}``; both the
-forward name→SCTID lookup and the reverse SCTID→[names] index used by the
-SNOMED fallback come from these files."""
+Files keyed by name (drug, comorbidity, organism) use the outer key
+directly; files keyed by MIMIC numeric identifier (labitem, chartitem)
+use ``entry["label"]`` as the human-readable name. See
+``_LABEL_KEYED_FILES`` for the latter set."""
+
+
+_LABEL_KEYED_FILES = frozenset({
+    "labitem_to_snomed.json",
+    "chartitem_to_snomed.json",
+})
+"""Files whose outer key is a MIMIC ``itemid`` rather than a human-readable
+name. The actual concept name lives in ``entry["label"]`` for these.
+
+Without this distinction, the forward ``name → SCTID`` index would be
+populated with itemid strings (``"50912" → "113075003"``) and a user-facing
+lookup like ``forward["creatinine"]`` would always miss — which silently
+broke the SNOMED-hierarchy fallback for any lab or chart term."""
 
 
 class ConceptResolver:
@@ -53,6 +97,14 @@ class ConceptResolver:
         # the SNOMED fallback path. Built lazily from the mapping files.
         self._forward_sctid_index: dict[str, str] | None = None
         self._reverse_sctid_index: dict[str, list[str]] | None = None
+        # LOINC → [itemid] reverse index for biomarker resolution. Goes
+        # directly LOINC → itemid rather than LOINC → SNOMED → itemid: the
+        # SNOMED layer collapses unit-distinct LOINCs (e.g., serum vs urine
+        # creatinine both share SNOMED 113075003), which would defeat the
+        # whole point of grounding. Built lazily from labitem_to_snomed.json
+        # on the first ``resolve_biomarker`` call that supplies a LOINC.
+        self._snomed_mapper: object | None = None
+        self._loinc_to_labitem: dict[str, list[int]] | None = None
 
     def _load_category_map(self) -> dict:
         if self._category_map is not None:
@@ -99,13 +151,25 @@ class ConceptResolver:
             except (OSError, json.JSONDecodeError) as exc:
                 logger.warning("Failed to load mapping %s: %s", filename, exc)
                 continue
-            for name, entry in data.items():
-                if name == "_metadata" or not isinstance(entry, dict):
+            label_keyed = filename in _LABEL_KEYED_FILES
+            for outer_key, entry in data.items():
+                if outer_key == "_metadata" or not isinstance(entry, dict):
                     continue
                 sctid = entry.get("snomed_code")
                 if not sctid:
                     continue
                 sctid = str(sctid)
+                # For label-keyed files (labitem / chartitem), the outer key
+                # is a numeric itemid string and the human-readable name is
+                # in ``entry["label"]``. For all other files the outer key
+                # IS the name. Skip silently if a label-keyed entry is
+                # missing its label rather than indexing by the itemid.
+                if label_keyed:
+                    name = entry.get("label")
+                    if not name:
+                        continue
+                else:
+                    name = outer_key
                 name_lower = name.lower()
                 # Prefer the first forward entry we saw — curated categories
                 # take priority over later mapping files for the same name.
@@ -190,3 +254,125 @@ class ConceptResolver:
             concept.name, len(result),
         )
         return result
+
+    # -- LOINC-grounded biomarker resolution -------------------------------
+
+    def _get_snomed_mapper(self):
+        """Lazy SnomedMapper construction — only built when a biomarker
+        concept actually carries a LOINC. Construction itself is cheap
+        (no file I/O), but the import drag is paid only on demand."""
+        if self._snomed_mapper is None:
+            from src.graph_construction.terminology.snomed_mapper import (
+                SnomedMapper,
+            )
+            self._snomed_mapper = SnomedMapper(self._mappings_dir)
+        return self._snomed_mapper
+
+    def _build_loinc_to_labitem_index(self) -> None:
+        """Build ``{loinc → [itemid]}`` directly from labitem_to_snomed.json.
+
+        Going LOINC-direct (rather than LOINC → SNOMED → itemid) preserves
+        specimen-level distinctions: serum creatinine (LOINC 2160-0) and
+        urine creatinine (LOINC 2161-8) both share SNOMED 113075003, so a
+        SNOMED-mediated lookup would over-include. Building the index
+        directly from each labitem entry's ``loinc`` field keeps them
+        separate. Constructed lazily on the first biomarker LOINC query.
+        """
+        if self._loinc_to_labitem is not None:
+            return
+        mapper = self._get_snomed_mapper()
+        reverse: dict[str, list[int]] = {}
+        for itemid_key, entry in mapper._labitem_map.items():
+            if not isinstance(entry, dict):
+                continue
+            loinc = entry.get("loinc")
+            if loinc:
+                try:
+                    reverse.setdefault(str(loinc), []).append(int(itemid_key))
+                except ValueError:
+                    continue
+        self._loinc_to_labitem = reverse
+
+    def resolve_biomarker(
+        self, concept: ClinicalConcept,
+    ) -> BiomarkerResolution:
+        """Resolve a biomarker concept to MIMIC labitem identifiers via LOINC.
+
+        Resolution path:
+          LOINC code → ``loinc_to_labitem`` index → ``[itemid, …]``
+
+        SNOMED is consulted only for *provenance* (populating ``snomed_code``
+        on the result) and to distinguish a "LOINC unknown" failure from a
+        "LOINC valid but no MIMIC coverage" failure — the actual resolution
+        runs LOINC-direct so unit-distinct LOINCs stay separate.
+
+        Three terminal cases:
+          1. No LOINC supplied → silent fallback (names only, no warning).
+          2. LOINC supplied but absent from loinc_to_snomed.json → loud
+             fallback with ``fallback_reason`` for user-visible warning.
+          3. LOINC valid (in loinc_to_snomed.json) but no MIMIC labitem
+             carries that LOINC → loud fallback with ``fallback_reason``.
+
+        On success, returns a ``BiomarkerResolution`` with ``itemids``
+        populated and ``fallback_reason=None``.
+        """
+        names = self.resolve(concept)  # always populated; LIKE-fallback names
+
+        if not concept.loinc_code:
+            return BiomarkerResolution(
+                itemids=None,
+                names=names,
+                loinc_code=None,
+                snomed_code=None,
+                fallback_reason=None,
+            )
+
+        self._build_loinc_to_labitem_index()
+        assert self._loinc_to_labitem is not None
+        itemids = sorted(self._loinc_to_labitem.get(concept.loinc_code, []))
+
+        if itemids:
+            # Successful grounding. Look up SNOMED for provenance only;
+            # the result is correct even if SNOMED lookup happens to fail.
+            mapper = self._get_snomed_mapper()
+            sn = mapper.get_snomed_for_loinc(concept.loinc_code)
+            logger.info(
+                "Resolved biomarker %r via LOINC %s → %d itemids: %s",
+                concept.name, concept.loinc_code, len(itemids), itemids,
+            )
+            return BiomarkerResolution(
+                itemids=itemids,
+                names=names,
+                loinc_code=concept.loinc_code,
+                snomed_code=sn.code if sn is not None else None,
+                fallback_reason=None,
+            )
+
+        # No itemids — distinguish "LOINC unknown" (case 2) from "LOINC
+        # known but no MIMIC coverage" (case 3) so the warning text is
+        # diagnosable.
+        mapper = self._get_snomed_mapper()
+        sn = mapper.get_snomed_for_loinc(concept.loinc_code)
+        if sn is None:
+            return BiomarkerResolution(
+                itemids=None,
+                names=names,
+                loinc_code=concept.loinc_code,
+                snomed_code=None,
+                fallback_reason=(
+                    f"LOINC {concept.loinc_code!r} not found in mapping table "
+                    "— falling back to label match; result may pool "
+                    "unit-incompatible variants."
+                ),
+            )
+        return BiomarkerResolution(
+            itemids=None,
+            names=names,
+            loinc_code=concept.loinc_code,
+            snomed_code=sn.code,
+            fallback_reason=(
+                f"LOINC {concept.loinc_code!r} → SNOMED {sn.code} has no "
+                "MIMIC labitem coverage — falling back to label match; "
+                "result may pool unit-incompatible variants."
+            ),
+        )

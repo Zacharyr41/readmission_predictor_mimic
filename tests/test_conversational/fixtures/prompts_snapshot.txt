@@ -59,6 +59,34 @@ Map clinical entities to one of these concept_type values:
                      platelet count, bicarbonate, chloride, magnesium
                      Use attributes to specify specimen type when relevant:
                      e.g. attributes=["blood"] for serum labs, ["urine"] for urine labs
+
+                     IMPORTANT — LOINC grounding: when the lab has a clear LOINC
+                     code, populate ``loinc_code``. This restricts the query to
+                     that LOINC's specific MIMIC labitems and avoids pooling
+                     unit-incompatible variants (e.g. serum creatinine ~1 mg/dL
+                     vs urine creatinine ~100 mg/dL). The LOINC must match the
+                     specimen the user implied — default to the most common
+                     clinical interpretation when ambiguous:
+                       - serum creatinine     → loinc_code="2160-0"
+                       - urine creatinine     → loinc_code="2161-8"
+                       - serum lactate        → loinc_code="2524-7"
+                       - sodium (serum)       → loinc_code="2951-2"
+                       - potassium (serum)    → loinc_code="2823-3"
+                       - glucose (serum)      → loinc_code="2345-7"
+                       - hemoglobin           → loinc_code="718-7"
+                       - WBC                  → loinc_code="6690-2"
+                       - platelet count       → loinc_code="777-3"
+                       - bilirubin (total)    → loinc_code="1975-2"
+                       - albumin (serum)      → loinc_code="1751-7"
+                       - INR                  → loinc_code="6301-6"
+                       - troponin I           → loinc_code="10839-9"
+                       - BUN                  → loinc_code="3094-0"
+                       - bicarbonate          → loinc_code="1963-8"
+                       - chloride (serum)     → loinc_code="2075-0"
+                       - magnesium (serum)    → loinc_code="2601-3"
+                     Omit ``loinc_code`` when the lab is uncommon or you are
+                     unsure — the system will fall back to label matching with
+                     a visible warning.
 - "vital"         → Vital signs: heart rate, blood pressure, systolic BP, diastolic BP,
                      respiratory rate, SpO2, temperature, MAP, GCS
 - "drug"          → Medications: vasopressors (norepinephrine, vasopressin, phenylephrine),
@@ -86,7 +114,7 @@ Use this when the user's question can be answered by one structured query.
 {
   "original_question": "<verbatim user question>",
   "clinical_concepts": [
-    {"name": "<concept name>", "concept_type": "<type>", "attributes": []}
+    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>"}
   ],
   "temporal_constraints": [
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}
@@ -289,7 +317,8 @@ Question: "What is the average creatinine for patients over 65?"
   "clinical_concepts": [
     {
       "name": "creatinine",
-      "concept_type": "biomarker"
+      "concept_type": "biomarker",
+      "loinc_code": "2160-0"
     }
   ],
   "patient_filters": [

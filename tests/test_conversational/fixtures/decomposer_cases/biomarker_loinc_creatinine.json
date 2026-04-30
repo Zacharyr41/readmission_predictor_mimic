@@ -1,0 +1,24 @@
+{
+  "name": "biomarker_loinc_creatinine",
+  "question": "What is the average creatinine for ICU patients?",
+  "llm_response": "{\"original_question\": \"What is the average creatinine for ICU patients?\", \"clinical_concepts\": [{\"name\": \"creatinine\", \"concept_type\": \"biomarker\", \"loinc_code\": \"2160-0\"}], \"aggregation\": \"mean\", \"return_type\": \"text\", \"scope\": \"cohort\"}",
+  "expected_cq": {
+    "original_question": "What is the average creatinine for ICU patients?",
+    "clinical_concepts": [
+      {
+        "name": "creatinine",
+        "concept_type": "biomarker",
+        "attributes": [],
+        "resolved_from_category": false,
+        "loinc_code": "2160-0"
+      }
+    ],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null
+  },
+  "tags": ["cohort", "biomarker", "loinc-grounded"]
+}

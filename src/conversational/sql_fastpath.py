@@ -64,6 +64,7 @@ def compile_sql(
     registry: OperationRegistry,
     *,
     resolved_names: list[str] | None = None,
+    resolved_itemids: list[int] | None = None,
 ) -> SqlFastpathQuery:
     """Dispatch to the right compile branch based on CQ shape.
 
@@ -84,6 +85,14 @@ def compile_sql(
         category (e.g. "antibiotics" → ["vancomycin", "ceftriaxone", …])
         so the fast-path covers the same membership as the graph path.
         Defaults to ``[cq.clinical_concepts[0].name]``.
+    resolved_itemids:
+        Optional list of MIMIC ``itemid`` values for biomarker concepts
+        whose LOINC code was resolved successfully (see
+        ``ConceptResolver.resolve_biomarker``). When provided, the
+        biomarker compile branch emits ``WHERE l.itemid IN (?, ?, …)``
+        instead of a ``LIKE`` filter on ``d.label`` — avoids pooling
+        unit-incompatible variants (e.g. serum vs urine creatinine).
+        Ignored for non-biomarker concept types.
     """
     # Defensive re-check: planner should already have gated these out,
     # but an explicit raise here surfaces misrouting instead of emitting
@@ -128,7 +137,10 @@ def compile_sql(
 
     # Route by concept type.
     if concept.concept_type in {"biomarker", "vital"}:
-        return _compile_event_aggregate(cq, concept, names, sql_fn, backend, registry)
+        return _compile_event_aggregate(
+            cq, concept, names, sql_fn, backend, registry,
+            itemids=resolved_itemids if concept.concept_type == "biomarker" else None,
+        )
     if concept.concept_type == "drug":
         return _compile_drug_aggregate(cq, concept, names, sql_fn, backend, registry)
     if concept.concept_type == "microbiology":
@@ -208,6 +220,18 @@ def _ilike_any(backend: Any, column: str, names: list[str]) -> tuple[str, list[s
     return "(" + " OR ".join(clauses) + ")", [f"%{n}%" for n in names]
 
 
+def _itemid_in(alias: str, itemids: list[int]) -> tuple[str, list[int]]:
+    """Build ``alias.itemid IN (?, ?, …)`` for a list of MIMIC itemids.
+
+    Used when a biomarker concept carries a LOINC code that's been resolved
+    to specific MIMIC labitem identifiers — preferred over ``_ilike_any``
+    because itemid filtering avoids the unit-pollution problem that
+    ``LIKE '%creatinine%'`` causes (which pools serum + urine + ratios).
+    """
+    placeholders = ",".join(["?"] * len(itemids))
+    return f"{alias}.itemid IN ({placeholders})", list(itemids)
+
+
 # ---------------------------------------------------------------------------
 # Biomarker / vital event aggregation
 # ---------------------------------------------------------------------------
@@ -220,8 +244,16 @@ def _compile_event_aggregate(
     sql_fn: str,
     backend: Any,
     registry: OperationRegistry,
+    *,
+    itemids: list[int] | None = None,
 ) -> SqlFastpathQuery:
-    """AVG/MAX/MIN/COUNT over biomarker (labevents) or vital (chartevents)."""
+    """AVG/MAX/MIN/COUNT over biomarker (labevents) or vital (chartevents).
+
+    When ``itemids`` is supplied (biomarker concepts only, populated by the
+    orchestrator from ``ConceptResolver.resolve_biomarker``), the WHERE
+    clause filters on ``itemid IN (...)`` instead of the label-substring
+    LIKE — avoids pooling unit-incompatible variants of the same lab.
+    """
     t = backend.table
     if concept.concept_type == "biomarker":
         event_table = f"{t('labevents')} l"
@@ -274,7 +306,12 @@ def _compile_event_aggregate(
         group_by_clause = f"GROUP BY {group_by_col}"
 
     # WHERE: concept match + non-null value + cohort filters.
-    name_clause, name_params = _ilike_any(backend, name_col, names)
+    # When the resolver supplied itemids (LOINC-grounded biomarker), filter
+    # on those directly; otherwise fall back to the label-substring LIKE.
+    if itemids:
+        name_clause, name_params = _itemid_in(event_alias, itemids)
+    else:
+        name_clause, name_params = _ilike_any(backend, name_col, names)
     where_clauses: list[str] = [
         name_clause,
         f"{event_alias}.valuenum IS NOT NULL",
