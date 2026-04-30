@@ -9,8 +9,9 @@
 >
 > This guide is **Streamlit chat only** by design. Every prompt below
 > is something the mentor can read, type into the chat box, and watch
-> render. The demo runs ~45 minutes and exercises 16 distinct prompts
-> across 14 code paths.
+> render. Every anchor is described clinically — no internal database
+> keys (`hadm_id`, `subject_id`) ever appear in a user-typed prompt,
+> because that's not how a clinician would use the tool.
 
 ---
 
@@ -30,12 +31,10 @@ Honest map of which surfaces are exercised by the prompts in this guide.
 | Survival outcome refusal | ✅ (loud refusal) | C8 |
 | Non-identity aggregation refusal | ✅ (loud refusal) | C9 |
 | Similarity, template anchor (no temporal) | ✅ | S1, S2, S5 |
-| Similarity, `hadm_id` anchor (full temporal Jaccard) | ✅ | S3 |
-| Similarity, `subject_id` anchor | ✅ | S4 |
+| Similarity, `hadm_id` / `subject_id` anchor (full temporal Jaccard) | ❌ — code path exists but not demoed (would require user to type internal IDs); covered by `tests/test_similarity` |
 | Custom `contextual_weights` override | ✅ | S2 |
 | `min_similarity` threshold | ✅ | S5 |
-| Similarity-narrowed causal, template anchor | ✅ | Capstone-1 |
-| Similarity-narrowed causal, hadm anchor | ✅ | Capstone-2 |
+| Similarity-narrowed causal, template anchor | ✅ | Capstone |
 
 **Known visual gap (called out so the mentor isn't surprised).** The
 chat renders the flat 6-column similarity table but does *not* yet
@@ -46,11 +45,14 @@ along on `SimilarityScore.contextual_explanation` and
 `src/similarity/explanations.py` are ready — the Streamlit panel itself
 is queued as Phase 9b.
 
-**Phrasing caveat.** S3 and Capstone-2 both ask for similarity to a
-specific admission via `hadm_id`. That's clinically unnatural phrasing;
-a real clinician would describe the patient. We use it to demonstrate
-that the second anchor mode works end-to-end, since the temporal-Jaccard
-pipeline only runs with a real admission.
+**Why no real-anchor similarity in the demo.** The temporal-Jaccard
+pipeline only runs against a specific anchor admission, and the only
+way to pin one from chat is to type an `hadm_id` — an internal database
+key, not a clinical concept. Asking a clinician to do that betrays the
+schema, so we deliberately leave that prompt out of the demo. The code
+path is exercised by `tests/test_similarity`; surfacing it through a
+clinical UX (e.g., "the patient I'm currently looking at") is queued as
+follow-on UX work.
 
 ---
 
@@ -77,48 +79,7 @@ ls data/mappings/ | grep -E '(drug|icd10cm|labitem|loinc)_to_snomed.json'
 If any of those three fail, fix before the mentor arrives — none of the
 demo prompts will work otherwise.
 
-### 1.2 Pick real `hadm_id` / `subject_id` ahead of time
-
-Three prompts (S3, S4, Capstone-2) reference a specific admission or
-subject. Pick them once before the demo so the chat doesn't stall on
-"can't resolve". The query below picks ICU admissions with ≥ 5
-prescription events — these have enough trajectory for the temporal-
-Jaccard story to be interesting.
-
-```bash
-.venv/bin/python -c "
-import duckdb
-con = duckdb.connect('data/processed/mimiciv.duckdb')
-# hadm candidates with ICU + meaningful prescription history
-print('Candidate hadm_ids:')
-for hadm, subj, n in con.execute('''
-  SELECT a.hadm_id, a.subject_id, COUNT(p.drug) AS n_rx
-  FROM admissions a
-  JOIN icustays i ON a.hadm_id = i.hadm_id
-  JOIN prescriptions p ON a.hadm_id = p.hadm_id
-  GROUP BY a.hadm_id, a.subject_id
-  HAVING COUNT(p.drug) > 5
-  LIMIT 5
-''').fetchall():
-    print(f'  hadm={hadm}, subject={subj}, rx_events={n}')
-print()
-# subject candidates with multiple admissions (for S4 subject_id mode)
-print('Candidate subject_ids (≥ 2 admissions):')
-for subj, n_adm in con.execute('''
-  SELECT subject_id, COUNT(*) AS n_adm
-  FROM admissions
-  GROUP BY subject_id
-  HAVING COUNT(*) >= 2
-  LIMIT 5
-''').fetchall():
-    print(f'  subject={subj}, admissions={n_adm}')
-"
-```
-
-Substitute the chosen IDs into the three prompts marked
-`<HADM_ID>` / `<SUBJECT_ID>` below.
-
-### 1.3 Launch the chat
+### 1.2 Launch the chat
 
 ```bash
 bash scripts/run_chat.sh
@@ -129,7 +90,7 @@ bash scripts/run_chat.sh
 Browser opens at `http://localhost:8501`. The orchestrator opens
 `data/processed/mimiciv.duckdb` per `config/settings.py:17`.
 
-### 1.4 Pre-flight smoke prompt
+### 1.3 Pre-flight smoke prompt
 
 Type into the chat:
 
@@ -342,43 +303,6 @@ live, not boilerplate.
 dominating the ordering. The diagnostic-block phrasing
 (`contextual_weights override applied`) confirms the override fired.
 
-### S3 — `hadm_id` anchor, full temporal Jaccard [NEW]
-
-> *"Show me the 10 admissions most similar to admission `<HADM_ID>`."*
-> (Substitute the integer chosen in §1.2.)
-
-**Code path.** Decomposer extracts the integer per the
-`_SCOPE_INFERENCE` guidance + few-shot example
-`06_similarity_to_hadm.json`. The `hadm_id` branch of `_resolve_anchor`
-(`src/similarity/run.py:247-264`) fetches features + bucketed events for
-the anchor admission, then `_fetch_admission_events` runs again per
-candidate. `compute_temporal_similarity` runs over per-bucket Jaccards
-(`src/similarity/temporal.py`); buckets come from
-`assign_buckets` in ICU-day mode (`src/similarity/bucketing.py`).
-`combine_scores` returns `0.5 · s_temp + 0.5 · s_ctx` (default α).
-
-**What the mentor sees.** A 10-row ranked table where `temporal` is
-populated for every row — the first time in this demo that the
-temporal-Jaccard pipeline runs end-to-end. Compare ordering to S1: same
-machinery, but cohort selection now reflects shared trajectories rather
-than just covariates.
-
-### S4 — `subject_id` anchor [NEW]
-
-> *"Find patients similar to subject `<SUBJECT_ID>` across their
-> admissions, top 10."* (Substitute the integer chosen in §1.2.)
-
-**Code path.** The `anchor_subject_id` branch of `_resolve_anchor`
-(`src/similarity/run.py:267-288`) lists all admissions for the subject
-and picks the most recent as representative — that admission's features
-+ buckets become the anchor. Downstream pipeline is identical to S3.
-
-**What the mentor sees.** Same 6-column shape as S3 with the temporal
-column populated. Surface the "most recent admission" choice when
-walking the result so the mentor sees it's a deliberate design
-decision, not a tiebreak — and a candidate question for follow-on work
-(should it be the first admission? An aggregate? A user choice?).
-
 ### S5 — `min_similarity` threshold [NEW]
 
 > *"Find patients similar to a 72-year-old woman with COPD exacerbation
@@ -398,7 +322,7 @@ relative to the group weights, not to any external scale.
 
 ---
 
-## Section 4 — Arc C: Capstone — similarity-narrowed causal (~9 min)
+## Section 4 — Arc C: Capstone — similarity-narrowed causal (~6 min)
 
 The integration moment. Phase 9 isn't a side-show — it's a Phase 8d
 *cohort source*. A causal CQ that carries `similarity_spec` stays on
@@ -408,7 +332,7 @@ builder, and emits an audit note into `DiagnosticReport.notes`
 (`src/causal/run.py:187-219`). The mentor sees the cohort provenance
 verbatim in the diagnostics block.
 
-### Capstone-1 — template-narrowed causal
+### Capstone — template-narrowed causal
 
 > *"Among admissions similar to a 68-year-old woman with atrial
 > fibrillation and CKD, what's the effect of GLP-1 exposure vs no
@@ -434,25 +358,6 @@ Phase 9 — cohort narrowed by similarity to template anchor
 A specific clinical profile drives cohort selection; that cohort flows
 into the formal causal estimator; the estimate carries the provenance.
 
-### Capstone-2 — `hadm_id`-narrowed causal [NEW]
-
-> *"Among admissions similar to admission `<HADM_ID>`, compare alteplase
-> (tPA) vs no tPA on 30-day readmission."* (Substitute the integer
-> chosen in §1.2.)
-
-**Code path.** Same dispatch as Capstone-1, but `similarity_spec` now
-carries `anchor_hadm_id` rather than `anchor_template`. The narrowing
-uses real-anchor mode with full temporal Jaccard (S3's pipeline). The
-audit note references the real hadm anchor and carries `n_pool` +
-`n_returned`.
-
-**What the mentor sees.** Same 4-column shape as Capstone-1, but the
-audit note now references the hadm_id and the cohort selection
-mechanism is genuinely different: candidates ranked by *trajectory*
-similarity rather than just *profile* similarity. Compare against
-Capstone-1: same downstream estimator, two different cohort selection
-mechanisms, the system is honest about which it used.
-
 ---
 
 ## Section 5 — Troubleshooting
@@ -460,7 +365,6 @@ mechanisms, the system is honest about which it used.
 | Symptom | Likely cause | Pointer |
 |---|---|---|
 | Bootstrap stalls on a small cohort | Tiny arm size hits LR class-imbalance per replicate | Pre-narrow the cohort, or ask the question with a broader filter |
-| Decomposer drops the integer in S3 / Capstone-2 | `<HADM_ID>` typed without surrounding context | Few-shot examples `06_similarity_to_hadm.json` + `08_similarity_causal_narrowing.json` show the expected phrasing — keep "admission" as the noun |
 | Decomposer can't resolve "similar to ..." | Anchor description too vague | Decomposer should emit `clarifying_question` (`src/conversational/models.py:194`); rephrase with at least one concrete clinical attribute |
 | Streamlit shows raw JSON instead of a table | Renderer fallback when `data_table` shape is unexpected | Inspect `_render_answer` at `src/conversational/app.py:195+` |
 | Template anchor returns `temporal=None` for all rows | Expected — no trajectory for a synthetic profile | Documented contextual-only fallback in `combine_scores` |
@@ -469,23 +373,22 @@ mechanisms, the system is honest about which it used.
 
 ---
 
-## Section 6 — 45-minute runbook
+## Section 6 — 35-minute runbook
 
 Concrete schedule. Adjust if the mentor interrupts with deep questions
 on a single example — the negative tests (C8, C9) are the easiest to
-drop if you run long, and S4 can be cut to S3 + S5 if needed.
+drop if you run long.
 
 | Time | Activity | Prompts |
 |---|---|---|
-| 0–5 | Setup + smoke check | §1.4 pre-flight smoke; verify pre-picked IDs |
-| 5–10 | Causal: tightest path | C1 (binary tPA), C2 (continuous LOS) |
-| 10–14 | Causal: multi-arm + learner switch | C3 (3-arm T-learner), C4 (same scenario, S-learner) |
-| 14–18 | Causal: identification + intervention breadth | C5 (X-learner + overlap), C7 (ICD-PCS procedure) |
-| 18–22 | Causal: multi-outcome + guard rails | C6 (multi-outcome), C8 (survival refusal), C9 (aggregation refusal) |
-| 22–28 | Similarity: anchor breadth | S1 (template), S3 (hadm_id), S4 (subject_id) |
-| 28–32 | Similarity: weights + threshold | S2 (severity-weighted), S5 (min_similarity) |
-| 32–40 | Capstone | Capstone-1 (template-narrowed), Capstone-2 (hadm-narrowed) |
-| 40–45 | Q&A buffer | open |
+| 0–3 | Setup + smoke check | §1.3 pre-flight smoke |
+| 3–8 | Causal: tightest path | C1 (binary tPA), C2 (continuous LOS) |
+| 8–12 | Causal: multi-arm + learner switch | C3 (3-arm T-learner), C4 (same scenario, S-learner) |
+| 12–16 | Causal: identification + intervention breadth | C5 (X-learner + overlap), C7 (ICD-PCS procedure) |
+| 16–20 | Causal: multi-outcome + guard rails | C6 (multi-outcome), C8 (survival refusal), C9 (aggregation refusal) |
+| 20–26 | Similarity | S1 (template), S2 (severity-weighted), S5 (min_similarity) |
+| 26–30 | Capstone | template-narrowed causal |
+| 30–35 | Q&A buffer | open |
 
 ---
 
@@ -499,22 +402,17 @@ mentor arrives.
 2. `.venv/bin/python -m pytest
    tests/test_conversational/test_orchestrator.py::TestSimilarityBranch
    tests/test_similarity tests/test_causal -q` passes.
-3. Streamlit launches; pre-flight smoke (§1.4) returns a single-cell
+3. Streamlit launches; pre-flight smoke (§1.3) returns a single-cell
    answer.
-4. Run **C1, C5, S1, S3, Capstone-2** end-to-end in chat. These five
+4. Run **C1, C5, S1, Capstone** end-to-end in chat. These four
    collectively touch: binary T-learner, X-learner + overlap diagnostic,
-   template-anchor similarity, hadm-anchor similarity (full temporal
-   Jaccard), and similarity-narrowed causal. If all five render
-   correctly, every other prompt in the guide is a permutation of code
-   paths these already exercise.
+   template-anchor similarity, and similarity-narrowed causal. If all
+   four render correctly, every other prompt in the guide is a
+   permutation of code paths these already exercise.
 5. Confirm C8 + C9 surface plain-English errors rather than stack
    traces (the orchestrator's outer try/except in
    `orchestrator.py:244-251` catches; the user-facing text comes from
    the underlying exception's message).
-6. If the chosen `<HADM_ID>` or `<SUBJECT_ID>` from §1.2 fails to
-   resolve at demo time (ICU stay missing, prescriptions sparse), pick
-   a different one from the candidate list — the §1.2 query returns
-   five candidates per query specifically so you have alternates.
 
 ---
 
