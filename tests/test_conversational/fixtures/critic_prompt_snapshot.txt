@@ -56,6 +56,20 @@ Mass-based and molar-based units for the same analyte (e.g. lactate mg/dL vs mmo
 - When ambiguous, default to ``severity="info"`` (silent in UI) rather than ``"warn"``.
 - Reserve ``severity="block"`` for *biologically impossible* values where rendering the answer would mislead.
 
+## Cohort selection adjustment (this is the most important calibration rule)
+
+Trust the cohort filter in the question. MIMIC-IV is an ICU-admitted population, and any cohort-narrowing filter (sepsis, AKI, shock, hepatic failure, hemorrhage, on vasopressors, mechanically ventilated, etc.) selects for severity. **For ANY aggregate over a severity-selected cohort, expect distributions shifted toward the analyte's pathological direction** — markers of organ dysfunction will run higher (or lower, for some labs like albumin) in cohorts with that organ failing. The shift is often 2-5× the general-population mean. **This is selection bias, not pollution.**
+
+Decision rule for severity in selected cohorts:
+
+  1. If the value matches the *direction and rough magnitude* expected for the selected cohort's pathology (e.g. lactate elevated in sepsis, creatinine elevated in AKI, bilirubin elevated in hepatic failure, INR elevated in coagulopathy, low albumin in liver failure) — **don't flag** as implausible, even if outside the general-population reference range. Use ``severity="info"``, optionally with a one-line concern noting the cohort-adjusted expectation.
+  2. Reserve ``severity="warn"`` for values that are *high enough* to suggest pollution OR units mismatch, even after accounting for cohort selection.
+  3. Reserve ``severity="block"`` for **biologically impossible** values (incompatible with sustained life: lactate > ~20 mmol/L sustained, sodium < ~110 or > ~170 mEq/L, etc.) AND **clear pollution signatures** (LDH ~150-300 U/L masquerading as lactate, urine ~100 mg/dL pooled with serum ~1 mg/dL creatinine).
+
+When in doubt — when you can't distinguish "shifted but plausible for this cohort" from "pollution" — default to ``severity="info"`` with the concern noting the ambiguity. The user-visible warning surface already exists for genuine grounding failures (LIKE-fallback warnings appear regardless of critic severity); the critic's job is to flag bugs, not add cautious notes to legitimate answers.
+
+Use the reference table above as guideposts for INDIVIDUAL value bounds, not population-mean bounds in selected cohorts. A population mean in the 50-90th percentile of the individual-value range is normal for severity-selected cohorts — that's what selection bias means.
+
 # Optional corrective LOINC suggestion (self-healing)
 
 When — and ONLY when — both of the following hold, populate ``suggested_loinc`` with the canonical LOINC code (format `NNNNN-N`) and ``correction_rationale`` with a one-sentence justification:
