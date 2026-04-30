@@ -301,3 +301,86 @@ class TestCriticPromptSnapshot:
                 f"{len(CRITIC_SYSTEM_PROMPT)}."
             )
             assert expected == CRITIC_SYSTEM_PROMPT, diff_preview
+
+
+# ---------------------------------------------------------------------------
+# Self-healing critic — verdict carries a corrective LOINC suggestion
+# ---------------------------------------------------------------------------
+#
+# These tests pin the *contract* for the new fields on CriticVerdict:
+# ``suggested_loinc`` + ``correction_rationale``. Whether the orchestrator
+# actually retries on a suggestion is tested in test_orchestrator.py
+# (TestSelfHealingCritic). Here we verify the parse + validation layer.
+
+
+class TestCriticSuggests:
+    def test_critic_emits_suggested_loinc_round_trips(self):
+        """When the critic returns suggested_loinc + correction_rationale,
+        both fields populate on the parsed verdict."""
+        client = mock_anthropic([json.dumps({
+            "plausible": False,
+            "severity": "block",
+            "concern": "Mean lactate of 199 mg/dL is in the LDH range.",
+            "reference_used": "Serum lactate ICU-plausible upper ~135 mg/dL",
+            "suggested_loinc": "32693-4",
+            "correction_rationale": (
+                "MIMIC codes lactate molarly via LOINC 32693-4 (mmol/L blood); "
+                "the prompt's 2524-7 (mg/dL serum) doesn't ground."
+            ),
+        })])
+        cq = _make_cq("What is the average lactate?")
+        answer = _make_answer("Mean lactate 199.43 mg/dL")
+        verdict = critique(
+            client, cq, answer,
+            fallback_warning="LOINC '2524-7' not found in mapping table",
+        )
+        assert verdict is not None
+        assert verdict.suggested_loinc == "32693-4"
+        assert verdict.correction_rationale is not None
+        assert "32693-4" in verdict.correction_rationale or "LOINC" in verdict.correction_rationale
+
+    def test_critic_omits_suggestion_on_plausible_answer(self):
+        """severity='info' verdicts shouldn't carry a corrective suggestion.
+        The contract is permissive — we don't enforce — but the round-trip
+        of None values must work cleanly."""
+        client = mock_anthropic([json.dumps({
+            "plausible": True,
+            "severity": "info",
+            "concern": None,
+            "reference_used": None,
+            "suggested_loinc": None,
+            "correction_rationale": None,
+        })])
+        cq = _make_cq()
+        answer = _make_answer("Mean creatinine 1.4 mg/dL")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert verdict.suggested_loinc is None
+        assert verdict.correction_rationale is None
+
+    def test_critic_handles_malformed_loinc_gracefully(self):
+        """A malformed suggested_loinc (e.g. typo, freeform text) must be
+        coerced to None by the field_validator — never crash a turn,
+        never let the orchestrator try to use a bogus code."""
+        client = mock_anthropic([json.dumps({
+            "plausible": False,
+            "severity": "warn",
+            "concern": "Suspect pollution.",
+            "suggested_loinc": "not-a-real-loinc",
+            "correction_rationale": "could not pin down",
+        })])
+        cq = _make_cq()
+        answer = _make_answer("Mean lactate 199 mg/dL")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert verdict.suggested_loinc is None  # coerced
+        # rationale survives — it's free-text and might still be useful
+        assert verdict.correction_rationale == "could not pin down"
+
+    def test_correction_trace_field_default_is_none(self):
+        """AnswerResult.correction_trace defaults to None — no retry happened.
+        This is the regression guard for the common path."""
+        from src.conversational.models import AnswerResult
+
+        a = AnswerResult(text_summary="hello")
+        assert a.correction_trace is None

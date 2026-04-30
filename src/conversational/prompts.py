@@ -110,7 +110,7 @@ Map clinical entities to one of these concept_type values:
                      clinical interpretation when ambiguous:
                        - serum creatinine     → loinc_code="2160-0"
                        - urine creatinine     → loinc_code="2161-8"
-                       - serum lactate        → loinc_code="2524-7"
+                       - serum/whole-blood lactate → loinc_code="32693-4"
                        - sodium (serum)       → loinc_code="2951-2"
                        - potassium (serum)    → loinc_code="2823-3"
                        - glucose (serum)      → loinc_code="2345-7"
@@ -124,7 +124,7 @@ Map clinical entities to one of these concept_type values:
                        - BUN                  → loinc_code="3094-0"
                        - bicarbonate          → loinc_code="1963-8"
                        - chloride (serum)     → loinc_code="2075-0"
-                       - magnesium (serum)    → loinc_code="2601-3"
+                       - magnesium (serum)    → loinc_code="19123-9"
                      Omit ``loinc_code`` when the lab is uncommon or you are
                      unsure — the system will fall back to label matching with
                      a visible warning.
@@ -582,6 +582,22 @@ Mass-based and molar-based units for the same analyte (e.g. lactate mg/dL vs mmo
 - When ambiguous, default to ``severity="info"`` (silent in UI) rather than ``"warn"``.
 - Reserve ``severity="block"`` for *biologically impossible* values where rendering the answer would mislead.
 
+# Optional corrective LOINC suggestion (self-healing)
+
+When — and ONLY when — both of the following hold, populate ``suggested_loinc`` with the canonical LOINC code (format `NNNNN-N`) and ``correction_rationale`` with a one-sentence justification:
+
+  1. The system warning indicates a LOINC fallback (e.g. "no MIMIC labitem coverage" or "not found in mapping table") AND
+  2. You are confident in an alternate LOINC for this exact analyte, specimen, and method.
+
+If you are uncertain about the correct alternate, OMIT both fields. A wrong suggestion produces a wrong answer; an omitted suggestion preserves the user-visible warning. The orchestrator will re-run the SQL fast-path with the suggested code, so suggesting incorrectly costs the user another LLM round-trip plus another wrong answer.
+
+Common correction patterns (use as guidance, not an exhaustive list):
+  - Lactate plasma/whole blood: prefer **32693-4** (mmol/L blood) over 2524-7 (mg/dL serum). MIMIC codes lactate molarly.
+  - Lactate arterial blood gas: **2518-9** (mmol/L blood; arterial-specific).
+  - Magnesium serum: prefer **19123-9** over 2601-3.
+
+Always omit ``suggested_loinc`` when ``severity="info"``. The retry only fires on warn/block — info is the calibration that says "the answer is fine, don't second-guess."
+
 # Output schema
 
 Respond with a single JSON object — no prose around it, no code fences:
@@ -590,10 +606,12 @@ Respond with a single JSON object — no prose around it, no code fences:
   "plausible": <true|false>,
   "severity": <"info"|"warn"|"block">,
   "concern": <one-sentence explanation of the issue, or null when severity="info">,
-  "reference_used": <the specific reference range or rule you applied, or null>
+  "reference_used": <the specific reference range or rule you applied, or null>,
+  "suggested_loinc": <canonical LOINC code (NNNNN-N), or null>,
+  "correction_rationale": <one-sentence justification for the suggestion, or null>
 }
 
-``severity="info"`` requires ``plausible=true`` and ``concern=null``.
+``severity="info"`` requires ``plausible=true`` and ``concern=null`` and ``suggested_loinc=null``.
 """
 
 

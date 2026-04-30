@@ -225,6 +225,35 @@ def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
 
     st.markdown(answer.text_summary)
 
+    if answer.correction_trace:
+        with st.expander(
+            "🔄 Self-healed answer — original attempt was rejected",
+            expanded=False,
+        ):
+            st.markdown(
+                "The critic flagged the first attempt and proposed a corrected "
+                "LOINC code. We re-ran with the correction; the answer above "
+                "reflects the corrected attempt. Earlier attempts are kept "
+                "for transparency."
+            )
+            for entry in answer.correction_trace:
+                st.markdown(
+                    f"**Attempt {entry['attempt'] + 1}** — "
+                    f"LOINC `{entry.get('loinc_used') or 'none'}`"
+                )
+                if entry.get("fallback_warning"):
+                    st.caption(f"Fallback warning: {entry['fallback_warning']}")
+                st.markdown(entry.get("text_summary") or "*(no answer text)*")
+                v = entry.get("critic_verdict")
+                if v:
+                    st.caption(
+                        f"Critic verdict: **{v.get('severity')}** — "
+                        f"{v.get('concern') or '—'}"
+                    )
+                else:
+                    st.caption("Critic verdict: *not produced (call failed or skipped)*")
+                st.markdown("---")
+
     if answer.critic_verdict is not None:
         verdict = answer.critic_verdict
         if verdict.severity == "block":

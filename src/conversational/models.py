@@ -3,7 +3,11 @@
 from enum import Enum
 from typing import Literal
 
+import re
+
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+_LOINC_PATTERN = re.compile(r"^\d{1,7}-\d$")
 
 
 class ClinicalConcept(BaseModel):
@@ -291,6 +295,11 @@ class CriticVerdict(BaseModel):
     ``severity`` drives UI rendering: ``"info"`` is silent (default state for
     legitimate answers), ``"warn"`` surfaces a visible note, ``"block"`` should
     suppress the answer or render it behind an explicit override.
+
+    The optional ``suggested_loinc`` + ``correction_rationale`` fields carry
+    a self-healing recommendation: when the critic flags a LOINC-grounding
+    failure, the orchestrator can re-run the SQL fast-path with the proposed
+    code (see ``orchestrator._run_with_critic_retry``).
     """
 
     plausible: bool
@@ -298,6 +307,21 @@ class CriticVerdict(BaseModel):
     concern: str | None = None
     reference_used: str | None = None
     raw_response: str | None = None  # truncated; debug-only
+    # Self-healing fields. Populated only when the critic catches a
+    # LOINC-grounding failure AND has a confident alternate code. The
+    # validator silently coerces malformed strings to ``None`` so a noisy
+    # critic response never crashes a turn.
+    suggested_loinc: str | None = None
+    correction_rationale: str | None = None
+
+    @field_validator("suggested_loinc", mode="before")
+    @classmethod
+    def _coerce_invalid_loinc_to_none(cls, v):
+        if v is None or v == "":
+            return None
+        if not isinstance(v, str) or not _LOINC_PATTERN.match(v):
+            return None
+        return v
 
 
 class AnswerResult(BaseModel):
@@ -323,6 +347,13 @@ class AnswerResult(BaseModel):
     # Second-pass plausibility verdict (see CriticVerdict). None when the
     # critic was disabled or failed silently.
     critic_verdict: CriticVerdict | None = None
+    # Self-healing trace: when the orchestrator runs the SQL fast-path more
+    # than once because a critic-suggested LOINC correction triggered a
+    # retry, each attempt is recorded here. ``None`` means no retry happened
+    # (the common case). Each entry is a dict with: ``attempt`` (int),
+    # ``loinc_used`` (str|None), ``text_summary`` (str), ``fallback_warning``
+    # (str|None), ``critic_verdict`` (dict|None).
+    correction_trace: list[dict] | None = None
 
 
 class DecompositionResult(BaseModel):

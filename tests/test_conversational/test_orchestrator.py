@@ -1079,3 +1079,324 @@ class TestCriticIntegration:
 
         assert result.text_summary  # answer renders
         assert result.critic_verdict is None  # but no verdict
+
+
+# ---------------------------------------------------------------------------
+# TestSelfHealingCritic — critic proposes corrected LOINC; orchestrator retries
+#
+# These tests exercise ``_run_with_critic_retry``. They patch the
+# ``_run_sql_fastpath`` method directly (returning canned answer / sql /
+# fallback_warning tuples) and use ``mock_anthropic`` for the critic's
+# verdict responses. The decomposer is mocked to emit a SQL_FAST CQ with
+# a biomarker concept carrying ``loinc_code="2524-7"`` (the wrong-for-
+# MIMIC lactate code) so the suggestion-based retry path is exercised.
+# ---------------------------------------------------------------------------
+
+
+def _patch_for_self_healing(fn):
+    """Patches for self-healing tests: mock decompose, _run_sql_fastpath,
+    backends. Critique stays real (uses pipeline._client = mock_anthropic)."""
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch.object(ConversationalPipeline, "_run_sql_fastpath")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
+    return fn
+
+
+def _make_lactate_cq(loinc_code: str | None = "2524-7") -> CompetencyQuestion:
+    """Build a SQL_FAST-eligible CQ: biomarker concept + cohort scope +
+    aggregation, with a configurable LOINC code."""
+    return CompetencyQuestion(
+        original_question="What is the average lactate for patients with sepsis?",
+        clinical_concepts=[
+            ClinicalConcept(
+                name="lactate",
+                concept_type="biomarker",
+                loinc_code=loinc_code,
+            ),
+        ],
+        aggregation="mean",
+        scope="cohort",
+    )
+
+
+def _verdict_json(
+    severity: str = "info",
+    *,
+    plausible: bool | None = None,
+    concern: str | None = None,
+    suggested_loinc: str | None = None,
+    correction_rationale: str | None = None,
+) -> str:
+    if plausible is None:
+        plausible = severity == "info"
+    return json.dumps({
+        "plausible": plausible,
+        "severity": severity,
+        "concern": concern,
+        "reference_used": None,
+        "suggested_loinc": suggested_loinc,
+        "correction_rationale": correction_rationale,
+    })
+
+
+class TestSelfHealingCritic:
+    """When the critic flags a LOINC-grounding failure AND proposes a
+    corrected LOINC, the orchestrator mutates the CQ and re-runs the
+    SQL fast-path. Bounded by ``critic_max_retries`` (default 1)."""
+
+    @_patch_for_self_healing
+    def test_lactate_loinc_retry_happy_path(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """Canonical case: first attempt produces polluted answer + critic
+        block with suggested_loinc; orchestrator retries with corrected
+        LOINC; second attempt is clean. Final result is the corrected
+        answer with a correction_trace recording both attempts."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        polluted_answer = AnswerResult(text_summary="Polluted lactate 199.43 mg/dL")
+        clean_answer = AnswerResult(text_summary="Clean lactate 2.1 mmol/L")
+        mock_run_sql_fastpath.side_effect = [
+            (polluted_answer, ["SELECT ... LIKE %lactate%"], "LOINC '2524-7' has no MIMIC labitem coverage"),
+            (clean_answer, ["SELECT ... itemid IN (50813)"], None),
+        ]
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(
+                severity="block",
+                concern="Mean lactate 199 mg/dL is in LDH range — pollution.",
+                suggested_loinc="32693-4",
+                correction_rationale="MIMIC codes lactate molarly via 32693-4.",
+            ),
+            _verdict_json(severity="info"),
+        ])
+
+        result = pipeline.ask("What is the average lactate for patients with sepsis?")
+
+        # Final answer is the corrected attempt.
+        assert result.text_summary == "Clean lactate 2.1 mmol/L"
+        # Trace records both attempts.
+        assert result.correction_trace is not None
+        assert len(result.correction_trace) == 2
+        assert result.correction_trace[0]["loinc_used"] == "2524-7"
+        assert result.correction_trace[1]["loinc_used"] == "32693-4"
+        assert result.correction_trace[0]["fallback_warning"] is not None
+        assert result.correction_trace[1]["fallback_warning"] is None
+        # CQ in conversation history reflects the corrected LOINC.
+        assert pipeline.conversation_history[-1][0].clinical_concepts[0].loinc_code == "32693-4"
+        # Critic was called twice (once per attempt).
+        assert pipeline._client.messages.create.call_count == 2
+
+    @_patch_for_self_healing
+    def test_no_suggestion_no_retry(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """Critic flags severity=block but emits no suggested_loinc.
+        Orchestrator must NOT retry — correction_trace stays None."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        polluted = AnswerResult(text_summary="Polluted answer")
+        mock_run_sql_fastpath.return_value = (
+            polluted, ["SELECT ..."], "LOINC fallback",
+        )
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(severity="block", concern="bad answer", suggested_loinc=None),
+        ])
+
+        result = pipeline.ask("...")
+
+        assert result.correction_trace is None
+        assert result.text_summary == "Polluted answer"
+        assert mock_run_sql_fastpath.call_count == 1
+        assert pipeline._client.messages.create.call_count == 1  # only critic 1
+
+    @_patch_for_self_healing
+    def test_max_retries_respected(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """Critic suggests LOINCs on both verdicts. With max_retries=1,
+        only ONE retry happens — the second polluted attempt is final."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        a1 = AnswerResult(text_summary="answer 1")
+        a2 = AnswerResult(text_summary="answer 2")
+        mock_run_sql_fastpath.side_effect = [
+            (a1, ["sql1"], "fb1"),
+            (a2, ["sql2"], "fb2"),
+        ]
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_critic=True, critic_max_retries=1,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(severity="block", concern="x", suggested_loinc="32693-4"),
+            _verdict_json(severity="block", concern="y", suggested_loinc="2518-9"),
+        ])
+
+        result = pipeline.ask("...")
+
+        assert result.text_summary == "answer 2"
+        assert len(result.correction_trace) == 2
+        assert mock_run_sql_fastpath.call_count == 2
+        assert pipeline._client.messages.create.call_count == 2
+
+    @_patch_for_self_healing
+    def test_concept_not_biomarker_no_retry(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """Critic returns suggested_loinc on a drug concept (which the
+        critic shouldn't do, but we're robust). _should_retry rejects
+        non-biomarker concepts."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        drug_cq = CompetencyQuestion(
+            original_question="something drug",
+            clinical_concepts=[
+                ClinicalConcept(name="vancomycin", concept_type="drug"),
+            ],
+            aggregation="count",
+            scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[drug_cq])
+
+        a1 = AnswerResult(text_summary="drug answer")
+        mock_run_sql_fastpath.return_value = (a1, ["sql"], None)
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(severity="block", concern="x", suggested_loinc="32693-4"),
+        ])
+
+        result = pipeline.ask("...")
+
+        assert result.correction_trace is None
+        assert mock_run_sql_fastpath.call_count == 1
+
+    @_patch_for_self_healing
+    def test_idempotent_guard_same_loinc_no_retry(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """If the critic suggests the same LOINC the CQ already has,
+        _should_retry refuses — protects against degenerate loops."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        cq = _make_lactate_cq(loinc_code="32693-4")  # already has the suggested code
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        a1 = AnswerResult(text_summary="answer")
+        mock_run_sql_fastpath.return_value = (a1, ["sql"], None)
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(severity="warn", concern="x", suggested_loinc="32693-4"),
+        ])
+
+        result = pipeline.ask("...")
+
+        assert result.correction_trace is None
+        assert mock_run_sql_fastpath.call_count == 1
+
+    @_patch_for_self_healing
+    def test_severity_info_no_retry(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """severity=info verdicts must never trigger retry, even if a
+        suggested_loinc happens to be present (defensive)."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        a1 = AnswerResult(text_summary="legitimate answer")
+        mock_run_sql_fastpath.return_value = (a1, ["sql"], None)
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(
+                severity="info",
+                plausible=True,
+                suggested_loinc="32693-4",  # malformed: shouldn't have this on info
+            ),
+        ])
+
+        result = pipeline.ask("...")
+
+        assert result.correction_trace is None
+        assert mock_run_sql_fastpath.call_count == 1
+
+    @_patch_for_self_healing
+    def test_critic_failure_during_retry_breaks_loop(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """If the critic call fails on the retry attempt (returns None),
+        the loop terminates: _should_retry sees no verdict and breaks."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        a1 = AnswerResult(text_summary="answer 1")
+        a2 = AnswerResult(text_summary="answer 2")
+        mock_run_sql_fastpath.side_effect = [
+            (a1, ["sql1"], "fb1"),
+            (a2, ["sql2"], None),
+        ]
+
+        # Mock returns valid verdict, then raises. critique() catches the
+        # raise and returns None. _should_retry sees None and stops.
+        client = MagicMock()
+        first_resp = MagicMock()
+        first_resp.content = [MagicMock(text=_verdict_json(
+            severity="block", concern="x", suggested_loinc="32693-4",
+        ))]
+        client.messages.create.side_effect = [first_resp, RuntimeError("api down")]
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = client
+
+        result = pipeline.ask("...")
+
+        # Both runs happened (the retry fired before the critic failed).
+        assert mock_run_sql_fastpath.call_count == 2
+        # Trace has both attempts; second has critic_verdict=None.
+        assert len(result.correction_trace) == 2
+        assert result.correction_trace[1]["critic_verdict"] is None
+        # Final answer is the second attempt.
+        assert result.text_summary == "answer 2"

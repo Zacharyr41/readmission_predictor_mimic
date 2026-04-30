@@ -69,7 +69,7 @@ Map clinical entities to one of these concept_type values:
                      clinical interpretation when ambiguous:
                        - serum creatinine     → loinc_code="2160-0"
                        - urine creatinine     → loinc_code="2161-8"
-                       - serum lactate        → loinc_code="2524-7"
+                       - serum/whole-blood lactate → loinc_code="32693-4"
                        - sodium (serum)       → loinc_code="2951-2"
                        - potassium (serum)    → loinc_code="2823-3"
                        - glucose (serum)      → loinc_code="2345-7"
@@ -83,7 +83,7 @@ Map clinical entities to one of these concept_type values:
                        - BUN                  → loinc_code="3094-0"
                        - bicarbonate          → loinc_code="1963-8"
                        - chloride (serum)     → loinc_code="2075-0"
-                       - magnesium (serum)    → loinc_code="2601-3"
+                       - magnesium (serum)    → loinc_code="19123-9"
                      Omit ``loinc_code`` when the lab is uncommon or you are
                      unsure — the system will fall back to label matching with
                      a visible warning.

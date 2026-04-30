@@ -56,6 +56,7 @@ class ConversationalPipeline:
         extraction_config: ExtractionConfig | None = None,
         max_workers: int = 1,
         enable_critic: bool = True,
+        critic_max_retries: int = 1,
     ) -> None:
         import anthropic as _anthropic
 
@@ -69,6 +70,11 @@ class ConversationalPipeline:
         # tests opt out via ``enable_critic=False`` to avoid extending
         # every mock LLM response list.
         self._enable_critic = enable_critic
+        # Self-healing retry budget for the SQL fast-path. 1 retry is
+        # enough to catch the lactate-class LOINC misidentification case
+        # without unbounded latency. Configurable for tests that exercise
+        # multi-retry behavior or boundary conditions.
+        self._critic_max_retries = critic_max_retries
         repo_root = Path(__file__).parent.parent.parent
         # Phase 5: wire SNOMED hierarchy if the cached JSON is present.
         # The SnomedHierarchy class itself degrades gracefully on missing
@@ -166,13 +172,11 @@ class ConversationalPipeline:
                 for idx, cq in enumerate(decomp.competency_questions):
                     plan = self._planner.classify(cq)
                     if plan == QueryPlan.SQL_FAST:
-                        sub, sql_used, fallback_warning = self._run_sql_fastpath(
+                        sub, sql_used, _fb = self._run_with_critic_retry(
                             cq, backend, resolved_names=per_cq_resolved[idx][0],
                         )
-                        sub.interpretation_summary = cq.interpretation_summary
-                        sub = self._critique(
-                            sub, cq, fallback_warning=fallback_warning,
-                        )
+                        # ``interpretation_summary`` and ``critic_verdict`` are
+                        # already attached inside ``_run_with_critic_retry``.
                         sub_answers[idx] = sub
                         fastpath_sparql.extend(sql_used)  # stash for aggregation
                     elif plan == QueryPlan.CAUSAL:
@@ -301,6 +305,106 @@ class ConversationalPipeline:
         if verdict is not None:
             sub.critic_verdict = verdict
         return sub
+
+    def _should_retry(
+        self,
+        sub: AnswerResult,
+        cq: CompetencyQuestion,
+        attempt: int,
+        max_retries: int,
+    ) -> bool:
+        """Decide whether the SQL fast-path should retry with a corrected LOINC.
+
+        Conservative: every condition must hold. Specifically the critic
+        must have flagged a non-info severity AND emitted a non-null
+        ``suggested_loinc`` AND the concept must be a biomarker AND the
+        suggestion must differ from the LOINC already on the CQ (idempotent
+        guard against degenerate loops).
+        """
+        if attempt >= max_retries:
+            return False
+        v = sub.critic_verdict
+        if v is None or v.severity not in {"warn", "block"}:
+            return False
+        if not v.suggested_loinc:
+            return False
+        if not cq.clinical_concepts:
+            return False
+        c = cq.clinical_concepts[0]
+        if c.concept_type != "biomarker":
+            return False
+        if v.suggested_loinc == c.loinc_code:
+            return False  # idempotent guard
+        return True
+
+    def _run_with_critic_retry(
+        self,
+        cq: CompetencyQuestion,
+        backend,
+        *,
+        resolved_names: list[str],
+        max_retries: int | None = None,
+    ) -> tuple[AnswerResult, list[str], str | None]:
+        """SQL fast-path with one round of critic-driven LOINC correction.
+
+        The flow:
+          1. Run ``_run_sql_fastpath`` with the current CQ.
+          2. Run the critic on the resulting answer.
+          3. If ``_should_retry`` says yes, mutate
+             ``cq.clinical_concepts[0].loinc_code`` to the suggested code
+             and loop. Otherwise break.
+          4. If more than one attempt happened, attach the trace to
+             ``answer.correction_trace`` so the UI can render the journey.
+
+        Bound by ``max_retries`` (default 1; configurable via constructor
+        ``self._critic_max_retries``). The retry never fires when
+        ``_enable_critic`` is False (no verdict to drive the decision)
+        or on non-biomarker concepts (no LOINC mutation seam).
+
+        Causal/similarity/graph branches do NOT use this method — they
+        keep today's single-attempt behavior. The seam to extend self-
+        healing to those branches is v2 (each has different failure
+        modes and mutation points).
+        """
+        cap = self._critic_max_retries if max_retries is None else max_retries
+        trace: list[dict] = []
+        sub: AnswerResult | None = None
+        sql_used: list[str] = []
+        fb: str | None = None
+        for attempt in range(cap + 1):
+            loinc_used = (
+                cq.clinical_concepts[0].loinc_code
+                if cq.clinical_concepts else None
+            )
+            sub, sql_used, fb = self._run_sql_fastpath(
+                cq, backend, resolved_names=resolved_names,
+            )
+            sub.interpretation_summary = cq.interpretation_summary
+            sub = self._critique(sub, cq, fallback_warning=fb)
+            trace.append({
+                "attempt": attempt,
+                "loinc_used": loinc_used,
+                "text_summary": sub.text_summary,
+                "fallback_warning": fb,
+                "critic_verdict": (
+                    sub.critic_verdict.model_dump()
+                    if sub.critic_verdict is not None else None
+                ),
+            })
+            if not self._should_retry(sub, cq, attempt, cap):
+                break
+            try:
+                cq.clinical_concepts[0].loinc_code = (
+                    sub.critic_verdict.suggested_loinc
+                )
+            except Exception:
+                logger.exception(
+                    "self-healing critic: LOINC mutation failed; aborting retry"
+                )
+                break
+        if sub is not None and len(trace) > 1:
+            sub.correction_trace = trace
+        return sub, sql_used, fb
 
     def _run_sql_fastpath(
         self,
