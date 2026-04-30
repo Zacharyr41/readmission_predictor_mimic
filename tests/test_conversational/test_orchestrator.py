@@ -1,5 +1,6 @@
 """Tests for the conversational pipeline orchestrator."""
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -67,6 +68,15 @@ def _patch_all(fn):
     fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    # Patch the critic so existing orchestrator tests don't hit the real
+    # Anthropic API on every turn. The critic's fail-safe try/except would
+    # absorb errors, but exercising it would still make network calls and
+    # add latency. Tests that want to exercise the critic specifically
+    # use TestCriticIntegration (which doesn't use _patch_all).
+    fn = patch(
+        "src.conversational.orchestrator.critique",
+        new=MagicMock(return_value=None),
+    )(fn)
     # Use MagicMock *instances* (not the class) so calling e.g.
     # ``_DuckDBBackend(path)`` returns the mock's ``return_value`` — itself a
     # MagicMock with auto-generated attributes (``.close()``, ``.execute()``).
@@ -399,6 +409,10 @@ def _patch_all_multi(fn):
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
     fn = patch(
+        "src.conversational.orchestrator.critique",
+        new=MagicMock(return_value=None),
+    )(fn)
+    fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
     fn = patch(
@@ -601,6 +615,10 @@ def _patch_fastpath(fn):
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
     fn = patch("src.conversational.orchestrator.compile_sql")(fn)
+    fn = patch(
+        "src.conversational.orchestrator.critique",
+        new=MagicMock(return_value=None),
+    )(fn)
     fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
@@ -949,3 +967,115 @@ class TestSimilarityBranch:
         assert isinstance(result, AnswerResult)
         assert result.data_table is None
         assert "similarity" in result.text_summary.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestCriticIntegration — end-to-end critic wiring (Phase 6)
+#
+# These tests intentionally do NOT use ``_patch_all`` because that decorator
+# patches the critic function. They patch the same upstream stages but
+# leave ``critique`` real, with a mock Anthropic client returning a canned
+# verdict. This exercises the full critic call chain through the
+# orchestrator's ``_critique`` method.
+# ---------------------------------------------------------------------------
+
+
+def _patch_pre_critic(fn):
+    """Same patches as ``_patch_all`` minus the critique mock."""
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
+    return fn
+
+
+class TestCriticIntegration:
+    """The critic runs inside ``ConversationalPipeline.ask`` after each
+    sub-CQ produces an AnswerResult. ``enable_critic=True`` wires the call;
+    ``enable_critic=False`` skips it."""
+
+    @_patch_pre_critic
+    def test_critic_runs_after_answer_and_attaches_verdict(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """When enable_critic=True, the orchestrator passes each AnswerResult
+        through the critic and attaches the parsed CriticVerdict."""
+        from tests.test_conversational.conftest import mock_anthropic
+
+        # Stages run normally; only generate_answer is mocked so we don't
+        # need a real LLM for the answerer.
+        cq, reasoning, answer = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        critic_response = json.dumps({
+            "plausible": True,
+            "severity": "info",
+            "concern": None,
+            "reference_used": None,
+        })
+        # The pipeline constructor builds its own real Anthropic client; we
+        # override _client after construction so the critic uses our mock.
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([critic_response])
+
+        result = pipeline.ask("What is the creatinine?")
+
+        assert result.critic_verdict is not None
+        assert result.critic_verdict.severity == "info"
+        assert result.critic_verdict.plausible is True
+
+    @_patch_pre_critic
+    def test_critic_disabled_skips_call(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """When enable_critic=False, no critic call is made and verdict
+        stays None — the pipeline's behavior is identical to before the
+        critic was wired in."""
+        from tests.test_conversational.conftest import mock_anthropic
+
+        cq, reasoning, answer = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        # Mock client errors out if called — proves the critic never fires.
+        client = MagicMock()
+        client.messages.create.side_effect = AssertionError(
+            "critic must NOT call the LLM when enable_critic=False"
+        )
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=False,
+        )
+        pipeline._client = client
+
+        result = pipeline.ask("What is the creatinine?")
+
+        assert result.critic_verdict is None
+
+    @_patch_pre_critic
+    def test_critic_failure_does_not_block_answer(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """If the critic API call raises, the answer must still render
+        with critic_verdict=None — the critic is fail-safe."""
+        cq, reasoning, answer = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        client = MagicMock()
+        client.messages.create.side_effect = RuntimeError("critic API down")
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = client
+
+        result = pipeline.ask("What is the creatinine?")
+
+        assert result.text_summary  # answer renders
+        assert result.critic_verdict is None  # but no verdict

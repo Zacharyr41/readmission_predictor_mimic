@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from src.conversational.answerer import generate_answer
 from src.conversational.concept_resolver import ConceptResolver
+from src.conversational.critic import critique
 from src.conversational.decomposer import decompose_question
 from src.conversational.extractor import (
     _BigQueryBackend,
@@ -54,6 +55,7 @@ class ConversationalPipeline:
         bigquery_project: str | None = None,
         extraction_config: ExtractionConfig | None = None,
         max_workers: int = 1,
+        enable_critic: bool = True,
     ) -> None:
         import anthropic as _anthropic
 
@@ -63,6 +65,10 @@ class ConversationalPipeline:
         self._bigquery_project = bigquery_project
         self._extraction_config = extraction_config
         self._max_workers = max_workers
+        # Second-pass plausibility critic. ON by default in production;
+        # tests opt out via ``enable_critic=False`` to avoid extending
+        # every mock LLM response list.
+        self._enable_critic = enable_critic
         repo_root = Path(__file__).parent.parent.parent
         # Phase 5: wire SNOMED hierarchy if the cached JSON is present.
         # The SnomedHierarchy class itself degrades gracefully on missing
@@ -160,10 +166,13 @@ class ConversationalPipeline:
                 for idx, cq in enumerate(decomp.competency_questions):
                     plan = self._planner.classify(cq)
                     if plan == QueryPlan.SQL_FAST:
-                        sub, sql_used = self._run_sql_fastpath(
+                        sub, sql_used, fallback_warning = self._run_sql_fastpath(
                             cq, backend, resolved_names=per_cq_resolved[idx][0],
                         )
                         sub.interpretation_summary = cq.interpretation_summary
+                        sub = self._critique(
+                            sub, cq, fallback_warning=fallback_warning,
+                        )
                         sub_answers[idx] = sub
                         fastpath_sparql.extend(sql_used)  # stash for aggregation
                     elif plan == QueryPlan.CAUSAL:
@@ -175,6 +184,7 @@ class ConversationalPipeline:
                         # obvious we're not returning a real estimate.
                         sub = self._run_causal(cq)
                         sub.interpretation_summary = cq.interpretation_summary
+                        sub = self._critique(sub, cq)
                         sub_answers[idx] = sub
                     elif plan == QueryPlan.SIMILARITY:
                         # Phase 9: standalone similarity ranking. The
@@ -188,6 +198,7 @@ class ConversationalPipeline:
                         # directive (src/causal/run.py:187-219).
                         sub = self._run_similarity(cq, backend)
                         sub.interpretation_summary = cq.interpretation_summary
+                        sub = self._critique(sub, cq)
                         sub_answers[idx] = sub
                     else:
                         graph_cqs.append((idx, cq))
@@ -222,6 +233,7 @@ class ConversationalPipeline:
                             graph_stats, reasoning.sparql_queries,
                         )
                         sub.interpretation_summary = cq.interpretation_summary
+                        sub = self._critique(sub, cq)
                         sub_answers[idx] = sub
 
             # All slots filled now (planner produces exactly one plan per CQ).
@@ -269,18 +281,43 @@ class ConversationalPipeline:
         finally:
             backend.close()
 
+    def _critique(
+        self,
+        sub: AnswerResult,
+        cq: CompetencyQuestion,
+        *,
+        fallback_warning: str | None = None,
+    ) -> AnswerResult:
+        """Apply the second-pass plausibility critic to a sub-answer.
+
+        Returns the same AnswerResult mutated with ``critic_verdict`` set
+        when the critic returns a verdict; ``critic_verdict`` stays None
+        when the critic is disabled or fails (failure is logged in
+        :func:`critic.critique`). Never raises.
+        """
+        if not self._enable_critic:
+            return sub
+        verdict = critique(self._client, cq, sub, fallback_warning=fallback_warning)
+        if verdict is not None:
+            sub.critic_verdict = verdict
+        return sub
+
     def _run_sql_fastpath(
         self,
         cq: CompetencyQuestion,
         backend,
         *,
         resolved_names: list[str],
-    ) -> tuple[AnswerResult, list[str]]:
+    ) -> tuple[AnswerResult, list[str], str | None]:
         """Compile and execute a SQL fast-path CQ; wrap in AnswerResult.
 
-        Returns (answer, [sql_text]) so the top-level aggregation of
-        ``sparql_queries_used`` across a multi-CQ turn can include the
-        SQL we ran on the fast-path (the Query Details expander shows it).
+        Returns (answer, [sql_text], fallback_warning):
+          - answer: the AnswerResult with text_summary etc.
+          - [sql_text]: SQL we ran (surfaced in Query Details).
+          - fallback_warning: structured note when LOINC grounding failed,
+            or None. Returned alongside (rather than only embedded in
+            text_summary) so the orchestrator can pass it to the critic
+            for second-pass plausibility review.
 
         Biomarker concepts that carry a LOINC code go through
         ``ConceptResolver.resolve_biomarker`` before compilation so the
@@ -288,7 +325,8 @@ class ConversationalPipeline:
         unit-pooling ``LIKE`` filter. When grounding fails (LOINC absent
         from the mapping table or no MIMIC labitem coverage), we fall
         back to LIKE and surface a visible warning to the user via
-        ``AnswerResult.text_summary``.
+        ``AnswerResult.text_summary`` AND to the critic via the third
+        return value.
         """
         resolved_itemids: list[int] | None = None
         fallback_warning: str | None = None
@@ -320,7 +358,7 @@ class ConversationalPipeline:
                 (answer.text_summary or "")
                 + f"\n\n⚠️ Note: {fallback_warning}"
             ).strip()
-        return answer, [query.sql]
+        return answer, [query.sql], fallback_warning
 
     def _run_causal(self, cq: CompetencyQuestion) -> AnswerResult:
         """Phase 8a: wrap a ``CausalEffectResult`` into an ``AnswerResult``.

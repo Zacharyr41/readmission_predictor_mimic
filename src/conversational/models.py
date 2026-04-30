@@ -284,6 +284,22 @@ class ExtractionResult(BaseModel):
     events: dict[str, list[dict]] = {}
 
 
+class CriticVerdict(BaseModel):
+    """Output of the second-pass plausibility critic (`src/conversational/critic.py`).
+
+    Populated when the orchestrator runs a critic pass over an AnswerResult.
+    ``severity`` drives UI rendering: ``"info"`` is silent (default state for
+    legitimate answers), ``"warn"`` surfaces a visible note, ``"block"`` should
+    suppress the answer or render it behind an explicit override.
+    """
+
+    plausible: bool
+    severity: Literal["info", "warn", "block"]
+    concern: str | None = None
+    reference_used: str | None = None
+    raw_response: str | None = None  # truncated; debug-only
+
+
 class AnswerResult(BaseModel):
     text_summary: str
     data_table: list[dict] | None = None
@@ -304,6 +320,9 @@ class AnswerResult(BaseModel):
     # the breakdown under one synthesized top-level summary. None for single-CQ
     # turns.
     sub_answers: list["AnswerResult"] | None = None
+    # Second-pass plausibility verdict (see CriticVerdict). None when the
+    # critic was disabled or failed silently.
+    critic_verdict: CriticVerdict | None = None
 
 
 class DecompositionResult(BaseModel):
