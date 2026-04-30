@@ -225,6 +225,22 @@ def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
 
     st.markdown(answer.text_summary)
 
+    if answer.critic_verdict is not None:
+        verdict = answer.critic_verdict
+        if verdict.severity == "block":
+            st.error(
+                f"🛑 **Plausibility critic flagged this answer:** {verdict.concern}"
+                + (f"\n\n*Reference:* {verdict.reference_used}" if verdict.reference_used else "")
+            )
+        elif verdict.severity == "warn":
+            st.warning(
+                f"⚠️ **Plausibility note:** {verdict.concern}"
+                + (f"\n\n*Reference:* {verdict.reference_used}" if verdict.reference_used else "")
+            )
+        elif verdict.concern:  # severity=info but with non-null concern
+            with st.expander("Reviewer notes"):
+                st.caption(verdict.concern)
+
     if answer.data_table:
         st.dataframe(pd.DataFrame(answer.data_table))
 
