@@ -472,6 +472,55 @@ def snomed_search(term: str, max_results: int = 10) -> dict[str, Any]:
     return _enforce_size_budget({"status": "ok", "results": normalized})
 
 
+# --- snomed_expand_ecl via Hermes (local stdio) ---------------------------
+
+
+def snomed_expand_ecl(expression: str, max_results: int = 200) -> dict[str, Any]:
+    """Expand a SNOMED CT Expression Constraint Language (ECL) expression.
+
+    ECL is SNOMED's native query language for selecting concept sets —
+    e.g. ``<<73211009 |Diabetes mellitus|`` returns Diabetes mellitus
+    and all its descendants. Use this when you need a structured cohort
+    definition rather than free-text search.
+
+    Returns ``{"status": "ok", "results": [{concept_id, preferred_term,
+    fully_specified_name}, ...]}`` on success, or ``unavailable`` when
+    Hermes is not installed / the ECL expression is malformed. Never
+    raises.
+    """
+    client = _get_mcp_client("hermes", _hermes_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": "Hermes MCP not configured (set HERMES_MCP_COMMAND)",
+        }
+    envelope = client.call_tool(
+        "expand_ecl",
+        {"expression": expression, "max_results": max_results},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        concept_id = str(r.get("concept_id") or r.get("id") or "")
+        if not concept_id:
+            continue
+        normalized.append({
+            "concept_id": concept_id,
+            "preferred_term": str(
+                r.get("preferred_term") or r.get("term") or r.get("name") or ""
+            ),
+            "fully_specified_name": str(
+                r.get("fsn") or r.get("fully_specified_name") or ""
+            ),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
 # --- rxnorm_lookup via OMOPHub (HTTP) --------------------------------------
 
 
@@ -524,6 +573,85 @@ def rxnorm_lookup(drug_name: str, max_results: int = 5) -> dict[str, Any]:
             "name": str(r.get("name") or r.get("concept_name") or ""),
             "tty": str(r.get("tty") or r.get("term_type") or ""),
             "vocabulary": str(r.get("vocabulary") or "RxNorm"),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+# --- code_map via OMOPHub (HTTP) -------------------------------------------
+
+
+def code_map(
+    *,
+    source_vocabulary: str,
+    source_code: str,
+    target_vocabulary: str,
+    max_results: int = 25,
+) -> dict[str, Any]:
+    """Map a code from one vocabulary to another via OMOPHub.
+
+    Common cross-vocab use cases:
+    - ICD-10 ↔ SNOMED  ("E11.9" → "44054006" Diabetes mellitus type 2)
+    - ICD-10 ↔ RxNorm  (treats-relationship pivot)
+    - LOINC ↔ SNOMED   (specimen / analyte mapping)
+
+    Returns ``{"status": "ok", "results": [{source_code,
+    source_vocabulary, target_code, target_vocabulary, target_name,
+    relationship}, ...]}``. Returns ``unavailable`` when OMOPHUB_MCP_URL
+    is not set or the call fails.
+    """
+    client = _get_mcp_client("omophub", _omophub_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": "OMOPHub MCP not configured (set OMOPHUB_MCP_URL)",
+        }
+    envelope = client.call_tool(
+        "map_code",
+        {
+            "source_vocabulary": source_vocabulary,
+            "source_code": source_code,
+            "target_vocabulary": target_vocabulary,
+            "max_results": max_results,
+        },
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        target_code = str(
+            r.get("target_code")
+            or r.get("target_concept_code")
+            or ""
+        )
+        if not target_code:
+            continue
+        normalized.append({
+            "source_code": str(
+                r.get("source_code")
+                or r.get("source_concept_code")
+                or source_code
+            ),
+            "source_vocabulary": str(
+                r.get("source_vocabulary")
+                or r.get("source_vocabulary_id")
+                or source_vocabulary
+            ),
+            "target_code": target_code,
+            "target_vocabulary": str(
+                r.get("target_vocabulary")
+                or r.get("target_vocabulary_id")
+                or target_vocabulary
+            ),
+            "target_name": str(
+                r.get("target_name") or r.get("target_concept_name") or ""
+            ),
+            "relationship": str(
+                r.get("relationship") or r.get("relationship_id") or ""
+            ),
         })
     return _enforce_size_budget({"status": "ok", "results": normalized})
 
@@ -742,6 +870,67 @@ def icd_lookup(query: str, version: str = "10", max_results: int = 10) -> dict[s
             )),
             "version": str(r.get("version") or version),
             "chapter": str(r.get("chapter") or ""),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+# --- icd_autocode via self-hosted ICD MCP (HTTP) --------------------------
+
+
+def icd_autocode(
+    text: str,
+    version: str = "10",
+    max_results: int = 10,
+) -> dict[str, Any]:
+    """Suggest ICD-10/11 codes for free-text clinical narrative.
+
+    The autocoding tool returns ranked candidates with relevance/confidence
+    scores — useful when the orchestrator needs to translate clinical
+    prose (a problem-list bullet, an admission note phrase) into structured
+    ICD codes for downstream filtering or billing-side reasoning.
+
+    Returns ``{"status": "ok", "results": [{code, title, version,
+    confidence}, ...]}``. ``confidence`` is None when the upstream did
+    not score the candidate. Returns ``unavailable`` when ``ICD_MCP_URL``
+    is not set.
+    """
+    client = _get_mcp_client("icd", _icd_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": "ICD MCP not configured (set ICD_MCP_URL)",
+        }
+    envelope = client.call_tool(
+        "autocode",
+        {"text": text, "version": str(version), "max_results": max_results},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        code = str(r.get("code") or r.get("icd_code") or "")
+        if not code:
+            continue
+        # Confidence/score: keep as float when present; never synthesise.
+        conf = r.get("confidence")
+        if conf is None:
+            conf = r.get("score")
+        if conf is not None:
+            try:
+                conf = float(conf)
+            except (TypeError, ValueError):
+                conf = None
+        normalized.append({
+            "code": code,
+            "title": _truncate_title(str(
+                r.get("title") or r.get("description") or ""
+            )),
+            "version": str(r.get("version") or version),
+            "confidence": conf,
         })
     return _enforce_size_budget({"status": "ok", "results": normalized})
 

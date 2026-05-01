@@ -12,12 +12,15 @@ from __future__ import annotations
 from typing import Any
 
 from src.conversational.health_evidence.tools import (
+    code_map,
+    icd_autocode,
     icd_lookup,
     loinc_reference_range,
     mimic_distribution_lookup,
     openfda_drug_label,
     pubmed_search,
     rxnorm_lookup,
+    snomed_expand_ecl,
     snomed_search,
     trials_search,
 )
@@ -251,15 +254,124 @@ ICD_LOOKUP_TOOL_DEF: dict[str, Any] = {
 }
 
 
+SNOMED_EXPAND_ECL_TOOL_DEF: dict[str, Any] = {
+    "name": "snomed_expand_ecl",
+    "description": (
+        "Expand a SNOMED CT Expression Constraint Language (ECL) expression "
+        "into the set of concepts that satisfy it. Use when you need a "
+        "structured cohort definition rather than free-text search — e.g. "
+        "<<73211009 |Diabetes mellitus| returns Diabetes mellitus and all "
+        "its descendants. Returns {status: 'unavailable'} if Hermes isn't "
+        "installed or the ECL parser rejected the expression."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": (
+                    "ECL expression. Examples: '<<73211009' (descendants + "
+                    "self), '<73211009 AND <<128605003' (intersection)."
+                ),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Concepts to return (default 200, max 1000).",
+                "default": 200,
+                "maximum": 1000,
+            },
+        },
+        "required": ["expression"],
+    },
+}
+
+
+CODE_MAP_TOOL_DEF: dict[str, Any] = {
+    "name": "code_map",
+    "description": (
+        "Map a code from one clinical vocabulary to another via OMOPHub. "
+        "Common pivots: ICD10CM → SNOMED for diagnosis canonicalization; "
+        "ICD10CM → RxNorm via treats-relationship; LOINC → SNOMED for "
+        "specimen-aware lab mapping. Use when grounding spans vocabularies. "
+        "Returns {status: 'unavailable'} if OMOPHUB_MCP_URL is not set."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source_vocabulary": {
+                "type": "string",
+                "description": (
+                    "Source OMOP vocabulary id (e.g. 'ICD10CM', 'SNOMED', "
+                    "'LOINC', 'RxNorm')."
+                ),
+            },
+            "source_code": {
+                "type": "string",
+                "description": "Code to translate (e.g. 'E11.9', '2160-0').",
+            },
+            "target_vocabulary": {
+                "type": "string",
+                "description": (
+                    "Target OMOP vocabulary id you want the code mapped to."
+                ),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Mappings to return (default 25, max 50).",
+                "default": 25,
+                "maximum": 50,
+            },
+        },
+        "required": ["source_vocabulary", "source_code", "target_vocabulary"],
+    },
+}
+
+
+ICD_AUTOCODE_TOOL_DEF: dict[str, Any] = {
+    "name": "icd_autocode",
+    "description": (
+        "Suggest ICD-10 (default) or ICD-11 codes for free-text clinical "
+        "narrative. Returns ranked candidates with confidence scores when "
+        "the upstream provides them. Use to translate prose (admission-note "
+        "phrases, problem-list bullets) into structured codes. Returns "
+        "{status: 'unavailable'} when ICD_MCP_URL is not set."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Clinical text to autocode.",
+            },
+            "version": {
+                "type": "string",
+                "description": "ICD version: '10' (default) or '11'.",
+                "default": "10",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Candidates to return (default 10, max 25).",
+                "default": 10,
+                "maximum": 25,
+            },
+        },
+        "required": ["text"],
+    },
+}
+
+
 ALL_TOOL_DEFS: list[dict[str, Any]] = [
     PUBMED_SEARCH_TOOL_DEF,
     MIMIC_DISTRIBUTION_TOOL_DEF,
     LOINC_REFERENCE_RANGE_TOOL_DEF,
     SNOMED_SEARCH_TOOL_DEF,
+    SNOMED_EXPAND_ECL_TOOL_DEF,
     RXNORM_LOOKUP_TOOL_DEF,
+    CODE_MAP_TOOL_DEF,
     TRIALS_SEARCH_TOOL_DEF,
     OPENFDA_DRUG_LABEL_TOOL_DEF,
     ICD_LOOKUP_TOOL_DEF,
+    ICD_AUTOCODE_TOOL_DEF,
 ]
 
 
@@ -268,10 +380,13 @@ TOOL_DISPATCH: dict[str, Any] = {
     "mimic_distribution_lookup": mimic_distribution_lookup,
     "loinc_reference_range": loinc_reference_range,
     "snomed_search": snomed_search,
+    "snomed_expand_ecl": snomed_expand_ecl,
     "rxnorm_lookup": rxnorm_lookup,
+    "code_map": code_map,
     "trials_search": trials_search,
     "openfda_drug_label": openfda_drug_label,
     "icd_lookup": icd_lookup,
+    "icd_autocode": icd_autocode,
 }
 """Map of tool-name → callable, looked up by ``EvidenceAgent`` when the
 model emits a ``tool_use`` block."""
