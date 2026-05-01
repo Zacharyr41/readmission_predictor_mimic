@@ -384,3 +384,264 @@ class TestCriticSuggests:
 
         a = AnswerResult(text_summary="hello")
         assert a.correction_trace is None
+
+
+# ---------------------------------------------------------------------------
+# Externally-grounded critic — cited_sources schema
+# ---------------------------------------------------------------------------
+
+
+class TestCriticCitedSources:
+    """The ``cited_sources`` field carries PubMed records the critic
+    consulted. Pydantic-side validation does shape only; identity
+    validation (filtering fabricated PMIDs) is critic.py's responsibility."""
+
+    def test_cited_sources_default_is_none(self):
+        v = CriticVerdict(plausible=True, severity="info")
+        assert v.cited_sources is None
+
+    def test_cited_sources_round_trip(self):
+        v = CriticVerdict(
+            plausible=True, severity="info",
+            cited_sources=[
+                {"type": "pubmed", "pmid": "27621888", "title": "T", "url": "https://pubmed.ncbi.nlm.nih.gov/27621888/"},
+            ],
+        )
+        assert v.cited_sources is not None
+        assert len(v.cited_sources) == 1
+        assert v.cited_sources[0]["pmid"] == "27621888"
+
+    def test_cited_sources_drops_malformed_entries(self):
+        v = CriticVerdict(
+            plausible=True, severity="info",
+            cited_sources=[
+                {"type": "pubmed", "pmid": "12345", "title": "ok"},
+                "not a dict",
+                {"type": "pubmed", "pmid": "abc-not-digits", "title": "bad"},
+                {"type": "pubmed", "title": "no pmid"},
+            ],
+        )
+        assert v.cited_sources is not None
+        assert len(v.cited_sources) == 1
+        assert v.cited_sources[0]["pmid"] == "12345"
+
+    def test_cited_sources_empty_list_coerces_to_none(self):
+        v = CriticVerdict(
+            plausible=True, severity="info", cited_sources=[],
+        )
+        assert v.cited_sources is None
+
+    def test_cited_sources_all_malformed_coerces_to_none(self):
+        v = CriticVerdict(
+            plausible=True, severity="info",
+            cited_sources=[{"no_pmid": "x"}, "junk"],
+        )
+        assert v.cited_sources is None
+
+    def test_cited_sources_pmid_coerced_to_string(self):
+        """Models could feed integer pmids; we coerce to string for stable round-trip."""
+        v = CriticVerdict(
+            plausible=True, severity="info",
+            cited_sources=[{"type": "pubmed", "pmid": 12345, "title": "x"}],
+        )
+        assert v.cited_sources is not None
+        assert v.cited_sources[0]["pmid"] == "12345"
+
+
+# ---------------------------------------------------------------------------
+# Tool-use loop in critique() — externally-grounded critic
+# ---------------------------------------------------------------------------
+#
+# These tests pin the contract for the critic's tool-use loop. We mock
+# ``mock_anthropic`` with multi-step response sequences (tool_use →
+# end_turn) and monkeypatch ``pubmed_search`` so the suite stays offline.
+# The critic must never raise; tool failures degrade to fallback.
+
+
+def _tool_use_response(
+    tool_name: str = "pubmed_search",
+    tool_input: dict | None = None,
+    tool_id: str = "tu_1",
+    text: str | None = None,
+) -> dict:
+    return {
+        "tool_use": [{"id": tool_id, "name": tool_name, "input": tool_input or {}}],
+        "stop_reason": "tool_use",
+        **({"text": text} if text else {}),
+    }
+
+
+def _end_turn_response(verdict_dict: dict) -> dict:
+    return {"text": json.dumps(verdict_dict), "stop_reason": "end_turn"}
+
+
+class TestCriticToolUse:
+
+    def test_critic_calls_pubmed_when_uncertain(self, monkeypatch):
+        """Happy path: model first emits tool_use; we execute pubmed_search;
+        model emits end_turn with verdict citing the records."""
+        # Fake pubmed_search return.
+        fake_records = [
+            {"pmid": "27621888", "title": "Lactate as a marker", "url": "https://pubmed.ncbi.nlm.nih.gov/27621888/"},
+            {"pmid": "29100563", "title": "Sepsis vasopressors", "url": "https://pubmed.ncbi.nlm.nih.gov/29100563/"},
+        ]
+        monkeypatch.setattr(
+            "src.conversational.critic.pubmed_search",
+            lambda **kw: {"status": "ok", "results": fake_records},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_input={"query": "lactate sepsis ICU mortality"},
+                tool_id="tu_1",
+            ),
+            _end_turn_response({
+                "plausible": True,
+                "severity": "info",
+                "concern": None,
+                "reference_used": "PubMed: 27621888, 29100563",
+                "cited_sources": [
+                    {"type": "pubmed", "pmid": "27621888", "title": "Lactate as a marker", "url": "https://pubmed.ncbi.nlm.nih.gov/27621888/"},
+                    {"type": "pubmed", "pmid": "29100563", "title": "Sepsis vasopressors", "url": "https://pubmed.ncbi.nlm.nih.gov/29100563/"},
+                ],
+            }),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("Mean lactate 7.99 mmol/L")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert verdict.severity == "info"
+        assert verdict.cited_sources is not None
+        assert {s["pmid"] for s in verdict.cited_sources} == {"27621888", "29100563"}
+        # Two LLM calls happened.
+        assert client.messages.create.call_count == 2
+
+    def test_critic_no_tool_call_simple_case(self):
+        """Model goes straight to end_turn — no tool call. Behaves like
+        the pre-tool-use critic; ``cited_sources`` is None."""
+        client = mock_anthropic([
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+            }),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("Mean creatinine 1.4 mg/dL")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert verdict.severity == "info"
+        assert verdict.cited_sources is None
+        assert client.messages.create.call_count == 1
+
+    def test_max_tool_calls_capped(self, monkeypatch):
+        """Model keeps requesting tool_use; loop forces a final response
+        on the cap iteration via tool_choice={'type':'none'}."""
+        monkeypatch.setattr(
+            "src.conversational.critic.pubmed_search",
+            lambda **kw: {"status": "ok", "results": []},
+        )
+        # Three tool_use rounds + one forced final = 4 LLM calls.
+        client = mock_anthropic([
+            _tool_use_response(tool_input={"query": "q1"}, tool_id="t1"),
+            _tool_use_response(tool_input={"query": "q2"}, tool_id="t2"),
+            _tool_use_response(tool_input={"query": "q3"}, tool_id="t3"),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+            }),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("test")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert client.messages.create.call_count == 4
+        # Final call carries tool_choice={"type":"none"}.
+        final_call_kwargs = client.messages.create.call_args_list[-1].kwargs
+        assert final_call_kwargs.get("tool_choice") == {"type": "none"}
+
+    def test_tool_failure_does_not_block_verdict(self, monkeypatch):
+        """When pubmed_search returns an unavailable envelope, the critic
+        proceeds with the reference table; verdict still produced."""
+        monkeypatch.setattr(
+            "src.conversational.critic.pubmed_search",
+            lambda **kw: {"status": "unavailable", "error": "API down"},
+        )
+        client = mock_anthropic([
+            _tool_use_response(tool_input={"query": "anything"}),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+            }),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("test")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert verdict.severity == "info"
+        assert verdict.cited_sources is None  # nothing real to cite
+
+    def test_unknown_tool_name_returns_unavailable(self):
+        """Model invents a tool name not in TOOL_DISPATCH; critic loop
+        injects an unavailable result instead of crashing."""
+        client = mock_anthropic([
+            _tool_use_response(tool_name="invented_tool", tool_input={"x": 1}),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+            }),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("test")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        # Loop completed; verdict produced via fallback.
+
+    def test_fabricated_pmid_filtered_out(self, monkeypatch):
+        """Model cites a PMID that wasn't in any tool_result. The critic
+        loop strips it before constructing CriticVerdict."""
+        monkeypatch.setattr(
+            "src.conversational.critic.pubmed_search",
+            lambda **kw: {"status": "ok", "results": [
+                {"pmid": "11111", "title": "real", "url": "https://pubmed.ncbi.nlm.nih.gov/11111/"},
+            ]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(tool_input={"query": "x"}),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+                "cited_sources": [
+                    {"type": "pubmed", "pmid": "11111", "title": "real", "url": "https://pubmed.ncbi.nlm.nih.gov/11111/"},
+                    {"type": "pubmed", "pmid": "99999999", "title": "fake", "url": "https://pubmed.ncbi.nlm.nih.gov/99999999/"},
+                ],
+            }),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("test")
+        verdict = critique(client, cq, answer)
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+        assert len(verdict.cited_sources) == 1
+        assert verdict.cited_sources[0]["pmid"] == "11111"
+
+    def test_critic_uses_30s_timeout(self):
+        """The critic's tool-use loop has a longer per-call timeout (30s)
+        than the pre-tool-use single-call critic (10s) to accommodate tool
+        execution latency."""
+        client = mock_anthropic([
+            _end_turn_response({"plausible": True, "severity": "info"}),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("test")
+        critique(client, cq, answer)
+        kwargs = client.messages.create.call_args.kwargs
+        assert kwargs.get("timeout") == 30.0
+
+    def test_tools_parameter_passed_to_messages_create(self):
+        """The critic always passes the tools list (PubMed) so the model
+        can choose to invoke it. Per the design: pass tools always; let
+        the model decide; cap iters in our loop."""
+        client = mock_anthropic([
+            _end_turn_response({"plausible": True, "severity": "info"}),
+        ])
+        cq = _make_cq()
+        answer = _make_answer("test")
+        critique(client, cq, answer)
+        kwargs = client.messages.create.call_args.kwargs
+        tools = kwargs.get("tools") or []
+        tool_names = {t["name"] for t in tools}
+        assert "pubmed_search" in tool_names

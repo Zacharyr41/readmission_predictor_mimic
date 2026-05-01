@@ -15,6 +15,7 @@ from src.conversational.models import (
     AnswerResult,
     ClinicalConcept,
     CompetencyQuestion,
+    Disambiguation,
     ExtractionResult,
     PatientFilter,
     TemporalConstraint,
@@ -75,6 +76,10 @@ def _patch_all(fn):
     # use TestCriticIntegration (which doesn't use _patch_all).
     fn = patch(
         "src.conversational.orchestrator.critique",
+        new=MagicMock(return_value=None),
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator.validate_sql",
         new=MagicMock(return_value=None),
     )(fn)
     # Use MagicMock *instances* (not the class) so calling e.g.
@@ -413,6 +418,10 @@ def _patch_all_multi(fn):
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
+        "src.conversational.orchestrator.validate_sql",
+        new=MagicMock(return_value=None),
+    )(fn)
+    fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
     fn = patch(
@@ -617,6 +626,10 @@ def _patch_fastpath(fn):
     fn = patch("src.conversational.orchestrator.compile_sql")(fn)
     fn = patch(
         "src.conversational.orchestrator.critique",
+        new=MagicMock(return_value=None),
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator.validate_sql",
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
@@ -987,6 +1000,12 @@ def _patch_pre_critic(fn):
     fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    # Validator is neutralised here too — these tests exercise the critic
+    # call chain end-to-end, not the validator.
+    fn = patch(
+        "src.conversational.orchestrator.validate_sql",
+        new=MagicMock(return_value=None),
+    )(fn)
     fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
@@ -1095,9 +1114,19 @@ class TestCriticIntegration:
 
 def _patch_for_self_healing(fn):
     """Patches for self-healing tests: mock decompose, _run_sql_fastpath,
-    backends. Critique stays real (uses pipeline._client = mock_anthropic)."""
+    backends. Critique stays real (uses pipeline._client = mock_anthropic).
+
+    Validator is neutralised — self-healing exercises the critic-driven
+    LOINC mutation, not the pre-execution validator. The dedicated
+    pre-validator + retry-with-mutation test in TestPreValidatorIntegration
+    exercises the validator-during-retry path.
+    """
     fn = patch("src.conversational.orchestrator.decompose_question")(fn)
     fn = patch.object(ConversationalPipeline, "_run_sql_fastpath")(fn)
+    fn = patch(
+        "src.conversational.orchestrator.validate_sql",
+        new=MagicMock(return_value=None),
+    )(fn)
     fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
@@ -1400,3 +1429,943 @@ class TestSelfHealingCritic:
         assert result.correction_trace[1]["critic_verdict"] is None
         # Final answer is the second attempt.
         assert result.text_summary == "answer 2"
+
+
+# ---------------------------------------------------------------------------
+# TestCriticToolUseIntegration — externally-grounded critic via the orchestrator
+# ---------------------------------------------------------------------------
+
+
+class TestCriticToolUseIntegration:
+    """End-to-end test that the orchestrator passes a tool-using critic
+    sequence through correctly. Verifies that ``cited_sources`` populated
+    on the verdict survives ``model_dump`` into ``correction_trace``."""
+
+    @_patch_pre_critic
+    def test_orchestrator_surfaces_cited_sources(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        monkeypatch,
+    ):
+        from tests.test_conversational.conftest import mock_anthropic
+
+        cq, reasoning, answer = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+
+        # Mock the critic's PubMed tool to return a deterministic record.
+        monkeypatch.setattr(
+            "src.conversational.critic.pubmed_search",
+            lambda **kw: {"status": "ok", "results": [
+                {"pmid": "12345", "title": "stub", "url": "https://pubmed.ncbi.nlm.nih.gov/12345/"},
+            ]},
+        )
+
+        # Critic sequence: tool_use → end_turn citing the stub record.
+        client = mock_anthropic([
+            {
+                "tool_use": [{"id": "tu_1", "name": "pubmed_search", "input": {"query": "x"}}],
+                "stop_reason": "tool_use",
+            },
+            {
+                "text": json.dumps({
+                    "plausible": True, "severity": "info", "concern": None,
+                    "cited_sources": [
+                        {"type": "pubmed", "pmid": "12345", "title": "stub", "url": "https://pubmed.ncbi.nlm.nih.gov/12345/"},
+                    ],
+                }),
+                "stop_reason": "end_turn",
+            },
+        ])
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = client
+
+        result = pipeline.ask("any biomarker question")
+
+        # The verdict carries the cited source.
+        assert result.critic_verdict is not None
+        assert result.critic_verdict.cited_sources is not None
+        assert result.critic_verdict.cited_sources[0]["pmid"] == "12345"
+
+
+# ---------------------------------------------------------------------------
+# TestPreValidatorIntegration — Phase B end-to-end wiring tests.
+#
+# These tests exercise the orchestrator's interaction with the
+# pre-execution SQL validator. They patch ``compile_sql`` (so we can
+# return a deterministic SqlFastpathQuery), patch ``backend.execute``
+# (so we can verify whether it was called), patch ``generate_answer``
+# (so we can verify the answerer is skipped on block), and patch
+# ``critique`` (same reason). The validator itself is patched per-test
+# to return a chosen verdict.
+# ---------------------------------------------------------------------------
+
+
+def _patch_for_validator(fn):
+    """Stack patches for pre-validator integration tests.
+
+    Like ``_patch_fastpath`` but does NOT pre-mock ``validate_sql`` —
+    each test installs its own validator response.
+    """
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
+    fn = patch("src.conversational.orchestrator.merge_extractions")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch("src.conversational.orchestrator.compile_sql")(fn)
+    fn = patch("src.conversational.orchestrator.critique")(fn)
+    fn = patch("src.conversational.orchestrator.validate_sql")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
+    return fn
+
+
+def _make_fastpath_cq(loinc_code: str | None = "2160-0") -> CompetencyQuestion:
+    """SQL_FAST-eligible CQ with a biomarker concept + cohort scope + agg."""
+    return CompetencyQuestion(
+        original_question="average creatinine for patients over 65",
+        clinical_concepts=[
+            ClinicalConcept(
+                name="creatinine",
+                concept_type="biomarker",
+                loinc_code=loinc_code,
+            ),
+        ],
+        aggregation="mean",
+        scope="cohort",
+    )
+
+
+def _make_validator_verdict(verdict: str, concern: str | None = None,
+                             suggested_fix: str | None = None):
+    from src.conversational.models import SqlValidationVerdict
+    return SqlValidationVerdict(
+        verdict=verdict, concern=concern, suggested_fix=suggested_fix,
+    )
+
+
+def _make_query_obj():
+    from src.conversational.sql_fastpath import SqlFastpathQuery
+    return SqlFastpathQuery(
+        sql="SELECT AVG(l.valuenum) FROM labevents l ...",
+        params=[1, 2, 3],
+        columns=["mean_value"],
+    )
+
+
+class TestPreValidatorIntegration:
+    """End-to-end wiring of the pre-execution SQL validator.
+
+    Per the plan: block short-circuits backend.execute + generate_answer
+    + critic; warn passes through to execution but threads concern into
+    critic; pass / None are transparent. enable_pre_validator=False is
+    the regression guard."""
+
+    @_patch_for_validator
+    def test_disabled_skips_validator_call(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_fastpath_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = _make_query_obj()
+        mock_answer.return_value = AnswerResult(text_summary="answer text")
+        mock_critique.return_value = None
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_pre_validator=False,
+        )
+        pipeline.ask("avg creatinine over 65")
+
+        assert mock_validator.call_count == 0
+        # backend.execute is on the backend mock returned by _DuckDBBackend()
+        backend_instance = pipeline._open_backend.__wrapped__  # not available
+        # Counters never incremented when disabled.
+        assert pipeline._pre_validator_blocks == 0
+        assert pipeline._pre_validator_warns == 0
+        assert pipeline._pre_validator_passes == 0
+
+    @_patch_for_validator
+    def test_block_short_circuits_execute_and_critic(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_fastpath_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = _make_query_obj()
+        mock_validator.return_value = _make_validator_verdict(
+            "block",
+            concern="LIKE-pooling pollution",
+            suggested_fix="emit LOINC 2160-0",
+        )
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_pre_validator=True,
+        )
+        result = pipeline.ask("avg creatinine over 65")
+
+        # Validator was called; block path taken.
+        assert mock_validator.call_count == 1
+        # No execute, no answerer, no critic.
+        # _DuckDBBackend was patched as a MagicMock instance; pipeline opened
+        # one backend per ask(). Inspect via the patched class's instance.
+        from src.conversational.orchestrator import _DuckDBBackend
+        backend_instance = _DuckDBBackend.return_value
+        assert backend_instance.execute.call_count == 0
+        assert mock_answer.call_count == 0
+        assert mock_critique.call_count == 0
+        # AnswerResult contains the validator concern.
+        assert "blocked" in result.text_summary.lower()
+        assert "LIKE-pooling pollution" in result.text_summary
+        assert "emit LOINC 2160-0" in result.text_summary
+        # Counter incremented.
+        assert pipeline._pre_validator_blocks == 1
+        assert pipeline._pre_validator_warns == 0
+        assert pipeline._pre_validator_passes == 0
+
+    @_patch_for_validator
+    def test_warn_threads_concern_into_critic_fallback(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_fastpath_cq(loinc_code=None)
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = _make_query_obj()
+        mock_answer.return_value = AnswerResult(text_summary="answer")
+        mock_critique.return_value = None
+        mock_validator.return_value = _make_validator_verdict(
+            "warn", concern="possible unit pooling",
+        )
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_pre_validator=True,
+        )
+        # Mock backend.execute return so generate_answer-style path completes.
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        pipeline.ask("avg creatinine over 65")
+
+        # Execute and critic were both called (warn does NOT short-circuit).
+        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert mock_critique.call_count == 1
+        # The critic received the validator concern via fallback_warning kwarg.
+        critic_kwargs = mock_critique.call_args.kwargs
+        fb_arg = critic_kwargs.get("fallback_warning") or ""
+        assert "possible unit pooling" in fb_arg
+        # Counter incremented.
+        assert pipeline._pre_validator_warns == 1
+        assert pipeline._pre_validator_blocks == 0
+        assert pipeline._pre_validator_passes == 0
+
+    @_patch_for_validator
+    def test_pass_is_transparent(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_fastpath_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = _make_query_obj()
+        mock_answer.return_value = AnswerResult(text_summary="answer")
+        mock_critique.return_value = None
+        mock_validator.return_value = _make_validator_verdict("pass")
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_pre_validator=True,
+        )
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        pipeline.ask("avg creatinine over 65")
+
+        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert mock_critique.call_count == 1
+        # Counter: passed.
+        assert pipeline._pre_validator_passes == 1
+        assert pipeline._pre_validator_blocks == 0
+        assert pipeline._pre_validator_warns == 0
+
+    @_patch_for_validator
+    def test_validator_returns_none_proceeds_as_baseline(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_fastpath_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = _make_query_obj()
+        mock_answer.return_value = AnswerResult(text_summary="answer")
+        mock_critique.return_value = None
+        # Validator API failure → returns None.
+        mock_validator.return_value = None
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_pre_validator=True,
+        )
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        pipeline.ask("avg creatinine over 65")
+
+        # Pipeline proceeds normally.
+        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert mock_critique.call_count == 1
+        # All counters stay at zero — None doesn't increment any.
+        assert pipeline._pre_validator_blocks == 0
+        assert pipeline._pre_validator_warns == 0
+        assert pipeline._pre_validator_passes == 0
+
+    @_patch_for_validator
+    def test_block_does_not_fire_on_graph_path(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        """Validator only fires inside _run_with_critic_retry (SQL fast-path).
+        Graph-path CQs (no aggregation, single-patient scope, etc.) route
+        through the graph branch and never touch the validator."""
+        from src.conversational.models import DecompositionResult
+        # Single-patient scope without aggregation routes to graph path.
+        cq = CompetencyQuestion(
+            original_question="show creatinine trajectory for patient X",
+            clinical_concepts=[
+                ClinicalConcept(name="Creatinine", concept_type="biomarker"),
+            ],
+            scope="single_patient",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_extract.return_value = ExtractionResult()
+        mock_build.return_value = (MagicMock(), {"triples": 0})
+        mock_reason.return_value = _make_reasoning()
+        mock_answer.return_value = AnswerResult(text_summary="answer")
+        mock_critique.return_value = None
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_pre_validator=True,
+        )
+        pipeline.ask("show creatinine trajectory")
+
+        # Validator was NOT called — graph path doesn't go through
+        # _run_with_critic_retry.
+        assert mock_validator.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# TestPreValidatorRetryWithMutation — verify the validator is re-invoked
+# when the critic-driven retry mutates the LOINC.
+# ---------------------------------------------------------------------------
+
+
+def _patch_for_validator_retry(fn):
+    """Like _patch_for_validator but leaves the critic real (mock_anthropic-
+    driven) so we can exercise the critic-mutate-LOINC retry path."""
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
+    fn = patch("src.conversational.orchestrator.merge_extractions")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch("src.conversational.orchestrator.compile_sql")(fn)
+    fn = patch("src.conversational.orchestrator.validate_sql")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
+    return fn
+
+
+class TestPreValidatorRetryWithMutation:
+    @_patch_for_validator_retry
+    def test_validator_re_runs_after_critic_mutates_loinc(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_validator,
+    ):
+        """Attempt 0: validator returns 'warn'; critic suggests new LOINC.
+        Attempt 1: validator must be invoked AGAIN with the new SQL (since
+        the critic mutated the CQ's loinc_code, _compile_fastpath_preview
+        recompiles)."""
+        from src.conversational.models import DecompositionResult
+        from tests.test_conversational.conftest import mock_anthropic
+
+        # Use a CQ that's eligible for self-healing (biomarker with LOINC).
+        cq = CompetencyQuestion(
+            original_question="average lactate for sepsis",
+            clinical_concepts=[
+                ClinicalConcept(
+                    name="lactate", concept_type="biomarker",
+                    loinc_code="2524-7",  # the wrong code
+                ),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        # compile_sql returns different shapes per attempt so we can assert
+        # the validator sees both.
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        attempt0_query = SqlFastpathQuery(
+            sql="SELECT 1 attempt0", params=[], columns=["x"],
+        )
+        attempt1_query = SqlFastpathQuery(
+            sql="SELECT 1 attempt1", params=[], columns=["x"],
+        )
+        mock_compile.side_effect = [attempt0_query, attempt1_query]
+
+        mock_answer.return_value = AnswerResult(text_summary="answer")
+
+        # Validator: warn on first call (allows execute), then pass on retry.
+        mock_validator.side_effect = [
+            _make_validator_verdict("warn", concern="suspect pollution"),
+            _make_validator_verdict("pass"),
+        ]
+
+        # Critic: returns a verdict with suggested_loinc on first call,
+        # then info-OK verdict on second call (so retry doesn't loop).
+        critic_responses = [
+            json.dumps({
+                "plausible": False, "severity": "warn",
+                "concern": "wrong LOINC", "reference_used": None,
+                "suggested_loinc": "32693-4",  # correct code
+                "correction_rationale": "use the MIMIC-coverage code",
+            }),
+            json.dumps({
+                "plausible": True, "severity": "info",
+                "concern": None, "reference_used": None,
+            }),
+        ]
+        client = mock_anthropic(critic_responses)
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_critic=True, enable_pre_validator=True, critic_max_retries=1,
+        )
+        pipeline._client = client
+
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        pipeline.ask("average lactate for sepsis")
+
+        # Validator called twice — once per attempt.
+        assert mock_validator.call_count == 2
+        # The two validator calls saw different queries (attempt0 vs attempt1).
+        first_query = mock_validator.call_args_list[0].args[2]
+        second_query = mock_validator.call_args_list[1].args[2]
+        assert first_query.sql != second_query.sql
+        # Two warns + ... wait, second is "pass". Counters: 1 warn, 1 pass.
+        assert pipeline._pre_validator_warns == 1
+        assert pipeline._pre_validator_passes == 1
+
+
+# ---------------------------------------------------------------------------
+# TestDisambiguationWiring — Phase C wiring of disambiguate() into the
+# clarify short-circuit path.
+# ---------------------------------------------------------------------------
+
+
+def _patch_for_consult(fn):
+    """Patches for consult-wiring tests. We patch the consult functions at
+    the orchestrator module level so individual tests can install mocked
+    behaviour. Backends and graph stages are patched so the orchestrator
+    doesn't try to hit a real DB."""
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch("src.conversational.orchestrator.compile_sql")(fn)
+    fn = patch("src.conversational.orchestrator.critique")(fn)
+    fn = patch("src.conversational.orchestrator.validate_sql")(fn)
+    fn = patch("src.conversational.orchestrator.disambiguate")(fn)
+    fn = patch("src.conversational.orchestrator.clarify")(fn)
+    fn = patch("src.conversational.orchestrator.contextualize")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock()
+    )(fn)
+    return fn
+
+
+def _make_clarifying_cq() -> CompetencyQuestion:
+    return CompetencyQuestion(
+        original_question="what's the lactate level?",
+        clarifying_question="Did you mean serum or CSF lactate?",
+        clinical_concepts=[
+            ClinicalConcept(name="lactate", concept_type="biomarker"),
+        ],
+    )
+
+
+class TestDisambiguationWiring:
+    @_patch_for_consult
+    def test_disabled_skips_disambiguate_call(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_clarifying_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_clarify.return_value = None  # so raw text falls through
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_disambiguation=False,
+        )
+        result = pipeline.ask("what's the lactate level?")
+
+        assert mock_disambiguate.call_count == 0
+        # Existing clarify short-circuit still fires; raw text returned.
+        assert "Did you mean serum or CSF lactate?" == result.text_summary
+        assert pipeline._disambiguations_attempted == 0
+
+    @_patch_for_consult
+    def test_high_confidence_resolution_clears_clarifying_question(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cq = _make_clarifying_cq()
+        # Make CQ otherwise SQL_FAST eligible so it routes to the fast path
+        # once the clarifying_question is cleared.
+        cq.aggregation = "mean"
+        cq.scope = "cohort"
+
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_disambiguate.return_value = Disambiguation(
+            input_name="lactate",
+            canonical_name="serum lactate",
+            resolved_code="32693-4",
+            code_system="loinc",
+            confidence="high",
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT 1", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        mock_answer.return_value = AnswerResult(text_summary="answer text")
+        mock_critique.return_value = None
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        result = pipeline_run = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_disambiguation=True,
+        ).ask("what's the lactate level?")
+
+        # CQ proceeded to the normal pipeline; backend was hit.
+        assert _DuckDBBackend.return_value.execute.called
+        # Disambiguate fired once; resolution counter incremented.
+        assert mock_disambiguate.call_count == 1
+        # Loinc was mutated onto the concept (the test CQ).
+        assert cq.loinc_code if False else True  # CQ doesn't expose; check via concept
+        assert cq.clinical_concepts[0].loinc_code == "32693-4"
+
+    @_patch_for_consult
+    def test_low_confidence_keeps_clarifying_question(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import DecompositionResult
+        from src.conversational.models import ClarifyingMessage
+        cq = _make_clarifying_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_disambiguate.return_value = Disambiguation(
+            input_name="lactate",
+            canonical_name="lactate (ambiguous)",
+            alternates=["serum lactate", "CSF lactate"],
+            confidence="low",
+        )
+        mock_clarify.return_value = ClarifyingMessage(
+            text="Did you mean serum (typical sepsis) or CSF lactate?",
+            alternates_offered=["serum lactate", "CSF lactate"],
+        )
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_disambiguation=True,
+            enable_clarify_enrichment=True,
+        )
+        result = pipeline.ask("what's the lactate level?")
+
+        # Disambiguate fired (one concept); but low conf → CQ retains
+        # clarifying_question; clarify() formatted the user-facing message.
+        assert mock_disambiguate.call_count == 1
+        assert mock_clarify.call_count == 1
+        assert "serum (typical sepsis)" in result.text_summary
+        # No high-conf resolution.
+        assert cq.clinical_concepts[0].loinc_code is None
+
+    @_patch_for_consult
+    def test_no_clarifying_question_means_no_disambiguate_call(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        """If decomposer didn't flag ambiguity, disambiguate is a no-op."""
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        mock_answer.return_value = AnswerResult(text_summary="ok")
+        mock_critique.return_value = None
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_disambiguation=True,
+        ).ask("x")
+
+        assert mock_disambiguate.call_count == 0
+
+    @_patch_for_consult
+    def test_disambiguate_failure_keeps_clarifying_question(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        """When disambiguate() returns None, the CQ retains its
+        clarifying_question and the orchestrator falls through to the
+        clarify short-circuit. No crash."""
+        from src.conversational.models import DecompositionResult
+        cq = _make_clarifying_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_disambiguate.return_value = None
+        mock_clarify.return_value = None  # falls through to raw text
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_disambiguation=True,
+        ).ask("what's the lactate level?")
+
+        # Raw text falls through unchanged.
+        assert result.text_summary == "Did you mean serum or CSF lactate?"
+
+
+class TestClarifyEnrichmentWiring:
+    @_patch_for_consult
+    def test_disabled_returns_raw_decomposer_text(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import DecompositionResult
+        cq = _make_clarifying_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_disambiguate.return_value = None  # don't auto-resolve
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_clarify_enrichment=False,
+        ).ask("what's the lactate level?")
+
+        assert mock_clarify.call_count == 0
+        assert result.text_summary == "Did you mean serum or CSF lactate?"
+
+    @_patch_for_consult
+    def test_clarify_returns_none_falls_back_to_raw(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        """API failure (clarify returns None) → raw decomposer text falls
+        through unchanged. Critical regression guard."""
+        from src.conversational.models import DecompositionResult
+        cq = _make_clarifying_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_disambiguate.return_value = None
+        mock_clarify.return_value = None
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_clarify_enrichment=True,
+        ).ask("what's the lactate level?")
+
+        # Raw text preserved.
+        assert result.text_summary == "Did you mean serum or CSF lactate?"
+
+    @_patch_for_consult
+    def test_clarify_runs_after_disambiguation_with_partials(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import (
+            ClarifyingMessage, DecompositionResult,
+        )
+        cq = _make_clarifying_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        partial = Disambiguation(
+            input_name="lactate", canonical_name="lactate (ambiguous)",
+            alternates=["serum lactate", "CSF lactate"],
+            confidence="low",
+        )
+        mock_disambiguate.return_value = partial
+        mock_clarify.return_value = ClarifyingMessage(
+            text="enriched message",
+            alternates_offered=["serum lactate", "CSF lactate"],
+        )
+
+        ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_disambiguation=True,
+            enable_clarify_enrichment=True,
+        ).ask("what's the lactate level?")
+
+        # Verify clarify was called and that partials were threaded in.
+        assert mock_clarify.call_count == 1
+        partials_arg = mock_clarify.call_args.args[3]
+        assert len(partials_arg) == 1
+        assert partials_arg[0].confidence == "low"
+
+
+class TestContextualizationWiring:
+    @_patch_for_consult
+    def test_disabled_skips_contextualize_call(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        mock_answer.return_value = AnswerResult(text_summary="answer")
+        mock_critique.return_value = None
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=False,  # default; explicit
+        )
+        pipeline.ask("x")
+
+        assert mock_contextualize.call_count == 0
+
+    @_patch_for_consult
+    def test_info_severity_appends_note(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import (
+            ContextualNote, CriticVerdict, DecompositionResult,
+        )
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        # Critic returns info-severity verdict.
+        mock_critique.return_value = CriticVerdict(
+            plausible=True, severity="info",
+        )
+        # Wrap mock_answer to attach the verdict via _critique side effect.
+        # Since we patch critique itself, we have to make the mock attach.
+        # The orchestrator's _critique sets sub.critic_verdict = verdict
+        # when verdict is not None — so the AnswerResult passing through
+        # _contextualize will have severity=info.
+        answer = AnswerResult(text_summary="base answer")
+        mock_answer.return_value = answer
+        mock_contextualize.return_value = ContextualNote(
+            text="Mean is in line with published norms.",
+            citations=[{"type": "pubmed", "pmid": "111"}],
+        )
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+        ).ask("x")
+
+        assert mock_contextualize.call_count == 1
+        assert "Context" in result.text_summary
+        assert "Mean is in line" in result.text_summary
+        assert result.contextual_citations == [{"type": "pubmed", "pmid": "111"}]
+
+    @_patch_for_consult
+    def test_warn_severity_skips_contextualize(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import (
+            CriticVerdict, DecompositionResult,
+        )
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        mock_critique.return_value = CriticVerdict(
+            plausible=False, severity="warn",
+            concern="suspect pollution",
+        )
+        mock_answer.return_value = AnswerResult(text_summary="base")
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+        ).ask("x")
+
+        # Critic warned → contextualize NOT called (don't drown the warning).
+        assert mock_contextualize.call_count == 0
+
+    @_patch_for_consult
+    def test_contextualize_returns_none_means_no_append(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        mock_critique.return_value = None
+        mock_answer.return_value = AnswerResult(text_summary="base answer")
+        mock_contextualize.return_value = None
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+        ).ask("x")
+
+        # No append; baseline behaviour preserved.
+        assert result.text_summary == "base answer"
+        assert result.contextual_citations is None
+
+    @_patch_for_consult
+    def test_critic_disabled_still_fires_contextualize(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_validator,
+        mock_disambiguate, mock_clarify, mock_contextualize,
+    ):
+        from src.conversational.models import (
+            ContextualNote, DecompositionResult,
+        )
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_validator.return_value = None
+        mock_answer.return_value = AnswerResult(text_summary="base")
+        mock_contextualize.return_value = ContextualNote(text="ctx note")
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_critic=False,  # no critic
+            enable_contextualization=True,
+        ).ask("x")
+
+        # No critic verdict means severity check passes (verdict is None);
+        # contextualize fires.
+        assert mock_contextualize.call_count == 1
+

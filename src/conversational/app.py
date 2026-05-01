@@ -270,6 +270,20 @@ def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
             with st.expander("Reviewer notes"):
                 st.caption(verdict.concern)
 
+        # Externally-grounded citations: surfaced when the critic invoked
+        # pubmed_search (or other future tools) to reach its verdict.
+        # Renders below the severity banner so the user can audit the
+        # evidence the critic relied on.
+        if verdict.cited_sources:
+            with st.expander(
+                f"📚 Sources cited by reviewer ({len(verdict.cited_sources)})",
+                expanded=False,
+            ):
+                for src in verdict.cited_sources:
+                    title = src.get("title") or src.get("pmid") or "(untitled)"
+                    url = src.get("url") or "#"
+                    st.markdown(f"- [{title}]({url})")
+
     if answer.data_table:
         st.dataframe(pd.DataFrame(answer.data_table))
 

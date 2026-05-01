@@ -313,6 +313,13 @@ class CriticVerdict(BaseModel):
     # critic response never crashes a turn.
     suggested_loinc: str | None = None
     correction_rationale: str | None = None
+    # Externally-grounded evidence: when the critic invokes ``pubmed_search``
+    # (or other future tools), it can cite the records it consulted. Each
+    # entry: ``{"type": "pubmed", "pmid": str, "title": str, "url": str}``.
+    # The validator does shape-only checks (drops malformed entries); the
+    # critic loop is responsible for filtering against actually-observed
+    # PMIDs to prevent the model from fabricating citations.
+    cited_sources: list[dict] | None = None
 
     @field_validator("suggested_loinc", mode="before")
     @classmethod
@@ -322,6 +329,108 @@ class CriticVerdict(BaseModel):
         if not isinstance(v, str) or not _LOINC_PATTERN.match(v):
             return None
         return v
+
+    @field_validator("cited_sources", mode="before")
+    @classmethod
+    def _validate_cited_sources_shape(cls, v):
+        """Drop malformed entries; coerce empty list to None.
+
+        Accepts entries that are dicts with a string-coercible ``pmid``
+        consisting of digits. Other entries are silently dropped. If the
+        list ends up empty after filtering, returns None to keep the
+        no-citations state distinguishable from the empty-list state."""
+        if v is None or v == "":
+            return None
+        if not isinstance(v, list):
+            return None
+        cleaned: list[dict] = []
+        for item in v:
+            if not isinstance(item, dict):
+                continue
+            pmid = item.get("pmid")
+            if pmid is None:
+                continue
+            pmid_str = str(pmid)
+            if not pmid_str.isdigit():
+                continue
+            cleaned.append({**item, "pmid": pmid_str})
+        return cleaned or None
+
+
+class SqlValidationVerdict(BaseModel):
+    """Output of the pre-execution SQL validator (`src/conversational/sql_validator.py`).
+
+    The validator is an LLM judge that runs AFTER ``compile_sql`` and BEFORE
+    ``backend.execute`` so confidently-broken SQL can be blocked before
+    BigQuery cost is paid. Verdict semantics:
+
+    - ``pass``: the SQL is logically consistent with the CompetencyQuestion;
+      proceed to execution as usual.
+    - ``warn``: the SQL has a soft concern (e.g. unit-pooling on a LIKE-
+      fallback) that the post-execution critic should also weigh; the
+      orchestrator threads ``concern`` into the critic's ``fallback_warning``.
+    - ``block``: the SQL is high-confidence broken (e.g. aggregating the
+      wrong column, referencing an unjoined table); the orchestrator
+      short-circuits — no execute, no answerer, no critic.
+
+    The validator NEVER blocks a LIKE-fallback path even on suspected unit
+    pooling — that case is escalated to the critic's self-healing retry,
+    which can mutate the LOINC code. Blocking would remove that path.
+    """
+
+    verdict: Literal["pass", "warn", "block"]
+    concern: str | None = None
+    suggested_fix: str | None = None
+    reference_used: str | None = None
+    raw_response: str | None = None  # truncated; debug-only
+
+
+class Disambiguation(BaseModel):
+    """Output of :func:`clinical_consult.disambiguate`.
+
+    The disambiguator takes an ambiguous concept name (e.g. "lactate") and
+    consults literature/registry tools to decide whether it can be
+    canonicalized. ``confidence="high"`` is what allows the orchestrator to
+    drop the decomposer's clarifying_question and proceed with the resolved
+    code; ``"medium"``/``"low"`` flow to the clarify-enrichment path so
+    the user still sees the alternates.
+    """
+
+    input_name: str
+    canonical_name: str
+    alternates: list[str] = []
+    resolved_code: str | None = None
+    code_system: Literal["loinc", "snomed", "rxnorm"] | None = None
+    confidence: Literal["low", "medium", "high"]
+    reasoning: str | None = None
+    citations: list[dict] | None = None
+
+
+class ClarifyingMessage(BaseModel):
+    """Output of :func:`clinical_consult.clarify`.
+
+    Replaces the decomposer's raw ``clarifying_question`` with a
+    literature-grounded message. ``alternates_offered`` lists the
+    candidates surfaced to the user; ``citations`` carries the evidence
+    used to draft the message (anti-hallucination filtered upstream).
+    """
+
+    text: str
+    alternates_offered: list[str] = []
+    citations: list[dict] | None = None
+
+
+class ContextualNote(BaseModel):
+    """Output of :func:`clinical_consult.contextualize`.
+
+    Appended to a successful answer's ``text_summary`` (with citations
+    surfaced separately on ``AnswerResult.contextual_citations``) when
+    the contextualization flag is enabled and the critic's verdict is
+    "info"-or-absent. Never used to override a critic warning.
+    """
+
+    text: str
+    citations: list[dict] | None = None
 
 
 class AnswerResult(BaseModel):
@@ -354,6 +463,11 @@ class AnswerResult(BaseModel):
     # ``loinc_used`` (str|None), ``text_summary`` (str), ``fallback_warning``
     # (str|None), ``critic_verdict`` (dict|None).
     correction_trace: list[dict] | None = None
+    # Phase C: contextual citations carry the literature/registry refs that
+    # informed an appended ``ContextualNote``. None when contextualization
+    # is disabled or didn't fire. Same shape as ``CriticVerdict.cited_sources``
+    # so UI rendering can be shared.
+    contextual_citations: list[dict] | None = None
 
 
 class DecompositionResult(BaseModel):

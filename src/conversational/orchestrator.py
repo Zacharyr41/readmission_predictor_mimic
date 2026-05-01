@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.conversational.answerer import generate_answer
+from src.conversational.clinical_consult import (
+    clarify,
+    contextualize,
+    disambiguate,
+)
 from src.conversational.concept_resolver import ConceptResolver
 from src.conversational.critic import critique
 from src.conversational.decomposer import decompose_question
@@ -35,6 +40,7 @@ from src.conversational.operations import get_default_registry
 from src.conversational.planner import QueryPlan, QueryPlanner
 from src.conversational.reasoner import reason
 from src.conversational.sql_fastpath import compile_sql
+from src.conversational.sql_validator import validate_sql
 
 if TYPE_CHECKING:
     import anthropic
@@ -57,6 +63,11 @@ class ConversationalPipeline:
         max_workers: int = 1,
         enable_critic: bool = True,
         critic_max_retries: int = 1,
+        enable_pre_validator: bool = True,
+        pre_validator_timeout: float = 12.0,
+        enable_disambiguation: bool = True,
+        enable_clarify_enrichment: bool = True,
+        enable_contextualization: bool = False,
     ) -> None:
         import anthropic as _anthropic
 
@@ -75,6 +86,34 @@ class ConversationalPipeline:
         # without unbounded latency. Configurable for tests that exercise
         # multi-retry behavior or boundary conditions.
         self._critic_max_retries = critic_max_retries
+        # Pre-execution SQL validator (Phase B). Default-ON in production;
+        # tests opt out via ``enable_pre_validator=False`` to avoid prepending
+        # a validator response to every mock_anthropic list. Counters track
+        # validator outcomes for cost telemetry.
+        self._enable_pre_validator = enable_pre_validator
+        self._pre_validator_timeout = pre_validator_timeout
+        self._pre_validator_blocks: int = 0
+        self._pre_validator_warns: int = 0
+        self._pre_validator_passes: int = 0
+        # Phase C: clinical-consult flags + counters. Disambiguation and
+        # clarify-enrichment are default-ON because they only fire on
+        # already-ambiguous turns (the decomposer flagged them) and the
+        # clarify path doesn't touch BigQuery, so the cost ceiling is
+        # one extra LLM call per ambiguous concept. Contextualization is
+        # default-OFF — pure UX additive feature, opting in is a deliberate
+        # cost choice.
+        self._enable_disambiguation = enable_disambiguation
+        self._enable_clarify_enrichment = enable_clarify_enrichment
+        self._enable_contextualization = enable_contextualization
+        self._disambiguations_attempted: int = 0
+        self._disambiguations_resolved: int = 0
+        self._clarify_enrichments: int = 0
+        self._contextualizations: int = 0
+        # Per-turn cache: maps a CQ identity (id() at decomp time) to the
+        # list of partial Disambiguation objects produced for it. The
+        # clarify short-circuit reads this so it can pass partials to the
+        # clarify() formatter. Reset at the top of each ask().
+        self._last_disambiguations: dict[int, list] = {}
         repo_root = Path(__file__).parent.parent.parent
         # Phase 5: wire SNOMED hierarchy if the cached JSON is present.
         # The SnomedHierarchy class itself degrades gracefully on missing
@@ -124,6 +163,14 @@ class ConversationalPipeline:
                 conversation_history=list(self.conversation_history) or None,
             )
 
+            # Phase C: literature-based disambiguation BEFORE the existing
+            # clarify short-circuit. CQs whose ambiguity resolves with high
+            # confidence get their clarifying_question cleared and their
+            # concept codes mutated, then proceed to the normal pipeline.
+            self._last_disambiguations = {}
+            if self._enable_disambiguation:
+                self._try_disambiguate(decomp, original_question=question)
+
             # Clarify short-circuit: any sub-CQ with a non-empty
             # clarifying_question wins; the whole turn becomes a clarify.
             clarifying_cq = next(
@@ -134,10 +181,25 @@ class ConversationalPipeline:
                 None,
             )
             if clarifying_cq is not None:
+                raw_text = clarifying_cq.clarifying_question
+                final_text = raw_text
+                # Phase C: clarify-enrichment formats a literature-grounded
+                # message. On any failure (None) we fall through to the raw
+                # decomposer text — perfect-fidelity regression guard.
+                if self._enable_clarify_enrichment:
+                    partials = self._last_disambiguations.get(
+                        id(clarifying_cq), [],
+                    )
+                    msg = clarify(
+                        self._client, question, raw_text, partials,
+                    )
+                    if msg is not None and msg.text:
+                        self._clarify_enrichments += 1
+                        final_text = msg.text
                 answer = AnswerResult(
-                    text_summary=clarifying_cq.clarifying_question,
+                    text_summary=final_text,
                     interpretation_summary=clarifying_cq.interpretation_summary,
-                    clarifying_question=clarifying_cq.clarifying_question,
+                    clarifying_question=final_text,
                 )
                 # Record the first CQ in history so conversation context is preserved.
                 self._remember(decomp.competency_questions[0], answer)
@@ -177,6 +239,7 @@ class ConversationalPipeline:
                         )
                         # ``interpretation_summary`` and ``critic_verdict`` are
                         # already attached inside ``_run_with_critic_retry``.
+                        sub = self._contextualize(sub, cq)
                         sub_answers[idx] = sub
                         fastpath_sparql.extend(sql_used)  # stash for aggregation
                     elif plan == QueryPlan.CAUSAL:
@@ -189,6 +252,7 @@ class ConversationalPipeline:
                         sub = self._run_causal(cq)
                         sub.interpretation_summary = cq.interpretation_summary
                         sub = self._critique(sub, cq)
+                        sub = self._contextualize(sub, cq)
                         sub_answers[idx] = sub
                     elif plan == QueryPlan.SIMILARITY:
                         # Phase 9: standalone similarity ranking. The
@@ -203,6 +267,7 @@ class ConversationalPipeline:
                         sub = self._run_similarity(cq, backend)
                         sub.interpretation_summary = cq.interpretation_summary
                         sub = self._critique(sub, cq)
+                        sub = self._contextualize(sub, cq)
                         sub_answers[idx] = sub
                     else:
                         graph_cqs.append((idx, cq))
@@ -238,6 +303,7 @@ class ConversationalPipeline:
                         )
                         sub.interpretation_summary = cq.interpretation_summary
                         sub = self._critique(sub, cq)
+                        sub = self._contextualize(sub, cq)
                         sub_answers[idx] = sub
 
             # All slots filled now (planner produces exactly one plan per CQ).
@@ -285,6 +351,63 @@ class ConversationalPipeline:
         finally:
             backend.close()
 
+    def _try_disambiguate(
+        self,
+        decomp,
+        *,
+        original_question: str,
+    ) -> None:
+        """For each CQ with a clarifying_question, attempt literature-based
+        disambiguation of its clinical_concepts.
+
+        Side effects:
+          * Mutates concepts in place — when a concept's disambiguation is
+            high-confidence and produces a resolved code, the matching
+            ontology field on the concept is set and ``resolved_from_category``
+            is marked True.
+          * Clears ``cq.clarifying_question`` when ALL of the CQ's concepts
+            disambiguate with high confidence — letting the pipeline proceed
+            without a user round-trip.
+          * Records the per-CQ Disambiguation list under
+            ``self._last_disambiguations`` keyed by ``id(cq)`` so the clarify
+            short-circuit can pass partials to ``clarify()``.
+
+        Never raises — every disambiguate() call has its own failure
+        handling, returning None on any error; we treat None as
+        "couldn't resolve" without crashing the pipeline.
+        """
+        for cq in decomp.competency_questions:
+            if not (cq.clarifying_question and cq.clarifying_question.strip()):
+                continue
+            if not cq.clinical_concepts:
+                continue
+            per_cq: list = []
+            all_high = True
+            for concept in cq.clinical_concepts:
+                self._disambiguations_attempted += 1
+                d = disambiguate(
+                    self._client, concept,
+                    original_question=original_question,
+                )
+                if d is None:
+                    all_high = False
+                    continue
+                per_cq.append(d)
+                if d.confidence == "high" and d.resolved_code:
+                    # Mutate the concept with the resolved code on the right
+                    # ontology field. Only LOINC is wired into the SQL fast
+                    # path today; other code systems get parked on the
+                    # concept for downstream use but do NOT change routing.
+                    if d.code_system == "loinc":
+                        concept.loinc_code = d.resolved_code
+                    concept.resolved_from_category = True
+                else:
+                    all_high = False
+            if all_high and per_cq:
+                self._disambiguations_resolved += 1
+                cq.clarifying_question = None
+            self._last_disambiguations[id(cq)] = per_cq
+
     def _critique(
         self,
         sub: AnswerResult,
@@ -304,6 +427,36 @@ class ConversationalPipeline:
         verdict = critique(self._client, cq, sub, fallback_warning=fallback_warning)
         if verdict is not None:
             sub.critic_verdict = verdict
+        return sub
+
+    def _contextualize(
+        self,
+        sub: AnswerResult,
+        cq: CompetencyQuestion,
+    ) -> AnswerResult:
+        """Optionally append a literature-grounded context note to the answer.
+
+        Only fires when ``enable_contextualization`` is True AND the critic
+        verdict is None (no critic ran) OR severity == "info" (no warning
+        to surface). Never overrides a critic warn/block — the critic's
+        concern is more important to the user than a literature note.
+
+        On any failure (contextualize() returns None), the answer is
+        returned unchanged. Pure additive feature.
+        """
+        if not self._enable_contextualization:
+            return sub
+        v = sub.critic_verdict
+        if v is not None and v.severity != "info":
+            return sub  # don't drown a warn/block with a literature note
+        note = contextualize(self._client, sub, cq)
+        if note is None:
+            return sub
+        self._contextualizations += 1
+        sep = "\n\n— Context —\n"
+        sub.text_summary = (sub.text_summary or "") + sep + note.text
+        if note.citations:
+            sub.contextual_citations = list(note.citations)
         return sub
 
     def _should_retry(
@@ -376,16 +529,84 @@ class ConversationalPipeline:
                 cq.clinical_concepts[0].loinc_code
                 if cq.clinical_concepts else None
             )
+
+            # Pre-execution validation (Phase B). Compile the SQL once,
+            # ask the validator whether to proceed, then reuse the
+            # compiled query for execution to avoid double-compile.
+            validator_verdict = None
+            preview_query = None
+            preview_itemids: list[int] | None = None
+            preview_fb: str | None = None
+            if self._enable_pre_validator:
+                preview_query, preview_itemids, preview_fb = (
+                    self._compile_fastpath_preview(
+                        cq, backend, resolved_names=resolved_names,
+                    )
+                )
+                if preview_query is not None:
+                    validator_verdict = validate_sql(
+                        self._client, cq, preview_query,
+                        fallback_warning=preview_fb,
+                        resolved_itemids=preview_itemids,
+                        timeout=self._pre_validator_timeout,
+                    )
+
+            # Block path: short-circuit. No execute / answer / critic.
+            if validator_verdict is not None and validator_verdict.verdict == "block":
+                self._pre_validator_blocks += 1
+                sub = AnswerResult(
+                    text_summary=_format_validator_block_message(
+                        validator_verdict,
+                    ),
+                )
+                sub.interpretation_summary = cq.interpretation_summary
+                fb = preview_fb
+                sql_used = [preview_query.sql] if preview_query is not None else []
+                trace.append({
+                    "attempt": attempt,
+                    "loinc_used": loinc_used,
+                    "text_summary": sub.text_summary,
+                    "fallback_warning": fb,
+                    "blocked_pre_execution": True,
+                    "validator_concern": validator_verdict.concern,
+                    "validator_reference": validator_verdict.reference_used,
+                    "critic_verdict": None,
+                })
+                break  # do not retry on block
+
+            # Execute + answer (existing path, possibly mocked in tests).
+            # Reuse the pre-compiled query when available to avoid
+            # recompiling. When the validator path was skipped (or
+            # compilation failed), _run_sql_fastpath compiles internally.
             sub, sql_used, fb = self._run_sql_fastpath(
                 cq, backend, resolved_names=resolved_names,
+                precompiled_query=preview_query,
+                precompiled_fallback_warning=preview_fb,
             )
             sub.interpretation_summary = cq.interpretation_summary
-            sub = self._critique(sub, cq, fallback_warning=fb)
+
+            # Thread a warn verdict into the critic's fallback_warning so
+            # the critic knows about the pre-flight concern.
+            critic_fb = fb
+            if validator_verdict is not None and validator_verdict.verdict == "warn":
+                self._pre_validator_warns += 1
+                note = (
+                    f"pre-execution validator warned: {validator_verdict.concern}"
+                )
+                critic_fb = (fb + "\n" + note) if fb else note
+            elif validator_verdict is not None and validator_verdict.verdict == "pass":
+                self._pre_validator_passes += 1
+
+            sub = self._critique(sub, cq, fallback_warning=critic_fb)
             trace.append({
                 "attempt": attempt,
                 "loinc_used": loinc_used,
                 "text_summary": sub.text_summary,
                 "fallback_warning": fb,
+                "validator_verdict": (
+                    validator_verdict.verdict
+                    if validator_verdict is not None else None
+                ),
                 "critic_verdict": (
                     sub.critic_verdict.model_dump()
                     if sub.critic_verdict is not None else None
@@ -406,12 +627,53 @@ class ConversationalPipeline:
             sub.correction_trace = trace
         return sub, sql_used, fb
 
+    def _compile_fastpath_preview(
+        self,
+        cq: CompetencyQuestion,
+        backend,
+        *,
+        resolved_names: list[str],
+    ):
+        """Compile the SQL fast-path query for pre-execution validation.
+
+        Mirrors the resolution/compile steps that ``_run_sql_fastpath``
+        runs internally, returning ``(query, resolved_itemids,
+        fallback_warning)``. Returns ``(None, None, None)`` if compilation
+        raises — in that case the validator is skipped and the orchestrator
+        proceeds; the underlying error will surface from ``_run_sql_fastpath``
+        when called.
+        """
+        try:
+            resolved_itemids: list[int] | None = None
+            fallback_warning: str | None = None
+            if cq.clinical_concepts:
+                concept = cq.clinical_concepts[0]
+                if concept.concept_type == "biomarker" and concept.loinc_code:
+                    biom = self._resolver.resolve_biomarker(concept)
+                    resolved_itemids = biom.itemids
+                    fallback_warning = biom.fallback_reason
+
+            query = compile_sql(
+                cq, backend, self._registry,
+                resolved_names=resolved_names,
+                resolved_itemids=resolved_itemids,
+            )
+            return query, resolved_itemids, fallback_warning
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "pre-validator preview compile failed; skipping validation: %s",
+                exc,
+            )
+            return None, None, None
+
     def _run_sql_fastpath(
         self,
         cq: CompetencyQuestion,
         backend,
         *,
         resolved_names: list[str],
+        precompiled_query=None,
+        precompiled_fallback_warning: str | None = None,
     ) -> tuple[AnswerResult, list[str], str | None]:
         """Compile and execute a SQL fast-path CQ; wrap in AnswerResult.
 
@@ -431,21 +693,31 @@ class ConversationalPipeline:
         back to LIKE and surface a visible warning to the user via
         ``AnswerResult.text_summary`` AND to the critic via the third
         return value.
-        """
-        resolved_itemids: list[int] | None = None
-        fallback_warning: str | None = None
-        if cq.clinical_concepts:
-            concept = cq.clinical_concepts[0]
-            if concept.concept_type == "biomarker" and concept.loinc_code:
-                biom = self._resolver.resolve_biomarker(concept)
-                resolved_itemids = biom.itemids
-                fallback_warning = biom.fallback_reason
 
-        query = compile_sql(
-            cq, backend, self._registry,
-            resolved_names=resolved_names,
-            resolved_itemids=resolved_itemids,
-        )
+        ``precompiled_query`` / ``precompiled_fallback_warning`` are an
+        optimization seam used by ``_run_with_critic_retry``: when the
+        pre-validator already compiled the query for its preview, we pass
+        the result through to avoid recompiling. When None (the legacy
+        external-caller path), this method does its own compile.
+        """
+        if precompiled_query is None:
+            resolved_itemids: list[int] | None = None
+            fallback_warning: str | None = None
+            if cq.clinical_concepts:
+                concept = cq.clinical_concepts[0]
+                if concept.concept_type == "biomarker" and concept.loinc_code:
+                    biom = self._resolver.resolve_biomarker(concept)
+                    resolved_itemids = biom.itemids
+                    fallback_warning = biom.fallback_reason
+
+            query = compile_sql(
+                cq, backend, self._registry,
+                resolved_names=resolved_names,
+                resolved_itemids=resolved_itemids,
+            )
+        else:
+            query = precompiled_query
+            fallback_warning = precompiled_fallback_warning
         raw_rows = backend.execute(query.sql, query.params)
         rows = [dict(zip(query.columns, r)) for r in raw_rows]
         answer = generate_answer(
@@ -590,6 +862,22 @@ class ConversationalPipeline:
     def reset(self) -> None:
         """Clear conversation history."""
         self.conversation_history.clear()
+
+
+def _format_validator_block_message(verdict) -> str:
+    """User-facing text when the pre-execution validator blocks a query.
+
+    The text explains why the query was not run, which gives the user a
+    concrete next step (rephrase, supply a more specific concept, etc.).
+    """
+    parts = [
+        "Query was blocked by the pre-execution validator before running.",
+    ]
+    if verdict.concern:
+        parts.append(f"\nReason: {verdict.concern}")
+    if verdict.suggested_fix:
+        parts.append(f"\nSuggested correction: {verdict.suggested_fix}")
+    return "\n".join(parts)
 
 
 def create_pipeline_from_settings() -> ConversationalPipeline:

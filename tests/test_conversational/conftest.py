@@ -52,35 +52,78 @@ MALFORMED_JSON_DIR = FIXTURES_DIR / "malformed_json"
 # ---------------------------------------------------------------------------
 
 
-def mock_anthropic(responses: list[str]) -> MagicMock:
-    """Return a ``MagicMock`` client that yields each response text in turn.
+def mock_anthropic(responses: list) -> MagicMock:
+    """Return a ``MagicMock`` client that yields each response in turn.
 
     The mock mimics ``anthropic.Anthropic``: ``client.messages.create(...)``
-    returns an object whose ``content[0].text`` is the next string in
-    ``responses``. A test can inspect ``client.messages.create.call_args_list``
-    to verify retry behaviour (message roles, counts, etc.) without matching
+    returns the next prebuilt response object. A test can inspect
+    ``client.messages.create.call_args_list`` to verify multi-call
+    behaviour (retry sequences, tool-use loops, etc.) without matching
     exact prompt substrings.
 
-    Parameters
-    ----------
-    responses:
-        Strings to return in order, one per ``messages.create`` call.
+    Each item in ``responses`` is one of:
+
+    * ``str`` (legacy): treated as ``{"text": <str>, "stop_reason":
+      "end_turn"}``. The response carries a single text content block;
+      ``response.content[0].text`` is the string. ``stop_reason`` is set
+      explicitly to ``"end_turn"`` so tool-use loops correctly identify
+      the final turn (without this, MagicMock's default ``.stop_reason``
+      is itself a MagicMock and never equals ``"end_turn"``).
+    * ``dict`` with ``{"text": str, "stop_reason": "end_turn"}``: same
+      as the legacy str shape, just explicit. Optionally also carries
+      ``"tool_use": [...]`` for mixed-content responses.
+    * ``dict`` with ``{"tool_use": [{"id", "name", "input"}, ...],
+      "stop_reason": "tool_use"}``: the model wants to call tools.
+      Each tool_use block becomes a content block with ``.type ==
+      "tool_use"``, ``.id``, ``.name``, ``.input``. Optional
+      ``"text"`` adds a leading text block (e.g. model's reasoning).
 
     Raises
     ------
     StopIteration (via MagicMock side_effect) if the code under test makes
-    more calls than there are responses — callers expecting a single call
-    should pass a single-element list and the mock will raise if a second
-    call is made.
+    more calls than there are responses.
     """
     client = MagicMock()
-    response_objects = []
-    for text in responses:
-        resp = MagicMock()
-        resp.content = [MagicMock(text=text)]
-        response_objects.append(resp)
+    response_objects = [_build_response(item) for item in responses]
     client.messages.create.side_effect = response_objects
     return client
+
+
+def _build_response(item) -> MagicMock:
+    """Build one response MagicMock from a list-item spec.
+
+    See ``mock_anthropic`` docstring for accepted shapes.
+    """
+    resp = MagicMock()
+    if isinstance(item, str):
+        # Legacy: text-only response, end_turn.
+        text_block = MagicMock(type="text", text=item)
+        resp.content = [text_block]
+        resp.stop_reason = "end_turn"
+        return resp
+    if not isinstance(item, dict):
+        raise TypeError(
+            f"mock_anthropic items must be str or dict; got {type(item).__name__}"
+        )
+    blocks = []
+    text = item.get("text")
+    if text is not None:
+        text_block = MagicMock(type="text")
+        text_block.text = text
+        blocks.append(text_block)
+    for tu in item.get("tool_use", []) or []:
+        # NOTE: ``MagicMock(name=...)`` is a footgun — ``name`` is the
+        # mock's *display* name for repr, not a regular attribute. Set
+        # ``.name`` explicitly after construction so ``getattr(block,
+        # "name")`` returns the tool name string.
+        block = MagicMock(type="tool_use")
+        block.id = tu.get("id", "tu_anonymous")
+        block.name = tu["name"]
+        block.input = tu.get("input", {})
+        blocks.append(block)
+    resp.content = blocks
+    resp.stop_reason = item.get("stop_reason", "end_turn")
+    return resp
 
 
 # ---------------------------------------------------------------------------

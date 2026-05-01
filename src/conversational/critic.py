@@ -14,6 +14,11 @@ on any failure (API error, timeout, malformed JSON, schema validation
 error) it returns ``None`` so the answer still renders. The orchestrator
 guards against missing verdicts by checking for ``None`` before attaching.
 
+Architecture: this module is a thin client over
+:class:`src.conversational.health_evidence.EvidenceAgent`. The agent owns
+the tool-use loop, citation tracking, and graceful failure; this module
+owns the critic-specific prompt assembly and verdict parsing.
+
 Model: Sonnet 4.6 (judgement quality matters; Haiku rejected). Prompt
 caching ON for the system block since the failure-mode taxonomy and
 reference ranges are stable across turns.
@@ -23,12 +28,19 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import sys
 from typing import Any
 
 import anthropic
 from pydantic import ValidationError
 
+# Public alias kept at the module top so existing tests that monkeypatch
+# ``src.conversational.critic.pubmed_search`` continue to work — the
+# dispatch built below resolves the tool name through this module's
+# globals at call time.
+from src.conversational.health_evidence import EvidenceAgent
+from src.conversational.health_evidence.tool_defs import PUBMED_SEARCH_TOOL_DEF
+from src.conversational.health_evidence.tools import pubmed_search  # noqa: F401  (test monkeypatch hook)
 from src.conversational.models import (
     AnswerResult,
     CompetencyQuestion,
@@ -39,14 +51,34 @@ from src.conversational.prompts import CRITIC_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
-# Sonnet 4.6 is the right tier for clinical-judgment tasks. The answerer and
-# decomposer use a stale Sonnet model name (``claude-sonnet-4-20250514``);
-# that's a separate follow-up — leave the critic on the current Sonnet.
+# Sonnet 4.6 is the right tier for clinical-judgment tasks.
 _CRITIC_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 600
-_DEFAULT_TIMEOUT_SECONDS = 10.0
+_DEFAULT_TIMEOUT_SECONDS = 30.0
 _MAX_DATA_TABLE_ROWS = 10
 _RAW_RESPONSE_TRUNCATE = 500
+# Hard cap on tool-use iterations per critique. Same as before refactor.
+_MAX_TOOL_ITERATIONS = 3
+
+
+def _critic_tool_dispatch() -> dict[str, Any]:
+    """Build a per-call tool_dispatch that resolves names through THIS
+    module's globals.
+
+    This preserves the existing test pattern: tests monkeypatch
+    ``src.conversational.critic.pubmed_search`` to inject canned tool
+    responses. The lambda looks up ``pubmed_search`` in the module dict
+    at *call* time, so the patch takes effect even though the function
+    object was imported at module load.
+
+    Without this indirection, the EvidenceAgent's default ``TOOL_DISPATCH``
+    captures the unpatched function reference at import time and the
+    monkeypatch would silently no-op.
+    """
+    module_dict = sys.modules[__name__].__dict__
+    return {
+        "pubmed_search": lambda **kw: module_dict["pubmed_search"](**kw),
+    }
 
 
 def critique(
@@ -82,29 +114,33 @@ def critique(
     """
     try:
         user_message = _build_user_message(cq, answer, fallback_warning)
-        response = client.messages.create(
+        agent = EvidenceAgent(
+            client,
             model=_CRITIC_MODEL,
             max_tokens=_MAX_TOKENS,
+            max_iterations=_MAX_TOOL_ITERATIONS,
             timeout=timeout,
-            system=[
-                {
-                    "type": "text",
-                    "text": CRITIC_SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                },
-            ],
-            messages=[{"role": "user", "content": user_message}],
+            tools=[PUBMED_SEARCH_TOOL_DEF],
+            tool_dispatch=_critic_tool_dispatch(),
         )
-        text = response.content[0].text
-        parsed = _extract_json(text)
-        if parsed is None:
+        result = agent.consult(CRITIC_SYSTEM_PROMPT, user_message)
+
+        if result.parsed_json is None:
             logger.warning(
                 "critic returned non-JSON response (truncated): %s",
-                text[:_RAW_RESPONSE_TRUNCATE],
+                (result.final_text or "")[:_RAW_RESPONSE_TRUNCATE],
             )
             return None
+
+        parsed = dict(result.parsed_json)
+        parsed["cited_sources"] = result.filter_claimed_citations(
+            parsed.get("cited_sources"),
+        )
         try:
-            verdict = CriticVerdict(**parsed, raw_response=text[:_RAW_RESPONSE_TRUNCATE])
+            verdict = CriticVerdict(
+                **parsed,
+                raw_response=result.final_text[:_RAW_RESPONSE_TRUNCATE],
+            )
         except ValidationError as exc:
             logger.warning(
                 "critic response failed schema validation: %s; payload=%r",
@@ -112,6 +148,7 @@ def critique(
             )
             return None
         return verdict
+
     except Exception as exc:  # noqa: BLE001 — never block answer rendering
         logger.warning(
             "critic call failed; falling through with no verdict: %s (%s)",
@@ -161,29 +198,3 @@ def _build_user_message(
         "Respond with the JSON verdict object only, per the output schema."
     )
     return "\n\n".join(parts)
-
-
-def _extract_json(text: str) -> dict[str, Any] | None:
-    """Pull the first JSON object out of an LLM response.
-
-    Mirrors the regex pattern in ``answerer._extract_json`` (lines 102-114)
-    but kept local to avoid circular imports. Tries fenced ```json blocks
-    first, then a bare object match.
-    """
-    # Fenced code block
-    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if fenced:
-        candidate = fenced.group(1).strip()
-    else:
-        # Bare object — find the first balanced { ... }
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            return None
-        candidate = match.group(0)
-    try:
-        result = json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(result, dict):
-        return None
-    return result
