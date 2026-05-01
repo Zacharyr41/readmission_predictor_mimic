@@ -383,6 +383,12 @@ class SqlValidationVerdict(BaseModel):
     suggested_fix: str | None = None
     reference_used: str | None = None
     raw_response: str | None = None  # truncated; debug-only
+    # Phase E (deterministic validator): when the validator runs the BigQuery
+    # dry-run, populate the cost-tracking fields. None on the v1 LLM-judge
+    # code path (which doesn't know byte counts) or when the validator
+    # didn't reach the dry_run stage.
+    bytes_processed: int | None = None
+    estimated_usd: float | None = None
 
 
 class Disambiguation(BaseModel):
@@ -431,6 +437,53 @@ class ContextualNote(BaseModel):
 
     text: str
     citations: list[dict] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Phase F: source-of-truth sub-agent output schema.
+#
+# Mirrors the JSON shape from the user's research:
+# {"query": "...", "answer_summary": "≤3 sentences",
+#  "findings": [{"claim": "...", "evidence": [...],
+#                "confidence": "high|medium|low",
+#                "status": "verified|unverified|conflicting"}],
+#  "unresolved": [...],
+#  "tools_called": [{"name": "...", "count": int}]}
+# ---------------------------------------------------------------------------
+
+
+class Evidence(BaseModel):
+    """One piece of evidence backing a HealthFinding claim."""
+
+    source: Literal["pubmed", "snomed", "rxnorm", "loinc", "mimic_distribution",
+                    "openfda", "clinicaltrials", "icd"]
+    id: str
+    tool: str | None = None
+    snippet: str | None = None
+
+
+class HealthFinding(BaseModel):
+    """One claim + its supporting evidence and confidence."""
+
+    claim: str
+    evidence: list[Evidence] = []
+    confidence: Literal["low", "medium", "high"]
+    status: Literal["verified", "unverified", "conflicting"]
+
+
+class HealthAnswer(BaseModel):
+    """Full output of :class:`HealthSourceOfTruthAgent.consult`.
+
+    The orchestrator (or any caller) consumes this when it needs
+    cross-MCP biomedical grounding. ``answer_summary`` is for surfacing
+    to the user; ``findings`` carries the structured per-claim evidence
+    for citation rendering or downstream reasoning."""
+
+    query: str
+    answer_summary: str
+    findings: list[HealthFinding] = []
+    unresolved: list[str] = []
+    tools_called: list[dict] = []  # [{"name": str, "count": int, "status": str}]
 
 
 class AnswerResult(BaseModel):

@@ -96,6 +96,10 @@ class _DuckDBBackend:
     def execute(self, sql: str, params: list) -> list[tuple]:
         return self._cursor().execute(sql, params).fetchall()
 
+    def execute_tolerant(self, sql: str, params: list) -> list[tuple]:
+        """No validator on DuckDB (local; no cost). Passthrough to execute()."""
+        return self.execute(sql, params)
+
     @staticmethod
     def ilike(column: str) -> str:
         """Case-insensitive LIKE expression (DuckDB supports ILIKE)."""
@@ -137,22 +141,94 @@ class _DuckDBBackend:
         self._conn.close()
 
 
-class _BigQueryBackend:
-    """Queries physionet-data MIMIC-IV datasets on BigQuery directly."""
+class ValidatorBlockedQueryError(Exception):
+    """Raised by ``_BigQueryBackend.execute`` when the injected pre-execution
+    validator returns a ``block`` verdict.
 
-    def __init__(self, project: str | None = None) -> None:
+    The orchestrator (or extraction wrappers) catch this and convert it
+    into a structured warning on the AnswerResult — the goal is to skip
+    the BigQuery scan without crashing the turn.
+    """
+
+    def __init__(self, verdict, sql: str = "") -> None:
+        self.verdict = verdict
+        self.sql = sql
+        super().__init__(
+            f"pre-execution validator blocked query: {getattr(verdict, 'concern', '?')}"
+        )
+
+
+class _BigQueryBackend:
+    """Queries physionet-data MIMIC-IV datasets on BigQuery directly.
+
+    Phase E hardening:
+    - Optional ``validator`` callable runs before every ``execute()``;
+      blocks raise ``ValidatorBlockedQueryError``. The orchestrator
+      injects ``validate_sql_deterministic`` bound to the bq-validator
+      MCP client.
+    - ``maximum_bytes_billed`` kill-switch is set on every job config
+      (defaults to 10 GiB) — fails the query at no charge if exceeded.
+      Belt-and-suspenders for the case where the validator misjudges.
+    """
+
+    DEFAULT_MAX_BYTES_BILLED = 10 * 1024**3  # 10 GiB
+
+    def __init__(
+        self,
+        project: str | None = None,
+        *,
+        validator=None,
+        max_bytes_billed: int | None = DEFAULT_MAX_BYTES_BILLED,
+    ) -> None:
         bq = _get_bigquery_module()
         self._client: bigquery.Client = bq.Client(project=project)
         self._bq = bq
+        self._validator = validator
+        self._max_bytes_billed = max_bytes_billed
+        # Per-session log of pre-execution blocks. The orchestrator drains
+        # this after extraction to surface a structured warning to the user.
+        self.blocked_queries: list[dict] = []
 
     def table(self, name: str) -> str:
         return f"`{_BQ_TABLES[name]}`"
 
     def execute(self, sql: str, params: list) -> list[tuple]:
+        if self._validator is not None:
+            try:
+                verdict = self._validator(sql, params)
+            except Exception:  # noqa: BLE001
+                # Validator infrastructure failure: log and proceed.
+                # Cost-of-validation insurance.
+                verdict = None
+            if verdict is not None and getattr(verdict, "verdict", None) == "block":
+                raise ValidatorBlockedQueryError(verdict, sql=sql)
         bq_sql, bq_params = self._convert_params(sql, params)
-        config = self._bq.QueryJobConfig(query_parameters=bq_params)
+        config = self._bq.QueryJobConfig(
+            query_parameters=bq_params,
+            maximum_bytes_billed=self._max_bytes_billed,
+        )
         rows = self._client.query(bq_sql, job_config=config).result()
         return [tuple(row.values()) for row in rows]
+
+    def execute_tolerant(self, sql: str, params: list) -> list[tuple]:
+        """Like ``execute`` but on a pre-execution block, log to
+        ``blocked_queries`` and return ``[]`` instead of raising.
+
+        Used by extractor.py call sites where a single blocked extraction
+        step should not abort the entire turn — the caller continues with
+        an empty data slice and the orchestrator surfaces a structured
+        warning."""
+        try:
+            return self.execute(sql, params)
+        except ValidatorBlockedQueryError as exc:
+            self.blocked_queries.append({
+                "sql_preview": sql[:200],
+                "concern": getattr(exc.verdict, "concern", None),
+                "stage": getattr(exc.verdict, "reference_used", None),
+                "estimated_usd": getattr(exc.verdict, "estimated_usd", None),
+                "bytes_processed": getattr(exc.verdict, "bytes_processed", None),
+            })
+            return []
 
     @staticmethod
     def ilike(column: str) -> str:
@@ -482,7 +558,7 @@ def _get_filtered_hadm_ids(
         f" FROM {t('admissions')} a {join_sql}{where_clause}"
     )
     sql = f"SELECT hadm_id FROM ({inner}) sub ORDER BY {order}"
-    return [r[0] for r in backend.execute(sql, frag.params)]
+    return [r[0] for r in backend.execute_tolerant(sql, frag.params)]
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +699,7 @@ def _extract_biomarkers(
         "label", "fluid", "category", "valuenum", "valueuom",
         "ref_range_lower", "ref_range_upper",
     ]
-    return [dict(zip(cols, r)) for r in backend.execute(
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(
         sql, [f"%{name}%"] + params + attr_params,
     )]
 
@@ -652,7 +728,7 @@ def _extract_vitals(
         "stay_id", "subject_id", "hadm_id", "itemid",
         "charttime", "label", "category", "valuenum",
     ]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, [f"%{name}%"] + params)]
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, [f"%{name}%"] + params)]
 
 
 def _extract_drugs(
@@ -677,7 +753,7 @@ def _extract_drugs(
         "hadm_id", "subject_id", "drug", "starttime",
         "stoptime", "dose_val_rx", "dose_unit_rx", "route",
     ]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, [f"%{name}%"] + params)]
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, [f"%{name}%"] + params)]
 
 
 def _extract_diagnoses(
@@ -704,7 +780,7 @@ def _extract_diagnoses(
     ]
     return [
         dict(zip(cols, r))
-        for r in backend.execute(sql, [f"%{name}%", f"{name}%"] + params)
+        for r in backend.execute_tolerant(sql, [f"%{name}%", f"{name}%"] + params)
     ]
 
 
@@ -732,7 +808,7 @@ def _extract_microbiology(
     ]
     return [
         dict(zip(cols, r))
-        for r in backend.execute(sql, [f"%{name}%", f"%{name}%"] + params)
+        for r in backend.execute_tolerant(sql, [f"%{name}%", f"%{name}%"] + params)
     ]
 
 
@@ -754,7 +830,7 @@ def _fetch_patients(
         ORDER BY p.subject_id
     """
     cols = ["subject_id", "gender", "anchor_age"]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, params)]
 
 
 def _fetch_admissions(
@@ -780,7 +856,7 @@ def _fetch_admissions(
         "admission_type", "discharge_location", "hospital_expire_flag",
         "readmitted_30d", "readmitted_60d",
     ]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, params)]
 
 
 def _fetch_icu_stays(
@@ -795,4 +871,4 @@ def _fetch_icu_stays(
         ORDER BY intime
     """
     cols = ["stay_id", "hadm_id", "subject_id", "intime", "outtime", "los"]
-    return [dict(zip(cols, r)) for r in backend.execute(sql, params)]
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, params)]

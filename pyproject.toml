@@ -49,6 +49,15 @@ conversational = [
     "anthropic>=0.39",
     "streamlit>=1.40",
     "plotly>=5.0",
+    # Phase D/E/F (v2 MCP integration + deterministic SQL validator):
+    # mcp Python SDK for stdio + HTTP MCP clients; sqlglot for SQL static
+    # analysis; fastmcp for the bq-validator MCP server. All three are
+    # required for the bq-validator path; mcp + sqlglot are required at
+    # client time. fastmcp is only needed when running the local stdio
+    # server.
+    "mcp>=1.0",
+    "sqlglot>=25.0",
+    "fastmcp>=0.2",
 ]
 # Phase 8 causal-inference pipeline. Deps are lazy-imported by the
 # estimator + survival modules; the base install stays slim. Install

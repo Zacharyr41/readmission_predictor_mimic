@@ -102,12 +102,109 @@ def _enforce_size_budget(payload: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# pubmed_search: NCBI E-utilities wrapper (moved verbatim from critic_tools.py)
+# pubmed_search: 3-backend dispatch
 # ---------------------------------------------------------------------------
 
 
+_ANTHROPIC_PUBMED_MCP_URL = "https://pubmed.mcp.claude.com/mcp"
+
+# Lazy-cached MCP clients keyed by backend name. Reused across calls so we
+# don't pay subprocess/HTTP-handshake cost on every PubMed lookup.
+_PUBMED_MCP_CLIENTS: dict[str, Any] = {}
+
+
 def pubmed_search(query: str, max_results: int = 5) -> dict[str, Any]:
-    """Search PubMed via NCBI E-utilities (esearch + esummary).
+    """Search PubMed. Backend selected by ``PUBMED_BACKEND`` env var:
+
+    - ``"direct"`` (default) — calls NCBI E-utilities via ``requests``.
+      No external MCP. PHI-safe (only the query string egresses).
+    - ``"mcp_anthropic"`` — calls Anthropic's hosted PubMed MCP at
+      https://pubmed.mcp.claude.com/mcp via streamable HTTP. PHI-safe
+      (only the query string). NOT ZDR-eligible per Anthropic's
+      Dec 2025 BAA, so do NOT use for any flow that has previously
+      handled MIMIC content in the same conversation.
+    - ``"mcp_self_host"`` — calls a self-hosted PubMed MCP at the URL
+      in ``PUBMED_MCP_URL``. The audit-grade option for production.
+
+    Returns the project's standard envelope on success / failure. Never
+    raises.
+    """
+    backend = os.environ.get("PUBMED_BACKEND", "direct").lower()
+    if backend == "mcp_anthropic":
+        return _pubmed_via_mcp(
+            query, max_results, backend_name="mcp_anthropic",
+            url=_ANTHROPIC_PUBMED_MCP_URL,
+        )
+    if backend == "mcp_self_host":
+        url = os.environ.get("PUBMED_MCP_URL")
+        if not url:
+            return {
+                "status": "unavailable",
+                "error": "PUBMED_BACKEND=mcp_self_host but PUBMED_MCP_URL is unset",
+            }
+        return _pubmed_via_mcp(
+            query, max_results, backend_name="mcp_self_host", url=url,
+        )
+    return _pubmed_direct(query, max_results)
+
+
+def _pubmed_via_mcp(
+    query: str, max_results: int, *, backend_name: str, url: str,
+) -> dict[str, Any]:
+    """Call a remote PubMed MCP server. Lazy-builds the client on first
+    use and caches it for the process lifetime."""
+    try:
+        retmax = max(1, min(int(max_results), _MAX_RESULTS_CEILING))
+    except (TypeError, ValueError):
+        retmax = 5
+
+    client = _PUBMED_MCP_CLIENTS.get(backend_name)
+    if client is None:
+        try:
+            from src.conversational.health_evidence.mcp_client import (
+                McpClient, McpServerConfig,
+            )
+
+            client = McpClient(McpServerConfig(
+                name=backend_name, transport="http", url=url,
+            ))
+            _PUBMED_MCP_CLIENTS[backend_name] = client
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pubmed MCP client init failed: %s", exc)
+            return {"status": "unavailable", "error": str(exc)}
+
+    envelope = client.call_tool(
+        "search",  # Anthropic-hosted PubMed exposes "search" + "fetch"
+        {"query": query, "max_results": retmax},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+
+    # Normalize MCP results into our standard PubMed envelope shape.
+    raw_results = envelope.get("results") or []
+    normalized = []
+    for r in raw_results[:retmax]:
+        if not isinstance(r, dict):
+            continue
+        pmid = str(r.get("pmid") or r.get("id") or "")
+        if not pmid:
+            continue
+        normalized.append({
+            "pmid": pmid,
+            "title": _truncate_title(str(r.get("title") or "")),
+            "source": str(r.get("source") or r.get("journal") or ""),
+            "pubdate": str(r.get("pubdate") or r.get("date") or ""),
+            "url": str(
+                r.get("url")
+                or f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+            ),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+def _pubmed_direct(query: str, max_results: int = 5) -> dict[str, Any]:
+    """Direct NCBI E-utilities backend (the v1 implementation).
 
     Returns ``{"status": "ok", "results": [{pmid, title, source, pubdate, url}, ...]}``
     on success, ``{"status": "unavailable", "error": str}`` on any failure.

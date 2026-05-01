@@ -38,9 +38,18 @@ from src.conversational.models import (
 )
 from src.conversational.operations import get_default_registry
 from src.conversational.planner import QueryPlan, QueryPlanner
+from src.conversational.health_evidence.mcp_client import (
+    McpClient,
+    McpServerConfig,
+)
+from src.conversational.health_evidence.sub_agent import (
+    HealthSourceOfTruthAgent,
+)
 from src.conversational.reasoner import reason
 from src.conversational.sql_fastpath import compile_sql
-from src.conversational.sql_validator import validate_sql
+from src.conversational.sql_validator_dry_run import (
+    validate_sql_deterministic,
+)
 
 if TYPE_CHECKING:
     import anthropic
@@ -64,10 +73,14 @@ class ConversationalPipeline:
         enable_critic: bool = True,
         critic_max_retries: int = 1,
         enable_pre_validator: bool = True,
-        pre_validator_timeout: float = 12.0,
+        pre_validator_timeout: float = 5.0,
+        pre_validator_max_usd: float = 0.50,
+        pre_validator_max_bytes: int = 10 * 1024**3,
+        bq_validator_mcp_config: McpServerConfig | None = None,
         enable_disambiguation: bool = True,
         enable_clarify_enrichment: bool = True,
         enable_contextualization: bool = False,
+        enable_sub_agent_in_contextualize: bool = False,
     ) -> None:
         import anthropic as _anthropic
 
@@ -86,15 +99,23 @@ class ConversationalPipeline:
         # without unbounded latency. Configurable for tests that exercise
         # multi-retry behavior or boundary conditions.
         self._critic_max_retries = critic_max_retries
-        # Pre-execution SQL validator (Phase B). Default-ON in production;
-        # tests opt out via ``enable_pre_validator=False`` to avoid prepending
-        # a validator response to every mock_anthropic list. Counters track
-        # validator outcomes for cost telemetry.
+        # Pre-execution SQL validator (Phase B → E: now deterministic via
+        # the bq-validator MCP, replacing the v1 LLM judge). Default-ON in
+        # production; tests opt out via ``enable_pre_validator=False`` to
+        # avoid spawning the MCP subprocess. Counters track outcomes for
+        # cost telemetry.
         self._enable_pre_validator = enable_pre_validator
         self._pre_validator_timeout = pre_validator_timeout
+        self._pre_validator_max_usd = pre_validator_max_usd
+        self._pre_validator_max_bytes = pre_validator_max_bytes
+        self._bq_validator_mcp_config = bq_validator_mcp_config
+        self._bq_validator_client: McpClient | None = None
         self._pre_validator_blocks: int = 0
         self._pre_validator_warns: int = 0
         self._pre_validator_passes: int = 0
+        # Phase E: graph-extraction blocks. Drained from
+        # ``backend.blocked_queries`` after each ask().
+        self._extractor_blocks: int = 0
         # Phase C: clinical-consult flags + counters. Disambiguation and
         # clarify-enrichment are default-ON because they only fire on
         # already-ambiguous turns (the decomposer flagged them) and the
@@ -105,10 +126,17 @@ class ConversationalPipeline:
         self._enable_disambiguation = enable_disambiguation
         self._enable_clarify_enrichment = enable_clarify_enrichment
         self._enable_contextualization = enable_contextualization
+        # Phase F: when contextualization is on, optionally route the
+        # literature lookup through the HealthSourceOfTruthAgent sub-agent
+        # for cross-MCP grounding (PubMed + LOINC + MIMIC distribution).
+        # Default OFF — opt-in costs ~2x the LLM calls of plain
+        # contextualize (sub-agent has its own context window).
+        self._enable_sub_agent_in_contextualize = enable_sub_agent_in_contextualize
         self._disambiguations_attempted: int = 0
         self._disambiguations_resolved: int = 0
         self._clarify_enrichments: int = 0
         self._contextualizations: int = 0
+        self._sub_agent_consultations: int = 0
         # Per-turn cache: maps a CQ identity (id() at decomp time) to the
         # list of partial Disambiguation objects produced for it. The
         # clarify short-circuit reads this so it can pass partials to the
@@ -341,15 +369,64 @@ class ConversationalPipeline:
         Used once per ``ask()`` call; both SQL fast-path and graph-path
         extractions share the connection/client to avoid repeated setup
         cost. Close is guaranteed by the contextmanager.
+
+        Phase E: when running against BigQuery with the pre-validator
+        enabled, inject the deterministic validator at the backend
+        boundary. ``execute_tolerant`` (used by all 9 extractor.py call
+        sites) catches block verdicts and logs to ``backend.blocked_queries``
+        so the orchestrator can surface a structured warning.
         """
         if self._data_source == "bigquery":
-            backend = _BigQueryBackend(self._bigquery_project)
+            validator = self._make_extractor_validator()
+            backend = _BigQueryBackend(
+                self._bigquery_project, validator=validator,
+                max_bytes_billed=self._pre_validator_max_bytes,
+            )
         else:
             backend = _DuckDBBackend(self._db_path)
         try:
             yield backend
         finally:
+            try:
+                # Drain extractor blocks into the per-pipeline counter so
+                # the chat UI / telemetry can see them later.
+                self._extractor_blocks += len(
+                    getattr(backend, "blocked_queries", []) or []
+                )
+            except Exception:  # noqa: BLE001
+                pass
             backend.close()
+
+    def _make_extractor_validator(self):
+        """Build the validator callable injected into ``_BigQueryBackend``.
+
+        Returns ``None`` when the pre-validator is disabled OR the MCP
+        client is unavailable. The backend handles ``None`` cleanly
+        (skips validation).
+        """
+        if not self._enable_pre_validator:
+            return None
+        client = self._get_bq_validator_client()
+        if client is None:
+            return None
+        max_usd = self._pre_validator_max_usd
+        max_bytes = self._pre_validator_max_bytes
+        timeout = self._pre_validator_timeout
+
+        def validator(sql: str, params: list):
+            from src.conversational.sql_fastpath import SqlFastpathQuery
+
+            wrapped = SqlFastpathQuery(sql=sql, params=list(params), columns=[])
+            return validate_sql_deterministic(
+                wrapped, mcp_client=client,
+                fallback_warning=None,
+                resolved_itemids=[1],  # treat extractor SQL as "grounded";
+                                       # never downgrade to warn on the
+                                       # tolerant extractor path
+                max_usd=max_usd, max_bytes=max_bytes, timeout=timeout,
+            )
+
+        return validator
 
     def _try_disambiguate(
         self,
@@ -441,15 +518,25 @@ class ConversationalPipeline:
         to surface). Never overrides a critic warn/block — the critic's
         concern is more important to the user than a literature note.
 
-        On any failure (contextualize() returns None), the answer is
-        returned unchanged. Pure additive feature.
+        Phase F: when ``enable_sub_agent_in_contextualize`` is True, route
+        the lookup through the HealthSourceOfTruthAgent sub-agent for
+        richer cross-MCP grounding (PubMed + LOINC + MIMIC distribution).
+        Otherwise use the simpler ``clinical_consult.contextualize``
+        EvidenceAgent path.
+
+        On any failure (contextualize() / sub-agent returns None), the
+        answer is returned unchanged. Pure additive feature.
         """
         if not self._enable_contextualization:
             return sub
         v = sub.critic_verdict
         if v is not None and v.severity != "info":
             return sub  # don't drown a warn/block with a literature note
-        note = contextualize(self._client, sub, cq)
+
+        if self._enable_sub_agent_in_contextualize:
+            note = self._contextualize_via_sub_agent(sub, cq)
+        else:
+            note = contextualize(self._client, sub, cq)
         if note is None:
             return sub
         self._contextualizations += 1
@@ -458,6 +545,82 @@ class ConversationalPipeline:
         if note.citations:
             sub.contextual_citations = list(note.citations)
         return sub
+
+    def _contextualize_via_sub_agent(
+        self,
+        sub: AnswerResult,
+        cq: CompetencyQuestion,
+    ):
+        """Use HealthSourceOfTruthAgent for contextualization.
+
+        Returns a ContextualNote (or None) — same contract as
+        ``clinical_consult.contextualize``.
+
+        PHI invariant: only ``cq.original_question`` and the decomposer's
+        ``interpretation_summary`` are forwarded to the sub-agent. The
+        answer's ``data_table`` (which CAN contain MIMIC row data) is
+        NEVER passed. Only the bare ``text_summary`` (which the answerer
+        already sanitised for user display) is passed as a hint string.
+        """
+        from src.conversational.models import ContextualNote
+
+        result = self._consult_health_source_of_truth(
+            question=cq.original_question,
+            context={
+                "interpretation": cq.interpretation_summary,
+                "answer_summary_excerpt": (sub.text_summary or "")[:500],
+            },
+        )
+        if result is None or not result.answer_summary:
+            return None
+        # Map HealthAnswer findings into the ContextualNote.citations
+        # shape (list of dicts mirroring CriticVerdict.cited_sources).
+        citations: list[dict] = []
+        for f in result.findings or []:
+            for ev in f.evidence or []:
+                citations.append({
+                    "type": ev.source,
+                    "id": ev.id,
+                    "tool": ev.tool,
+                })
+        return ContextualNote(
+            text=result.answer_summary,
+            citations=citations or None,
+        )
+
+    def _consult_health_source_of_truth(
+        self,
+        question: str,
+        context: dict | None = None,
+    ):
+        """Delegate a focused biomedical question to the source-of-truth
+        sub-agent. Returns ``HealthAnswer | None``.
+
+        Callers (currently: ``_contextualize_via_sub_agent``; future:
+        critic, disambiguate) use this when they need cross-MCP grounding
+        (PubMed + LOINC + MIMIC distribution + future SNOMED/RxNorm/etc).
+
+        PHI safety: ``question`` and values in ``context`` MUST be PHI-
+        free. The sub-agent NEVER receives data_table, hadm_ids, or
+        subject_ids. The static signature check in
+        ``test_sub_agent.py::TestPhiCompartmentalization`` enforces
+        this at CI time.
+
+        Never raises. Returns ``None`` on any failure. Increments
+        ``self._sub_agent_consultations`` on success.
+        """
+        try:
+            agent = HealthSourceOfTruthAgent(self._client)
+            result = agent.consult(question, context=context)
+            if result is not None:
+                self._sub_agent_consultations += 1
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "_consult_health_source_of_truth failed: %s (%s)",
+                exc, type(exc).__name__,
+            )
+            return None
 
     def _should_retry(
         self,
@@ -544,12 +707,17 @@ class ConversationalPipeline:
                     )
                 )
                 if preview_query is not None:
-                    validator_verdict = validate_sql(
-                        self._client, cq, preview_query,
-                        fallback_warning=preview_fb,
-                        resolved_itemids=preview_itemids,
-                        timeout=self._pre_validator_timeout,
-                    )
+                    client = self._get_bq_validator_client()
+                    if client is not None:
+                        validator_verdict = validate_sql_deterministic(
+                            preview_query,
+                            mcp_client=client,
+                            fallback_warning=preview_fb,
+                            resolved_itemids=preview_itemids,
+                            max_usd=self._pre_validator_max_usd,
+                            max_bytes=self._pre_validator_max_bytes,
+                            timeout=self._pre_validator_timeout,
+                        )
 
             # Block path: short-circuit. No execute / answer / critic.
             if validator_verdict is not None and validator_verdict.verdict == "block":
@@ -858,6 +1026,62 @@ class ConversationalPipeline:
         self.conversation_history.append((cq, answer))
         if len(self.conversation_history) > self.max_history:
             self.conversation_history = self.conversation_history[-self.max_history:]
+
+    def _get_bq_validator_client(self) -> McpClient | None:
+        """Lazy bq-validator MCP client.
+
+        Returns None if no config was supplied AND the default server
+        path is unavailable — the orchestrator gracefully proceeds
+        without validation in that case rather than crashing the turn.
+
+        The client is reused across all calls in this pipeline's lifetime
+        (subprocess respawn cost is high). It's cleaned up via
+        ``ConversationalPipeline.close()`` and the McpClient atexit hook.
+        """
+        if self._bq_validator_client is not None:
+            return self._bq_validator_client
+
+        config = self._bq_validator_mcp_config
+        if config is None:
+            from pathlib import Path
+            import sys
+
+            repo_root = Path(__file__).parent.parent.parent
+            server_path = repo_root / "mcp_servers" / "bq_validator" / "server.py"
+            if not server_path.exists():
+                logger.info(
+                    "bq-validator server not found at %s; skipping validation",
+                    server_path,
+                )
+                return None
+            config = McpServerConfig(
+                name="bq-validator",
+                transport="stdio",
+                command=sys.executable,
+                args=[str(server_path)],
+            )
+
+        try:
+            self._bq_validator_client = McpClient(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to create bq-validator McpClient: %s", exc,
+            )
+            return None
+        return self._bq_validator_client
+
+    def close(self) -> None:
+        """Tear down any owned MCP client connections.
+
+        Safe to call multiple times. Called automatically at process exit
+        via the McpClient atexit hook, but callers may invoke directly
+        for cleaner test isolation."""
+        if self._bq_validator_client is not None:
+            try:
+                self._bq_validator_client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._bq_validator_client = None
 
     def reset(self) -> None:
         """Clear conversation history."""

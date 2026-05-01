@@ -79,7 +79,7 @@ def _patch_all(fn):
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
-        "src.conversational.orchestrator.validate_sql",
+        "src.conversational.orchestrator.validate_sql_deterministic",
         new=MagicMock(return_value=None),
     )(fn)
     # Use MagicMock *instances* (not the class) so calling e.g.
@@ -418,7 +418,7 @@ def _patch_all_multi(fn):
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
-        "src.conversational.orchestrator.validate_sql",
+        "src.conversational.orchestrator.validate_sql_deterministic",
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
@@ -629,7 +629,7 @@ def _patch_fastpath(fn):
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
-        "src.conversational.orchestrator.validate_sql",
+        "src.conversational.orchestrator.validate_sql_deterministic",
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
@@ -1003,7 +1003,7 @@ def _patch_pre_critic(fn):
     # Validator is neutralised here too — these tests exercise the critic
     # call chain end-to-end, not the validator.
     fn = patch(
-        "src.conversational.orchestrator.validate_sql",
+        "src.conversational.orchestrator.validate_sql_deterministic",
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
@@ -1124,7 +1124,7 @@ def _patch_for_self_healing(fn):
     fn = patch("src.conversational.orchestrator.decompose_question")(fn)
     fn = patch.object(ConversationalPipeline, "_run_sql_fastpath")(fn)
     fn = patch(
-        "src.conversational.orchestrator.validate_sql",
+        "src.conversational.orchestrator.validate_sql_deterministic",
         new=MagicMock(return_value=None),
     )(fn)
     fn = patch(
@@ -1518,7 +1518,7 @@ def _patch_for_validator(fn):
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
     fn = patch("src.conversational.orchestrator.compile_sql")(fn)
     fn = patch("src.conversational.orchestrator.critique")(fn)
-    fn = patch("src.conversational.orchestrator.validate_sql")(fn)
+    fn = patch("src.conversational.orchestrator.validate_sql_deterministic")(fn)
     fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
@@ -1789,7 +1789,7 @@ def _patch_for_validator_retry(fn):
     fn = patch("src.conversational.orchestrator.reason")(fn)
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
     fn = patch("src.conversational.orchestrator.compile_sql")(fn)
-    fn = patch("src.conversational.orchestrator.validate_sql")(fn)
+    fn = patch("src.conversational.orchestrator.validate_sql_deterministic")(fn)
     fn = patch(
         "src.conversational.orchestrator._DuckDBBackend", new=MagicMock()
     )(fn)
@@ -1875,12 +1875,245 @@ class TestPreValidatorRetryWithMutation:
         # Validator called twice — once per attempt.
         assert mock_validator.call_count == 2
         # The two validator calls saw different queries (attempt0 vs attempt1).
-        first_query = mock_validator.call_args_list[0].args[2]
-        second_query = mock_validator.call_args_list[1].args[2]
+        # Phase E: validate_sql_deterministic(query, *, mcp_client=, ...) — query
+        # is the first positional arg.
+        first_query = mock_validator.call_args_list[0].args[0]
+        second_query = mock_validator.call_args_list[1].args[0]
         assert first_query.sql != second_query.sql
         # Two warns + ... wait, second is "pass". Counters: 1 warn, 1 pass.
         assert pipeline._pre_validator_warns == 1
         assert pipeline._pre_validator_passes == 1
+
+
+# ---------------------------------------------------------------------------
+# TestSubAgentInContextualize — Phase F3 wiring of the sub-agent into
+# the contextualization path.
+# ---------------------------------------------------------------------------
+
+
+def _patch_for_sub_agent_wiring(fn):
+    fn = patch("src.conversational.orchestrator.decompose_question")(fn)
+    fn = patch("src.conversational.orchestrator._extract")(fn)
+    fn = patch("src.conversational.orchestrator.build_query_graph")(fn)
+    fn = patch("src.conversational.orchestrator.reason")(fn)
+    fn = patch("src.conversational.orchestrator.generate_answer")(fn)
+    fn = patch("src.conversational.orchestrator.compile_sql")(fn)
+    fn = patch("src.conversational.orchestrator.critique")(fn)
+    fn = patch(
+        "src.conversational.orchestrator.validate_sql_deterministic",
+        new=MagicMock(return_value=None),
+    )(fn)
+    fn = patch("src.conversational.orchestrator.disambiguate")(fn)
+    fn = patch("src.conversational.orchestrator.clarify")(fn)
+    fn = patch("src.conversational.orchestrator.contextualize")(fn)
+    fn = patch("src.conversational.orchestrator.HealthSourceOfTruthAgent")(fn)
+    fn = patch(
+        "src.conversational.orchestrator._DuckDBBackend", new=MagicMock(),
+    )(fn)
+    fn = patch(
+        "src.conversational.orchestrator._BigQueryBackend", new=MagicMock(),
+    )(fn)
+    return fn
+
+
+class TestSubAgentInContextualize:
+    @_patch_for_sub_agent_wiring
+    def test_disabled_falls_back_to_simple_contextualize(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_disambiguate, mock_clarify,
+        mock_contextualize, mock_sub_agent_class,
+    ):
+        from src.conversational.models import (
+            ContextualNote, DecompositionResult,
+        )
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_answer.return_value = AnswerResult(text_summary="base")
+        mock_critique.return_value = None
+        mock_contextualize.return_value = ContextualNote(text="simple ctx")
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+            enable_sub_agent_in_contextualize=False,
+        ).ask("x")
+
+        # Simple contextualize was called; sub-agent class never instantiated.
+        assert mock_contextualize.call_count == 1
+        assert mock_sub_agent_class.call_count == 0
+        assert "simple ctx" in result.text_summary
+
+    @_patch_for_sub_agent_wiring
+    def test_enabled_uses_sub_agent_for_contextualize(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_disambiguate, mock_clarify,
+        mock_contextualize, mock_sub_agent_class,
+    ):
+        from src.conversational.models import (
+            DecompositionResult, Evidence, HealthAnswer, HealthFinding,
+        )
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="what is normal creatinine?",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_answer.return_value = AnswerResult(text_summary="mean was 1.2")
+        mock_critique.return_value = None
+        # Configure sub-agent: returns a HealthAnswer.
+        sub_instance = MagicMock()
+        sub_instance.consult.return_value = HealthAnswer(
+            query="what is normal creatinine?",
+            answer_summary="Normal serum creatinine is 0.7-1.3 mg/dL.",
+            findings=[HealthFinding(
+                claim="normal range",
+                evidence=[Evidence(
+                    source="loinc", id="2160-0", tool="loinc_reference_range",
+                )],
+                confidence="high",
+                status="verified",
+            )],
+        )
+        mock_sub_agent_class.return_value = sub_instance
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+            enable_sub_agent_in_contextualize=True,
+        ).ask("what is normal creatinine?")
+
+        # Sub-agent invoked exactly once; simple contextualize NOT used.
+        assert mock_sub_agent_class.call_count == 1
+        sub_instance.consult.assert_called_once()
+        assert mock_contextualize.call_count == 0
+        # The note from the sub-agent's answer_summary made it into the result.
+        assert "0.7-1.3" in result.text_summary
+        # And the LOINC citation was surfaced.
+        assert result.contextual_citations is not None
+        assert any(
+            c.get("id") == "2160-0" for c in result.contextual_citations
+        )
+
+    @_patch_for_sub_agent_wiring
+    def test_sub_agent_never_receives_data_table(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_disambiguate, mock_clarify,
+        mock_contextualize, mock_sub_agent_class,
+    ):
+        """PHI invariant: the sub-agent's consult() call must receive
+        only the question + sanitised context — never the answer's
+        data_table (which can contain MIMIC row data)."""
+        from src.conversational.models import (
+            DecompositionResult, HealthAnswer,
+        )
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        # Answer carries a data_table with PHI-shaped rows.
+        mock_answer.return_value = AnswerResult(
+            text_summary="mean was 1.2",
+            data_table=[
+                {"hadm_id": 12345, "subject_id": 999, "value": 1.2},
+                {"hadm_id": 12346, "subject_id": 998, "value": 1.3},
+            ],
+        )
+        mock_critique.return_value = None
+        sub_instance = MagicMock()
+        sub_instance.consult.return_value = HealthAnswer(
+            query="x", answer_summary="ctx", findings=[],
+        )
+        mock_sub_agent_class.return_value = sub_instance
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+            enable_sub_agent_in_contextualize=True,
+        ).ask("x")
+
+        # Inspect what the sub-agent received.
+        sub_instance.consult.assert_called_once()
+        kwargs = sub_instance.consult.call_args.kwargs
+        # context must be a dict — never carry data_table directly.
+        ctx = kwargs.get("context") or {}
+        assert "data_table" not in ctx
+        assert "rows" not in ctx
+        # And no PHI ID strings should appear in the serialised context.
+        ctx_str = str(ctx)
+        assert "12345" not in ctx_str
+        assert "subject_id" not in ctx_str.lower()
+        assert "hadm_id" not in ctx_str.lower()
+
+    @_patch_for_sub_agent_wiring
+    def test_sub_agent_returning_none_falls_through(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        mock_compile, mock_critique, mock_disambiguate, mock_clarify,
+        mock_contextualize, mock_sub_agent_class,
+    ):
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cq = CompetencyQuestion(
+            original_question="x",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="x", params=[], columns=["x"],
+        )
+        mock_answer.return_value = AnswerResult(text_summary="base")
+        mock_critique.return_value = None
+        sub_instance = MagicMock()
+        sub_instance.consult.return_value = None  # sub-agent failed
+        mock_sub_agent_class.return_value = sub_instance
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        result = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_contextualization=True,
+            enable_sub_agent_in_contextualize=True,
+        ).ask("x")
+
+        # Sub-agent failure → no note appended; baseline text preserved.
+        assert result.text_summary == "base"
+        assert result.contextual_citations is None
 
 
 # ---------------------------------------------------------------------------
@@ -1901,7 +2134,7 @@ def _patch_for_consult(fn):
     fn = patch("src.conversational.orchestrator.generate_answer")(fn)
     fn = patch("src.conversational.orchestrator.compile_sql")(fn)
     fn = patch("src.conversational.orchestrator.critique")(fn)
-    fn = patch("src.conversational.orchestrator.validate_sql")(fn)
+    fn = patch("src.conversational.orchestrator.validate_sql_deterministic")(fn)
     fn = patch("src.conversational.orchestrator.disambiguate")(fn)
     fn = patch("src.conversational.orchestrator.clarify")(fn)
     fn = patch("src.conversational.orchestrator.contextualize")(fn)
