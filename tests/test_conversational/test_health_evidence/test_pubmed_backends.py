@@ -24,7 +24,7 @@ from src.conversational.health_evidence.tools import pubmed_search
 def _clear_pubmed_mcp_cache(monkeypatch):
     """Reset the lazy MCP-client cache between tests so each test sees
     a fresh client and our patches take effect."""
-    monkeypatch.setattr(he_tools, "_PUBMED_MCP_CLIENTS", {})
+    monkeypatch.setattr(he_tools, "_MCP_CLIENTS", {})
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ class TestMcpBackendBehaviour:
             ],
         }
         # Pre-populate the cache with our fake.
-        monkeypatch.setattr(he_tools, "_PUBMED_MCP_CLIENTS", {
+        monkeypatch.setattr(he_tools, "_MCP_CLIENTS", {
             "mcp_anthropic": fake_client,
         })
 
@@ -134,7 +134,7 @@ class TestMcpBackendBehaviour:
             "status": "ok",
             "results": [{"pmid": "67890", "title": "X"}],
         }
-        monkeypatch.setattr(he_tools, "_PUBMED_MCP_CLIENTS", {
+        monkeypatch.setattr(he_tools, "_MCP_CLIENTS", {
             "mcp_anthropic": fake_client,
         })
         result = pubmed_search("x")
@@ -147,7 +147,7 @@ class TestMcpBackendBehaviour:
             "status": "unavailable",
             "error": "MCP server down",
         }
-        monkeypatch.setattr(he_tools, "_PUBMED_MCP_CLIENTS", {
+        monkeypatch.setattr(he_tools, "_MCP_CLIENTS", {
             "mcp_anthropic": fake_client,
         })
         result = pubmed_search("x")
@@ -165,7 +165,7 @@ class TestMcpBackendBehaviour:
                 {"id": "222", "title": "id-shaped"},
             ],
         }
-        monkeypatch.setattr(he_tools, "_PUBMED_MCP_CLIENTS", {
+        monkeypatch.setattr(he_tools, "_MCP_CLIENTS", {
             "mcp_anthropic": fake_client,
         })
         result = pubmed_search("x", max_results=5)
@@ -206,7 +206,7 @@ class TestEnvelopeShapeConsistency:
                 fake_client.call_tool.return_value = {
                     "status": "unavailable", "error": "forced",
                 }
-                monkeypatch.setattr(he_tools, "_PUBMED_MCP_CLIENTS", {
+                monkeypatch.setattr(he_tools, "_MCP_CLIENTS", {
                     backend: fake_client,
                 })
 

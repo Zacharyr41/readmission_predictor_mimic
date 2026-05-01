@@ -25,15 +25,25 @@ from src.conversational.health_evidence.models import (
 )
 from src.conversational.health_evidence.tool_defs import (
     ALL_TOOL_DEFS,
+    ICD_LOOKUP_TOOL_DEF,
     LOINC_REFERENCE_RANGE_TOOL_DEF,
     MIMIC_DISTRIBUTION_TOOL_DEF,
+    OPENFDA_DRUG_LABEL_TOOL_DEF,
     PUBMED_SEARCH_TOOL_DEF,
+    RXNORM_LOOKUP_TOOL_DEF,
+    SNOMED_SEARCH_TOOL_DEF,
     TOOL_DISPATCH,
+    TRIALS_SEARCH_TOOL_DEF,
 )
 from src.conversational.health_evidence.tools import (
+    icd_lookup,
     loinc_reference_range,
     mimic_distribution_lookup,
+    openfda_drug_label,
     pubmed_search,
+    rxnorm_lookup,
+    snomed_search,
+    trials_search,
 )
 
 __all__ = [
@@ -41,12 +51,22 @@ __all__ = [
     "Citation",
     "EvidenceAgent",
     "EvidenceResult",
+    "ICD_LOOKUP_TOOL_DEF",
     "LOINC_REFERENCE_RANGE_TOOL_DEF",
     "MIMIC_DISTRIBUTION_TOOL_DEF",
+    "OPENFDA_DRUG_LABEL_TOOL_DEF",
     "PUBMED_SEARCH_TOOL_DEF",
+    "RXNORM_LOOKUP_TOOL_DEF",
+    "SNOMED_SEARCH_TOOL_DEF",
     "TOOL_DISPATCH",
+    "TRIALS_SEARCH_TOOL_DEF",
     "ToolCall",
+    "icd_lookup",
     "loinc_reference_range",
     "mimic_distribution_lookup",
+    "openfda_drug_label",
     "pubmed_search",
+    "rxnorm_lookup",
+    "snomed_search",
+    "trials_search",
 ]

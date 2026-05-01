@@ -102,15 +102,62 @@ def _enforce_size_budget(payload: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Shared MCP client cache + helper (used by all MCP-backed tools below).
+# ---------------------------------------------------------------------------
+
+
+# Lazy-cached MCP clients keyed by an opaque name. One persistent client
+# per logical server; reused across calls so we don't pay subprocess /
+# HTTP-handshake cost on every lookup. The pubmed backend keeps its own
+# entries here under "pubmed:mcp_anthropic" / "pubmed:mcp_self_host" for
+# the legacy 3-backend dispatch.
+_MCP_CLIENTS: dict[str, Any] = {}
+
+# Backward-compat alias for the original pubmed-only cache. Existing
+# tests in test_pubmed_backends.py monkeypatch this name directly.
+_PUBMED_MCP_CLIENTS = _MCP_CLIENTS
+
+
+def _get_mcp_client(name: str, config_factory):
+    """Lazy-fetch or create-and-cache an MCP client.
+
+    ``config_factory``: zero-arg callable returning either an
+    :class:`McpServerConfig` (caller wants to talk to a real server) or
+    ``None`` (configuration unavailable — e.g., binary not on PATH,
+    required env var missing). When the factory returns None, this
+    function returns None so the calling tool can return a clean
+    ``unavailable`` envelope WITHOUT raising.
+
+    Each tool function should pass a stable ``name`` (e.g. "hermes",
+    "omophub") so subsequent calls reuse the same persistent client.
+    """
+    client = _MCP_CLIENTS.get(name)
+    if client is not None:
+        return client
+    try:
+        config = config_factory()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("MCP config for %s failed: %s", name, exc)
+        return None
+    if config is None:
+        return None
+    try:
+        from src.conversational.health_evidence.mcp_client import McpClient
+
+        client = McpClient(config)
+        _MCP_CLIENTS[name] = client
+        return client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("MCP client init for %s failed: %s", name, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # pubmed_search: 3-backend dispatch
 # ---------------------------------------------------------------------------
 
 
 _ANTHROPIC_PUBMED_MCP_URL = "https://pubmed.mcp.claude.com/mcp"
-
-# Lazy-cached MCP clients keyed by backend name. Reused across calls so we
-# don't pay subprocess/HTTP-handshake cost on every PubMed lookup.
-_PUBMED_MCP_CLIENTS: dict[str, Any] = {}
 
 
 def pubmed_search(query: str, max_results: int = 5) -> dict[str, Any]:
@@ -158,20 +205,17 @@ def _pubmed_via_mcp(
     except (TypeError, ValueError):
         retmax = 5
 
-    client = _PUBMED_MCP_CLIENTS.get(backend_name)
-    if client is None:
-        try:
-            from src.conversational.health_evidence.mcp_client import (
-                McpClient, McpServerConfig,
-            )
+    def _config():
+        from src.conversational.health_evidence.mcp_client import McpServerConfig
 
-            client = McpClient(McpServerConfig(
-                name=backend_name, transport="http", url=url,
-            ))
-            _PUBMED_MCP_CLIENTS[backend_name] = client
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("pubmed MCP client init failed: %s", exc)
-            return {"status": "unavailable", "error": str(exc)}
+        return McpServerConfig(name=backend_name, transport="http", url=url)
+
+    client = _get_mcp_client(backend_name, _config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": f"pubmed MCP client init failed for {backend_name}",
+        }
 
     envelope = client.call_tool(
         "search",  # Anthropic-hosted PubMed exposes "search" + "fetch"
@@ -344,6 +388,362 @@ def mimic_distribution_lookup(itemid: int) -> dict[str, Any]:
 
 # Module-level so tests can monkeypatch.
 LOINC_CATALOG_PATH: Path = _DEFAULT_LOINC_CATALOG_PATH
+
+
+# ---------------------------------------------------------------------------
+# Phase G — additional MCP-backed source-of-truth tools.
+#
+# Each tool follows the same shape:
+#   1. Build (or reuse) an McpClient via _get_mcp_client; return the
+#      "unavailable" envelope cleanly when configuration is missing.
+#   2. Call the upstream MCP tool.
+#   3. Normalise upstream results into a stable per-tool envelope shape
+#      so callers don't have to handle server-specific field names.
+#
+# All five are PHI-safe egress: they only ever see model-generated query
+# strings and ontology codes — never row data.
+# ---------------------------------------------------------------------------
+
+
+# --- snomed_search via Hermes (local stdio) --------------------------------
+
+
+def _hermes_config():
+    """Build a Hermes server config when the binary + DB are configured.
+
+    Returns ``None`` when ``HERMES_MCP_COMMAND`` resolves to a binary
+    that's not on PATH — the calling tool then returns ``unavailable``."""
+    import shutil
+
+    from src.conversational.health_evidence.mcp_client import McpServerConfig
+
+    command = os.environ.get("HERMES_MCP_COMMAND", "hermes")
+    db_path = os.environ.get(
+        "HERMES_MCP_DB", "/var/lib/hermes/snomed.db",
+    )
+    if not shutil.which(command):
+        return None
+    return McpServerConfig(
+        name="hermes", transport="stdio",
+        command=command, args=["--db", db_path, "mcp"],
+    )
+
+
+def snomed_search(term: str, max_results: int = 10) -> dict[str, Any]:
+    """Search SNOMED CT for concepts matching ``term`` via the Hermes
+    MCP server.
+
+    Returns ``{"status": "ok", "results": [{concept_id, preferred_term,
+    fully_specified_name, semantic_tag}, ...]}`` on success, or the
+    standard ``unavailable`` envelope when the Hermes binary is not
+    installed or the call fails. Never raises.
+    """
+    client = _get_mcp_client("hermes", _hermes_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": "Hermes MCP not configured (set HERMES_MCP_COMMAND)",
+        }
+    envelope = client.call_tool(
+        "search",
+        {"term": term, "max_results": max_results},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        concept_id = str(r.get("concept_id") or r.get("id") or "")
+        if not concept_id:
+            continue
+        normalized.append({
+            "concept_id": concept_id,
+            "preferred_term": str(
+                r.get("preferred_term") or r.get("term") or r.get("name") or ""
+            ),
+            "fully_specified_name": str(
+                r.get("fsn") or r.get("fully_specified_name") or ""
+            ),
+            "semantic_tag": str(r.get("semantic_tag") or ""),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+# --- rxnorm_lookup via OMOPHub (HTTP) --------------------------------------
+
+
+def _omophub_config():
+    from src.conversational.health_evidence.mcp_client import McpServerConfig
+
+    url = os.environ.get("OMOPHUB_MCP_URL")
+    if not url:
+        return None
+    return McpServerConfig(name="omophub", transport="http", url=url)
+
+
+def rxnorm_lookup(drug_name: str, max_results: int = 5) -> dict[str, Any]:
+    """Look up an RxNorm concept (RXCUI) for a drug name via the OMOPHub
+    MCP server.
+
+    Returns ``{"status": "ok", "results": [{rxcui, name, tty,
+    vocabulary}, ...]}``. Returns ``unavailable`` when ``OMOPHUB_MCP_URL``
+    is not set or the call fails.
+
+    Note on auth: OMOPHub requires ``OMOPHUB_API_KEY`` for production
+    use; the MCP server is expected to read it from the env passed to
+    the subprocess. The HTTP transport here assumes the caller has
+    configured the URL with auth (e.g., a managed gateway) appropriately.
+    """
+    client = _get_mcp_client("omophub", _omophub_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": "OMOPHub MCP not configured (set OMOPHUB_MCP_URL)",
+        }
+    envelope = client.call_tool(
+        "search",
+        {"query": drug_name, "vocabulary": "RxNorm",
+         "max_results": max_results},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        rxcui = str(r.get("rxcui") or r.get("concept_code") or r.get("id") or "")
+        if not rxcui:
+            continue
+        normalized.append({
+            "rxcui": rxcui,
+            "name": str(r.get("name") or r.get("concept_name") or ""),
+            "tty": str(r.get("tty") or r.get("term_type") or ""),
+            "vocabulary": str(r.get("vocabulary") or "RxNorm"),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+# --- trials_search via cyanheads ClinicalTrials MCP (stdio) ----------------
+
+
+def _clinicaltrials_config():
+    """Build a ClinicalTrials MCP server config.
+
+    Defaults to ``bunx clinicaltrialsgov-mcp-server@latest`` per the user
+    research; falls back to ``npx`` when bun is unavailable. Returns
+    ``None`` when neither launcher is on PATH.
+    """
+    import shutil
+
+    from src.conversational.health_evidence.mcp_client import McpServerConfig
+
+    explicit = os.environ.get("CLINICALTRIALS_MCP_COMMAND")
+    if explicit:
+        parts = explicit.split()
+        if not parts:
+            return None
+        if not shutil.which(parts[0]):
+            return None
+        return McpServerConfig(
+            name="clinicaltrials", transport="stdio",
+            command=parts[0], args=parts[1:],
+        )
+    for launcher in ("bunx", "npx"):
+        if shutil.which(launcher):
+            args = (
+                ["-y", "clinicaltrialsgov-mcp-server@latest"]
+                if launcher == "npx"
+                else ["clinicaltrialsgov-mcp-server@latest"]
+            )
+            return McpServerConfig(
+                name="clinicaltrials", transport="stdio",
+                command=launcher, args=args,
+            )
+    return None
+
+
+def trials_search(query: str, max_results: int = 10) -> dict[str, Any]:
+    """Search ClinicalTrials.gov for studies matching ``query``.
+
+    Returns ``{"status": "ok", "results": [{nct_id, brief_title, status,
+    conditions, phase}, ...]}``. Returns ``unavailable`` when the MCP
+    server is not configured or the call fails.
+    """
+    client = _get_mcp_client("clinicaltrials", _clinicaltrials_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": (
+                "ClinicalTrials MCP not configured (need bunx/npx on PATH "
+                "or CLINICALTRIALS_MCP_COMMAND)"
+            ),
+        }
+    envelope = client.call_tool(
+        "search_studies",
+        {"query": query, "max_results": max_results},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        nct_id = str(r.get("nct_id") or r.get("nctId") or "")
+        if not nct_id:
+            continue
+        cond = r.get("conditions") or r.get("condition") or []
+        if isinstance(cond, str):
+            cond = [cond]
+        normalized.append({
+            "nct_id": nct_id,
+            "brief_title": str(r.get("brief_title") or r.get("briefTitle") or ""),
+            "status": str(r.get("status") or r.get("overall_status") or ""),
+            "conditions": [str(c) for c in cond if c],
+            "phase": str(r.get("phase") or ""),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+# --- openfda_drug_label via OpenFDA MCP (stdio) ----------------------------
+
+
+def _openfda_config():
+    import shutil
+
+    from src.conversational.health_evidence.mcp_client import McpServerConfig
+
+    explicit = os.environ.get("OPENFDA_MCP_COMMAND")
+    if explicit:
+        parts = explicit.split()
+        if not parts or not shutil.which(parts[0]):
+            return None
+        env = None
+        api_key = os.environ.get("OPENFDA_API_KEY")
+        if api_key:
+            env = {"OPENFDA_API_KEY": api_key}
+        return McpServerConfig(
+            name="openfda", transport="stdio",
+            command=parts[0], args=parts[1:], env=env,
+        )
+    if shutil.which("npx"):
+        env = None
+        api_key = os.environ.get("OPENFDA_API_KEY")
+        if api_key:
+            env = {"OPENFDA_API_KEY": api_key}
+        return McpServerConfig(
+            name="openfda", transport="stdio",
+            command="npx",
+            args=["-y", "openfda-mcp-server"],
+            env=env,
+        )
+    return None
+
+
+def openfda_drug_label(drug_name: str) -> dict[str, Any]:
+    """Look up an OpenFDA drug label for ``drug_name``.
+
+    Returns ``{"status": "ok", "results": [{brand_name, generic_name,
+    indications_and_usage, warnings}, ...]}`` on success, or the standard
+    ``unavailable`` envelope.
+    """
+    client = _get_mcp_client("openfda", _openfda_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": (
+                "OpenFDA MCP not configured (need npx on PATH or "
+                "OPENFDA_MCP_COMMAND)"
+            ),
+        }
+    envelope = client.call_tool(
+        "search_drug_labels",
+        {"drug_name": drug_name},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:5]:
+        if not isinstance(r, dict):
+            continue
+        # OpenFDA labels often nest fields as lists; collapse to first
+        # entry's text to keep the envelope compact.
+        def _first(field):
+            v = r.get(field)
+            if isinstance(v, list) and v:
+                return str(v[0])
+            return str(v) if v is not None else ""
+
+        brand = _first("brand_name") or _first("openfda")
+        generic = _first("generic_name")
+        if not brand and not generic:
+            continue
+        normalized.append({
+            "brand_name": brand,
+            "generic_name": generic,
+            "indications_and_usage": _truncate_title(_first("indications_and_usage")),
+            "warnings": _truncate_title(_first("warnings")),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+# --- icd_lookup via self-hosted ICD MCP (HTTP) -----------------------------
+
+
+def _icd_config():
+    from src.conversational.health_evidence.mcp_client import McpServerConfig
+
+    url = os.environ.get("ICD_MCP_URL")
+    if not url:
+        return None
+    return McpServerConfig(name="icd", transport="http", url=url)
+
+
+def icd_lookup(query: str, version: str = "10", max_results: int = 10) -> dict[str, Any]:
+    """Look up ICD codes matching ``query`` via a self-hosted ICD MCP.
+
+    ``version`` is "10" or "11". Returns ``{"status": "ok", "results":
+    [{code, title, version, chapter}, ...]}``. Returns ``unavailable``
+    when ``ICD_MCP_URL`` is not set.
+    """
+    client = _get_mcp_client("icd", _icd_config)
+    if client is None:
+        return {
+            "status": "unavailable",
+            "error": "ICD MCP not configured (set ICD_MCP_URL)",
+        }
+    envelope = client.call_tool(
+        "lookup",
+        {"query": query, "version": str(version), "max_results": max_results},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if envelope.get("status") != "ok":
+        return envelope
+    raw = envelope.get("results") or []
+    normalized = []
+    for r in raw[:max_results]:
+        if not isinstance(r, dict):
+            continue
+        code = str(r.get("code") or r.get("icd_code") or "")
+        if not code:
+            continue
+        normalized.append({
+            "code": code,
+            "title": _truncate_title(str(
+                r.get("title") or r.get("description") or ""
+            )),
+            "version": str(r.get("version") or version),
+            "chapter": str(r.get("chapter") or ""),
+        })
+    return _enforce_size_budget({"status": "ok", "results": normalized})
 
 
 def loinc_reference_range(loinc_code: str) -> dict[str, Any]:

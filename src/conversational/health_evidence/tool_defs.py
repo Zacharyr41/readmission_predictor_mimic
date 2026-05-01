@@ -12,9 +12,14 @@ from __future__ import annotations
 from typing import Any
 
 from src.conversational.health_evidence.tools import (
+    icd_lookup,
     loinc_reference_range,
     mimic_distribution_lookup,
+    openfda_drug_label,
     pubmed_search,
+    rxnorm_lookup,
+    snomed_search,
+    trials_search,
 )
 
 
@@ -101,10 +106,160 @@ LOINC_REFERENCE_RANGE_TOOL_DEF: dict[str, Any] = {
 }
 
 
+SNOMED_SEARCH_TOOL_DEF: dict[str, Any] = {
+    "name": "snomed_search",
+    "description": (
+        "Search SNOMED CT for clinical concepts (diseases, findings, "
+        "procedures, body structures) matching a free-text term. Returns "
+        "concept IDs that the orchestrator can ground further lookups in. "
+        "Use when you need to canonicalize a clinical phrase to a SNOMED "
+        "concept ID before cross-mapping or searching other registries. "
+        "Returns {status: 'unavailable'} if the Hermes MCP isn't installed."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "term": {
+                "type": "string",
+                "description": "Free-text clinical phrase to search for.",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Records to return (default 10).",
+                "default": 10,
+                "maximum": 25,
+            },
+        },
+        "required": ["term"],
+    },
+}
+
+
+RXNORM_LOOKUP_TOOL_DEF: dict[str, Any] = {
+    "name": "rxnorm_lookup",
+    "description": (
+        "Look up RxNorm RXCUIs (canonical drug identifiers) for a drug "
+        "name via OMOPHub. Use this when you need to canonicalize a free-"
+        "text drug mention (brand name, common name, abbreviation) to a "
+        "structured identifier before further reasoning. Returns {status: "
+        "'unavailable'} if OMOPHUB_MCP_URL is not configured."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "drug_name": {
+                "type": "string",
+                "description": (
+                    "Drug name to look up. May be brand, generic, or "
+                    "common abbreviation."
+                ),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Records to return (default 5).",
+                "default": 5,
+                "maximum": 10,
+            },
+        },
+        "required": ["drug_name"],
+    },
+}
+
+
+TRIALS_SEARCH_TOOL_DEF: dict[str, Any] = {
+    "name": "trials_search",
+    "description": (
+        "Search ClinicalTrials.gov for studies matching a query (condition, "
+        "intervention, outcome, etc.). Returns NCT IDs and brief summaries "
+        "the orchestrator can use to ground evidence-based claims. "
+        "Returns {status: 'unavailable'} if the ClinicalTrials MCP "
+        "(bunx/npx clinicaltrialsgov-mcp-server) isn't available."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Search query — be specific: include condition, "
+                    "intervention, and population."
+                ),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Records to return (default 10).",
+                "default": 10,
+                "maximum": 25,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+OPENFDA_DRUG_LABEL_TOOL_DEF: dict[str, Any] = {
+    "name": "openfda_drug_label",
+    "description": (
+        "Look up the OpenFDA structured drug label for a brand or generic "
+        "drug name. Returns indications, warnings, and other label fields "
+        "useful for safety reasoning. Returns {status: 'unavailable'} if "
+        "the OpenFDA MCP isn't installed."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "drug_name": {
+                "type": "string",
+                "description": "Brand or generic drug name.",
+            },
+        },
+        "required": ["drug_name"],
+    },
+}
+
+
+ICD_LOOKUP_TOOL_DEF: dict[str, Any] = {
+    "name": "icd_lookup",
+    "description": (
+        "Look up ICD-10 (default) or ICD-11 codes matching a clinical "
+        "phrase. Returns code + title + chapter. Use to canonicalize "
+        "diagnoses to ICD codes. Returns {status: 'unavailable'} if "
+        "ICD_MCP_URL is not set (the ICD MCP requires self-hosting per "
+        "WHO licensing)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Clinical phrase to look up.",
+            },
+            "version": {
+                "type": "string",
+                "description": "ICD version: '10' (default) or '11'.",
+                "default": "10",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Records to return (default 10).",
+                "default": 10,
+                "maximum": 25,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
 ALL_TOOL_DEFS: list[dict[str, Any]] = [
     PUBMED_SEARCH_TOOL_DEF,
     MIMIC_DISTRIBUTION_TOOL_DEF,
     LOINC_REFERENCE_RANGE_TOOL_DEF,
+    SNOMED_SEARCH_TOOL_DEF,
+    RXNORM_LOOKUP_TOOL_DEF,
+    TRIALS_SEARCH_TOOL_DEF,
+    OPENFDA_DRUG_LABEL_TOOL_DEF,
+    ICD_LOOKUP_TOOL_DEF,
 ]
 
 
@@ -112,6 +267,11 @@ TOOL_DISPATCH: dict[str, Any] = {
     "pubmed_search": pubmed_search,
     "mimic_distribution_lookup": mimic_distribution_lookup,
     "loinc_reference_range": loinc_reference_range,
+    "snomed_search": snomed_search,
+    "rxnorm_lookup": rxnorm_lookup,
+    "trials_search": trials_search,
+    "openfda_drug_label": openfda_drug_label,
+    "icd_lookup": icd_lookup,
 }
 """Map of tool-name → callable, looked up by ``EvidenceAgent`` when the
 model emits a ``tool_use`` block."""

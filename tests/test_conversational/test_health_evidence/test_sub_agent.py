@@ -215,3 +215,38 @@ class TestPhiCompartmentalization:
         # The agent itself should not synthesise IDs.
         assert "hadm_id" not in user_msg.lower()
         assert "subject_id" not in user_msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase G — sub-agent has access to all 8 tools
+# ---------------------------------------------------------------------------
+
+
+class TestSubAgentToolCoverage:
+    def test_sub_agent_constructed_with_all_tool_defs(self):
+        """When you construct the sub-agent, the underlying EvidenceAgent
+        receives ALL_TOOL_DEFS — i.e. all 8 source-of-truth tools (3
+        originals + 5 Phase G additions) are advertised to the model
+        on every consult() call."""
+        client = mock_anthropic([_valid_payload()])
+        agent = HealthSourceOfTruthAgent(client)
+        agent.consult("any question")
+        kwargs = client.messages.create.call_args.kwargs
+        names = {t["name"] for t in kwargs["tools"]}
+        assert names == {
+            "pubmed_search", "mimic_distribution_lookup",
+            "loinc_reference_range", "snomed_search", "rxnorm_lookup",
+            "trials_search", "openfda_drug_label", "icd_lookup",
+        }
+
+    def test_evidence_model_supports_all_phase_g_sources(self):
+        """The Evidence model's ``source`` literal must accept all 5 new
+        Phase G source identifiers so the sub-agent's findings can cite
+        them."""
+        from src.conversational.models import Evidence
+
+        for source in [
+            "snomed", "rxnorm", "openfda", "clinicaltrials", "icd",
+        ]:
+            ev = Evidence(source=source, id="x", tool=f"{source}_tool")
+            assert ev.source == source
