@@ -711,18 +711,29 @@ def trials_search(query: str, max_results: int = 10) -> dict[str, Any]:
                 "or CLINICALTRIALS_MCP_COMMAND)"
             ),
         }
+    # cyanheads MCP exposes its tools with a ``clinicaltrials_`` prefix
+    # (e.g. ``clinicaltrials_search_studies``); the un-prefixed name in
+    # earlier code was wrong against the actual server.
     envelope = client.call_tool(
-        "search_studies",
+        "clinicaltrials_search_studies",
         {"query": query, "max_results": max_results},
         timeout=_HTTP_TIMEOUT_SECONDS,
     )
     if envelope.get("status") != "ok":
         return envelope
     raw = envelope.get("results") or []
-    normalized = []
-    for r in raw[:max_results]:
+    normalized: list[dict] = []
+    for r in raw:
         if not isinstance(r, dict):
             continue
+        # Real cyanheads server returns ``[{"text": "<markdown>"}]`` — a
+        # human-readable summary, not structured records. Parse out
+        # NCT entries when we see the text shape.
+        text_blob = r.get("text")
+        if isinstance(text_blob, str) and "NCT" in text_blob:
+            normalized.extend(_parse_clinicaltrials_text(text_blob, max_results))
+            continue
+        # Legacy/hypothetical shape: structured record fields.
         nct_id = str(r.get("nct_id") or r.get("nctId") or "")
         if not nct_id:
             continue
@@ -736,7 +747,60 @@ def trials_search(query: str, max_results: int = 10) -> dict[str, Any]:
             "conditions": [str(c) for c in cond if c],
             "phase": str(r.get("phase") or ""),
         })
-    return _enforce_size_budget({"status": "ok", "results": normalized})
+        if len(normalized) >= max_results:
+            break
+    return _enforce_size_budget({"status": "ok", "results": normalized[:max_results]})
+
+
+_CT_HEADER_RE = re.compile(
+    r"^- \*\*(NCT\d+)\*\*: (.+?) \[([A-Z_]+)\]\s*$",
+)
+_CT_DETAIL_RE = re.compile(
+    r"^\s+(PHASE\d+|NA)\s*\|\s*N=(\d+|NA)\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$",
+)
+
+
+def _parse_clinicaltrials_text(text: str, max_results: int) -> list[dict]:
+    """Extract structured records from cyanheads' markdown summary.
+
+    Per-study format:
+        - **NCT06968559**: <title> [RECRUITING]
+          PHASE3 | N=478 | <sponsor> | <conditions>
+
+    Some studies omit the detail line; we capture what's there and leave
+    missing fields empty rather than fabricate them. Returns up to
+    ``max_results`` entries."""
+    records: list[dict] = []
+    lines = text.splitlines()
+    current: dict | None = None
+    for line in lines:
+        m = _CT_HEADER_RE.match(line)
+        if m:
+            if current:
+                records.append(current)
+                if len(records) >= max_results:
+                    break
+            current = {
+                "nct_id": m.group(1),
+                "brief_title": _truncate_title(m.group(2)),
+                "status": m.group(3),
+                "conditions": [],
+                "phase": "",
+            }
+            continue
+        if current is None:
+            continue
+        d = _CT_DETAIL_RE.match(line)
+        if d:
+            phase = d.group(1)
+            if phase == "NA":
+                phase = ""
+            current["phase"] = phase
+            conds = [c.strip() for c in d.group(4).split(",") if c.strip()]
+            current["conditions"] = conds
+    if current and len(records) < max_results:
+        records.append(current)
+    return records[:max_results]
 
 
 # --- openfda_drug_label via OpenFDA MCP (stdio) ----------------------------
@@ -798,26 +862,42 @@ def openfda_drug_label(drug_name: str) -> dict[str, Any]:
     if envelope.get("status") != "ok":
         return envelope
     raw = envelope.get("results") or []
-    normalized = []
-    for r in raw[:5]:
+    # The npm openfda-mcp-server wraps records as ``[{"success": true,
+    # "data": [<records>]}]``. Unwrap when we see that shape; otherwise
+    # treat ``raw`` as a direct list of records (legacy / hypothetical).
+    flat_records: list[dict] = []
+    for r in raw:
         if not isinstance(r, dict):
             continue
-        # OpenFDA labels often nest fields as lists; collapse to first
-        # entry's text to keep the envelope compact.
-        def _first(field):
-            v = r.get(field)
-            if isinstance(v, list) and v:
-                return str(v[0])
-            return str(v) if v is not None else ""
+        if "data" in r and isinstance(r["data"], list):
+            flat_records.extend(d for d in r["data"] if isinstance(d, dict))
+        else:
+            flat_records.append(r)
 
-        brand = _first("brand_name") or _first("openfda")
-        generic = _first("generic_name")
+    normalized = []
+    for r in flat_records[:5]:
+        # OpenFDA labels can be either snake_case (legacy/hypothetical
+        # shape used in tests) or camelCase (real npm server). Some
+        # fields nest as lists; collapse to first entry.
+        def _first(*fields):
+            for f in fields:
+                v = r.get(f)
+                if isinstance(v, list) and v:
+                    return str(v[0])
+                if v is not None and v != "":
+                    return str(v)
+            return ""
+
+        brand = _first("brand_name", "brandName")
+        generic = _first("generic_name", "genericName")
         if not brand and not generic:
             continue
         normalized.append({
             "brand_name": brand,
             "generic_name": generic,
-            "indications_and_usage": _truncate_title(_first("indications_and_usage")),
+            "indications_and_usage": _truncate_title(
+                _first("indications_and_usage", "indications"),
+            ),
             "warnings": _truncate_title(_first("warnings")),
         })
     return _enforce_size_budget({"status": "ok", "results": normalized})
