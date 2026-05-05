@@ -645,3 +645,553 @@ class TestCriticToolUse:
         tools = kwargs.get("tools") or []
         tool_names = {t["name"] for t in tools}
         assert "pubmed_search" in tool_names
+
+
+# ---------------------------------------------------------------------------
+# _CRITIC_TOOLS dispatch coverage (Phase H)
+# ---------------------------------------------------------------------------
+
+
+class TestCriticToolDispatchCoverage:
+    """Guards the critic's tool dispatch infrastructure.
+
+    The dispatch is built as a dict-comprehension over ``_CRITIC_TOOLS``;
+    these tests catch (a) drift between the tuple and the dispatch dict
+    and (b) the classic late-binding closure pitfall where every lambda
+    in a comprehension captures the same loop variable."""
+
+    def test_dispatch_includes_one_entry_per_critic_tool(self):
+        from src.conversational.critic import (
+            _CRITIC_TOOLS,
+            _critic_tool_dispatch,
+        )
+        dispatch = _critic_tool_dispatch()
+        assert set(dispatch.keys()) == set(_CRITIC_TOOLS)
+
+    def test_dispatch_each_lambda_routes_to_its_own_tool(self, monkeypatch):
+        """Late-binding guard. If lambdas all close over the same name,
+        every dispatch entry would call the LAST tool. Patch each tool to
+        return its own marker; verify each dispatch entry returns the
+        correct marker."""
+        from src.conversational.critic import (
+            _CRITIC_TOOLS,
+            _critic_tool_dispatch,
+        )
+        for name in _CRITIC_TOOLS:
+            monkeypatch.setattr(
+                f"src.conversational.critic.{name}",
+                lambda _marker=name, **_kw: {
+                    "status": "ok", "results": [], "_marker": _marker,
+                },
+            )
+        dispatch = _critic_tool_dispatch()
+        for name in _CRITIC_TOOLS:
+            result = dispatch[name]()
+            assert result.get("_marker") == name, (
+                f"dispatch[{name!r}] routed to {result.get('_marker')!r}"
+            )
+
+    def test_critic_tool_defs_match_critic_tools(self):
+        from src.conversational.critic import (
+            _CRITIC_TOOLS,
+            _CRITIC_TOOL_DEFS,
+        )
+        assert {d["name"] for d in _CRITIC_TOOL_DEFS} == set(_CRITIC_TOOLS)
+
+
+# ---------------------------------------------------------------------------
+# Critic with broader tool access (Phase H)
+# ---------------------------------------------------------------------------
+
+
+class TestCriticLoincReferenceRange:
+    """Critic gains access to ``loinc_reference_range`` so it can cite
+    published normal ranges instead of recalling them from training data."""
+
+    def test_critic_calls_loinc_reference_range(self, monkeypatch):
+        """Happy path: model emits tool_use(loinc_reference_range);
+        verdict cites the LOINC source with id=loinc_code."""
+        monkeypatch.setattr(
+            "src.conversational.critic.loinc_reference_range",
+            lambda **kw: {"status": "ok", "results": [{
+                "loinc_code": "33747-0",
+                "low": 0.0, "high": 0.5, "units": "ng/mL",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="loinc_reference_range",
+                tool_input={"loinc_code": "33747-0"},
+                tool_id="lt1",
+            ),
+            _end_turn_response({
+                "plausible": True,
+                "severity": "info",
+                "concern": None,
+                "reference_used": "LOINC 33747-0 (procalcitonin)",
+                "cited_sources": [
+                    {"source": "loinc", "id": "33747-0", "title": "procalcitonin"},
+                ],
+            }),
+        ])
+        verdict = critique(
+            client,
+            _make_cq("typical procalcitonin in sepsis"),
+            _make_answer("Mean procalcitonin 1.2 ng/mL"),
+        )
+        assert verdict is not None
+        assert verdict.severity == "info"
+        assert verdict.cited_sources is not None
+        assert any(
+            s.get("source") == "loinc" and s.get("id") == "33747-0"
+            for s in verdict.cited_sources
+        )
+        assert client.messages.create.call_count == 2
+
+    def test_critic_loinc_unavailable_falls_through(self, monkeypatch):
+        """LOINC tool returns unavailable: critic still produces a verdict.
+        Graceful degradation is the agent's existing contract."""
+        monkeypatch.setattr(
+            "src.conversational.critic.loinc_reference_range",
+            lambda **kw: {"status": "unavailable", "error": "catalog missing"},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="loinc_reference_range",
+                tool_input={"loinc_code": "33747-0"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.severity == "info"
+
+    def test_loinc_tool_def_in_critic_system_block(self):
+        """LOINC tool def is passed to messages.create so the model knows
+        the tool exists."""
+        client = mock_anthropic([
+            _end_turn_response({"plausible": True, "severity": "info"}),
+        ])
+        critique(client, _make_cq(), _make_answer("test"))
+        kwargs = client.messages.create.call_args.kwargs
+        tool_names = {t["name"] for t in (kwargs.get("tools") or [])}
+        assert "loinc_reference_range" in tool_names
+
+
+class TestCriticMimicDistributionLookup:
+    """Critic gains access to ``mimic_distribution_lookup`` so it can
+    distinguish severity-shifted-but-plausible from polluted aggregates
+    by checking the cohort-typical distribution in MIMIC itself.
+
+    Canonical scenario from
+    ``memory/project_critic_external_grounding.md``: lactate ~7.99 mmol/L
+    in a sepsis cohort. Without the tool, the critic would either flag
+    it (false positive) or accept it (true positive only by luck). With
+    the tool, it can confirm the value sits inside MIMIC's sepsis-cohort
+    typical range and emit ``severity=info`` with a citation."""
+
+    def test_critic_uses_mimic_distribution_for_cohort_shifted_value(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "src.conversational.critic.mimic_distribution_lookup",
+            lambda **kw: {"status": "ok", "results": [{
+                "itemid": 50813,
+                "n": 1842,
+                "mean": 4.1,
+                "p50": 2.1,
+                "p95": 8.2,
+                "units": "mmol/L",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="mimic_distribution_lookup",
+                tool_input={"itemid": 50813},
+                tool_id="mt1",
+            ),
+            _end_turn_response({
+                "plausible": True,
+                "severity": "info",
+                "concern": None,
+                "reference_used": "MIMIC sepsis-cohort lactate p95=8.2 mmol/L",
+                "cited_sources": [
+                    {"source": "mimic_distribution", "id": "50813",
+                     "title": "lactate (sepsis cohort)"},
+                ],
+            }),
+        ])
+        verdict = critique(
+            client,
+            _make_cq("mean lactate in sepsis"),
+            _make_answer("Mean lactate 7.99 mmol/L (n=512)"),
+        )
+        assert verdict is not None
+        assert verdict.severity == "info"
+        assert verdict.plausible is True
+        assert verdict.cited_sources is not None
+        assert any(
+            s.get("source") == "mimic_distribution" and s.get("id") == "50813"
+            for s in verdict.cited_sources
+        )
+
+    def test_mimic_tool_def_in_critic_system_block(self):
+        client = mock_anthropic([
+            _end_turn_response({"plausible": True, "severity": "info"}),
+        ])
+        critique(client, _make_cq(), _make_answer("test"))
+        kwargs = client.messages.create.call_args.kwargs
+        tool_names = {t["name"] for t in (kwargs.get("tools") or [])}
+        assert "mimic_distribution_lookup" in tool_names
+
+
+class TestCriticPhaseGMcpTools:
+    """Phase-G source-of-truth MCPs are reachable from the critic.
+
+    One end-to-end happy-path test per tool, plus one
+    backend-unavailable test to confirm graceful degradation. The
+    critic is the production consumer that gives these MCPs reach
+    (Bucket 2 of the Phase H plan)."""
+
+    def test_critic_calls_snomed_search(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.snomed_search",
+            lambda **kw: {"status": "ok", "results": [{
+                "concept_id": "76571007",
+                "preferred_term": "Septic shock",
+                "fully_specified_name": "Septic shock (disorder)",
+                "semantic_tag": "disorder",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="snomed_search",
+                tool_input={"term": "septic shock"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+                "cited_sources": [
+                    {"source": "snomed", "id": "76571007",
+                     "title": "Septic shock"},
+                ],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+        assert any(
+            s.get("source") == "snomed" and s.get("id") == "76571007"
+            for s in verdict.cited_sources
+        )
+
+    def test_critic_calls_rxnorm_lookup(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.rxnorm_lookup",
+            lambda **kw: {"status": "ok", "results": [{
+                "rxcui": "7980", "name": "norepinephrine",
+                "tty": "IN", "vocabulary": "RxNorm",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="rxnorm_lookup",
+                tool_input={"drug_name": "norepinephrine"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "cited_sources": [
+                    {"source": "rxnorm", "id": "7980", "title": "norepinephrine"},
+                ],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+        assert any(
+            s.get("source") == "rxnorm" and s.get("id") == "7980"
+            for s in verdict.cited_sources
+        )
+
+    def test_critic_calls_openfda_drug_label(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.openfda_drug_label",
+            lambda **kw: {"status": "ok", "results": [{
+                "brand_name": "Levophed",
+                "generic_name": "norepinephrine bitartrate",
+                "indications_and_usage": "shock",
+                "warnings": "extravasation risk",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="openfda_drug_label",
+                tool_input={"drug_name": "Levophed"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "cited_sources": [
+                    {"source": "openfda", "id": "Levophed",
+                     "title": "norepinephrine bitartrate"},
+                ],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+        assert any(s.get("source") == "openfda" for s in verdict.cited_sources)
+
+    def test_critic_calls_icd_lookup(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.icd_lookup",
+            lambda **kw: {"status": "ok", "results": [{
+                "code": "I50.9",
+                "title": "Heart failure, unspecified",
+                "version": "10",
+                "chapter": "Diseases of the circulatory system",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="icd_lookup",
+                tool_input={"query": "heart failure"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "cited_sources": [
+                    {"source": "icd", "id": "I50.9",
+                     "title": "Heart failure, unspecified"},
+                ],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+        assert any(
+            s.get("source") == "icd" and s.get("id") == "I50.9"
+            for s in verdict.cited_sources
+        )
+
+    def test_critic_calls_trials_search(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.trials_search",
+            lambda **kw: {"status": "ok", "results": [{
+                "nct_id": "NCT04244266",
+                "brief_title": "Sepsis treatment study",
+                "status": "Completed",
+                "conditions": ["Sepsis"],
+                "phase": "Phase 3",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="trials_search",
+                tool_input={"query": "sepsis"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "cited_sources": [
+                    {"source": "clinicaltrials", "id": "NCT04244266",
+                     "title": "Sepsis treatment study"},
+                ],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+        assert any(
+            s.get("source") == "clinicaltrials" for s in verdict.cited_sources
+        )
+
+    def test_critic_calls_snomed_expand_ecl(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.snomed_expand_ecl",
+            lambda **kw: {"status": "ok", "results": [{
+                "concept_id": "44054006",
+                "preferred_term": "Diabetes mellitus type 2",
+                "fully_specified_name": "Diabetes mellitus type 2 (disorder)",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="snomed_expand_ecl",
+                tool_input={"expression": "<<73211009"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "cited_sources": [
+                    {"source": "snomed", "id": "44054006"},
+                ],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+
+    def test_critic_calls_icd_autocode(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.conversational.critic.icd_autocode",
+            lambda **kw: {"status": "ok", "results": [{
+                "code": "J96.00",
+                "title": "Acute respiratory failure",
+                "version": "10",
+                "confidence": 0.91,
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="icd_autocode",
+                tool_input={"text": "patient developed respiratory failure"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "cited_sources": [{"source": "icd", "id": "J96.00"}],
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.cited_sources is not None
+
+    def test_critic_calls_code_map(self, monkeypatch):
+        """code_map produces a cross-vocab mapping. Citation tracking is
+        intentionally not done for code_map (it's a mapping, not a primary
+        record), so cited_sources stays None — but the verdict still
+        renders cleanly."""
+        monkeypatch.setattr(
+            "src.conversational.critic.code_map",
+            lambda **kw: {"status": "ok", "results": [{
+                "source_code": "E11.9",
+                "source_vocabulary": "ICD10",
+                "target_code": "44054006",
+                "target_vocabulary": "SNOMED",
+                "target_name": "Diabetes mellitus type 2",
+                "relationship": "Maps to",
+            }]},
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="code_map",
+                tool_input={
+                    "source_vocabulary": "ICD10",
+                    "source_code": "E11.9",
+                    "target_vocabulary": "SNOMED",
+                },
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info",
+                "concern": None, "reference_used": "ICD10 E11.9 → SNOMED 44054006",
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.severity == "info"
+
+    def test_phase_g_tool_unavailable_is_graceful(self, monkeypatch):
+        """When an MCP backend is not configured, the tool returns
+        ``unavailable``; the critic still produces a verdict (no raise)."""
+        monkeypatch.setattr(
+            "src.conversational.critic.snomed_search",
+            lambda **kw: {
+                "status": "unavailable",
+                "error": "Hermes MCP not configured",
+            },
+        )
+        client = mock_anthropic([
+            _tool_use_response(
+                tool_name="snomed_search",
+                tool_input={"term": "anything"},
+            ),
+            _end_turn_response({
+                "plausible": True, "severity": "info", "concern": None,
+            }),
+        ])
+        verdict = critique(client, _make_cq(), _make_answer("text"))
+        assert verdict is not None
+        assert verdict.severity == "info"
+
+    def test_all_phase_g_tools_in_critic_system_block(self):
+        """Every Phase-G MCP tool is in the system block sent to the model."""
+        client = mock_anthropic([
+            _end_turn_response({"plausible": True, "severity": "info"}),
+        ])
+        critique(client, _make_cq(), _make_answer("test"))
+        kwargs = client.messages.create.call_args.kwargs
+        tool_names = {t["name"] for t in (kwargs.get("tools") or [])}
+        for expected in (
+            "snomed_search", "snomed_expand_ecl",
+            "rxnorm_lookup", "code_map",
+            "trials_search", "openfda_drug_label",
+            "icd_lookup", "icd_autocode",
+        ):
+            assert expected in tool_names, f"missing {expected!r}"
+
+    def test_critic_tool_count_is_eleven(self):
+        """Sanity: the critic now has exactly the 11 health-evidence tools."""
+        from src.conversational.critic import _CRITIC_TOOLS
+        assert len(_CRITIC_TOOLS) == 11
+        assert len(set(_CRITIC_TOOLS)) == 11  # no duplicates
+
+
+class TestCriticPromptShape:
+    """Phase H prompt shrink. The reference table that hard-coded
+    population-typical and ICU-plausible ranges per analyte is replaced
+    with: (a) a much smaller universal-impossibility floor table (the
+    physics of incompatible-with-life values), and (b) explicit guidance
+    to call ``loinc_reference_range`` / ``mimic_distribution_lookup``
+    when range-checking. This guards the shape of those changes — the
+    full text is held by the snapshot test."""
+
+    def test_prompt_enumerates_all_critic_tools(self):
+        """Every tool in _CRITIC_TOOLS is named in the system prompt so
+        the model knows what's available without inspecting the tool defs."""
+        from src.conversational.critic import _CRITIC_TOOLS
+        for name in _CRITIC_TOOLS:
+            assert name in CRITIC_SYSTEM_PROMPT, f"prompt missing tool {name!r}"
+
+    def test_prompt_drops_icu_plausible_recall_table(self):
+        """The pre-Phase-H prompt baked ICU-plausible upper bounds per
+        analyte (e.g. creatinine 'up to ~10'). Phase H removes this — the
+        critic looks them up instead. Marker substring guards this stays
+        out."""
+        # Pre-Phase-H markers (ICU-plausible ranges, recall-from-training):
+        assert "up to ~10" not in CRITIC_SYSTEM_PROMPT
+        assert "up to ~150" not in CRITIC_SYSTEM_PROMPT  # BUN row
+        assert "up to ~135" not in CRITIC_SYSTEM_PROMPT  # lactate mg/dL row
+        # Universal-impossibility floor preserved (or analogous wording):
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        assert (
+            "biologically impossible" in prompt_lower
+            or "incompatible with life" in prompt_lower
+        )
+
+    def test_prompt_directs_to_tools_for_ranges(self):
+        """Critic is told to use the tools for population-typical and
+        cohort-typical ranges instead of recalling them."""
+        assert "loinc_reference_range" in CRITIC_SYSTEM_PROMPT
+        assert "mimic_distribution_lookup" in CRITIC_SYSTEM_PROMPT
+
+    def test_prompt_preserves_cohort_selection_principle(self):
+        """The cohort-selection adjustment rule (added in f23f5bf) is the
+        most important calibration concept — must survive the shrink."""
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        assert "cohort selection" in prompt_lower or "cohort-selection" in prompt_lower
+        assert "selection bias" in prompt_lower
+
+    def test_prompt_preserves_self_healing_loinc_section(self):
+        """The self-healing LOINC suggestion path (suggested_loinc field)
+        is orthogonal to the externally-grounded critic and must remain."""
+        assert "suggested_loinc" in CRITIC_SYSTEM_PROMPT
+        assert "correction_rationale" in CRITIC_SYSTEM_PROMPT
+
+    def test_prompt_documents_multi_source_cited_sources_shape(self):
+        """cited_sources schema in the prompt advertises the multi-source
+        ``{source, id}`` shape so the model emits citations the validator
+        will accept."""
+        # The schema example mentions either the legacy or the new shape;
+        # at minimum, multi-source citations are documented somewhere.
+        assert (
+            '"source"' in CRITIC_SYSTEM_PROMPT
+            or "source =" in CRITIC_SYSTEM_PROMPT
+            or "registry" in CRITIC_SYSTEM_PROMPT.lower()
+        )

@@ -1491,6 +1491,124 @@ class TestCriticToolUseIntegration:
         assert result.critic_verdict.cited_sources[0]["pmid"] == "12345"
 
 
+class TestCriticToolTelemetry:
+    """Phase H: per-tool critic telemetry counters in the orchestrator.
+
+    Mirrors the ``_pre_validator_*`` counter pattern. The orchestrator
+    increments ``_critic_invocations`` once per critique() that returned
+    a verdict, plus per-tool counts in ``_critic_tool_calls`` and
+    per-tool unavailable counts in ``_critic_tool_unavailable``."""
+
+    @_patch_pre_critic
+    def test_counters_initialized_to_empty(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        assert pipeline._critic_invocations == 0
+        assert pipeline._critic_tool_calls == {}
+        assert pipeline._critic_tool_unavailable == {}
+
+    @_patch_pre_critic
+    def test_counters_drain_per_tool_call(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        monkeypatch,
+    ):
+        from tests.test_conversational.conftest import mock_anthropic
+
+        _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        # One ok pubmed call + one unavailable loinc call, then verdict.
+        monkeypatch.setattr(
+            "src.conversational.critic.pubmed_search",
+            lambda **kw: {"status": "ok", "results": [
+                {"pmid": "1", "title": "x", "url": "u"},
+            ]},
+        )
+        monkeypatch.setattr(
+            "src.conversational.critic.loinc_reference_range",
+            lambda **kw: {"status": "unavailable", "error": "no catalog"},
+        )
+
+        client = mock_anthropic([
+            {
+                "tool_use": [{"id": "tu1", "name": "pubmed_search",
+                              "input": {"query": "q"}}],
+                "stop_reason": "tool_use",
+            },
+            {
+                "tool_use": [{"id": "tu2", "name": "loinc_reference_range",
+                              "input": {"loinc_code": "1234-5"}}],
+                "stop_reason": "tool_use",
+            },
+            {
+                "text": json.dumps({
+                    "plausible": True, "severity": "info", "concern": None,
+                }),
+                "stop_reason": "end_turn",
+            },
+        ])
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = client
+        pipeline.ask("any question")
+
+        assert pipeline._critic_invocations == 1
+        assert pipeline._critic_tool_calls.get("pubmed_search") == 1
+        assert pipeline._critic_tool_unavailable.get(
+            "loinc_reference_range",
+        ) == 1
+        # The ok call doesn't show up in unavailable; the unavailable doesn't
+        # show up in tool_calls (or it does — see implementation choice).
+        # Implementation choice: tool_calls counts ALL invocations, including
+        # unavailable; unavailable is a SUBSET tracking failures.
+        assert pipeline._critic_tool_calls.get("loinc_reference_range") == 1
+
+    @_patch_pre_critic
+    def test_counters_unchanged_when_critic_disabled(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=False,
+        )
+        pipeline.ask("any question")
+        assert pipeline._critic_invocations == 0
+        assert pipeline._critic_tool_calls == {}
+        assert pipeline._critic_tool_unavailable == {}
+
+    @_patch_pre_critic
+    def test_counters_unchanged_when_critic_returns_none(
+        self,
+        mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        monkeypatch,
+    ):
+        """If the critic fails (returns None), the orchestrator should NOT
+        increment ``_critic_invocations`` — only successful verdicts count."""
+        _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+        )
+        monkeypatch.setattr(
+            "src.conversational.orchestrator.critique",
+            lambda *a, **kw: None,
+        )
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline.ask("any question")
+        assert pipeline._critic_invocations == 0
+        assert pipeline._critic_tool_calls == {}
+        assert pipeline._critic_tool_unavailable == {}
+
+
 # ---------------------------------------------------------------------------
 # TestPreValidatorIntegration — Phase B end-to-end wiring tests.
 #

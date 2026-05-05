@@ -14,16 +14,36 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-CitationSource = Literal["pubmed", "loinc", "mimic_distribution"]
+CitationSource = Literal[
+    "pubmed",
+    "loinc",
+    "mimic_distribution",
+    "snomed",
+    "rxnorm",
+    "icd",
+    "openfda",
+    "clinicaltrials",
+]
 
 
 class Citation(BaseModel):
     """One observed citation — a record returned by a tool call this turn.
 
     ``source`` is the registry the record came from; ``id`` is the canonical
-    identifier within that registry (PMID for pubmed, LOINC code for loinc,
-    MIMIC ``itemid`` for mimic_distribution). ``title`` and ``url`` are
-    convenience fields for downstream rendering."""
+    identifier within that registry. Mapping by tool name:
+
+    * ``pubmed`` — PMID (from ``pubmed_search``)
+    * ``loinc`` — LOINC code (from ``loinc_reference_range``)
+    * ``mimic_distribution`` — MIMIC ``itemid`` (from ``mimic_distribution_lookup``)
+    * ``snomed`` — SNOMED CT concept_id (from ``snomed_search`` /
+      ``snomed_expand_ecl``)
+    * ``rxnorm`` — RxNorm RXCUI (from ``rxnorm_lookup``)
+    * ``icd`` — ICD-10/11 code (from ``icd_lookup`` / ``icd_autocode``)
+    * ``openfda`` — drug brand or generic name (from ``openfda_drug_label`` —
+      OpenFDA records lack a stable per-record id in the normalized envelope)
+    * ``clinicaltrials`` — NCT ID (from ``trials_search``)
+
+    ``title`` and ``url`` are convenience fields for downstream rendering."""
 
     source: CitationSource
     id: str

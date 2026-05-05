@@ -210,55 +210,83 @@ class EvidenceAgent:
         observed_keys: set[tuple[str, str]],
     ) -> None:
         """Append observed citations from a tool result to ``observed`` /
-        ``observed_keys``, deduplicating by ``(source, id)``."""
+        ``observed_keys``, deduplicating by ``(source, id)``.
+
+        Each branch maps a tool's normalized result records to a
+        ``(CitationSource, id)`` pair. ``code_map`` is intentionally
+        absent: it produces cross-vocabulary mappings rather than primary
+        registry records, so its results aren't surfaced as citations
+        (the model can still reason about them in narrative)."""
         if not isinstance(result, dict) or result.get("status") != "ok":
             return
         for rec in result.get("results", []) or []:
             if not isinstance(rec, dict):
                 continue
+
+            source: str | None = None
+            id_str: str | None = None
+            title: str | None = None
+            url: str | None = None
+
             if tool_name == "pubmed_search":
                 pmid = str(rec.get("pmid") or "")
-                if not pmid:
-                    continue
-                key = ("pubmed", pmid)
-                if key in observed_keys:
-                    continue
-                observed_keys.add(key)
-                observed.append(Citation(
-                    source="pubmed",
-                    id=pmid,
-                    title=rec.get("title") or None,
-                    url=rec.get("url") or None,
-                ))
+                if pmid:
+                    source, id_str = "pubmed", pmid
+                    title = rec.get("title") or None
+                    url = rec.get("url") or None
             elif tool_name == "loinc_reference_range":
                 code = str(rec.get("loinc_code") or "")
-                if not code:
-                    continue
-                key = ("loinc", code)
-                if key in observed_keys:
-                    continue
-                observed_keys.add(key)
-                observed.append(Citation(
-                    source="loinc",
-                    id=code,
-                    title=None,
-                    url=None,
-                ))
+                if code:
+                    source, id_str = "loinc", code
             elif tool_name == "mimic_distribution_lookup":
                 itemid = rec.get("itemid")
-                if itemid is None:
-                    continue
-                id_str = str(itemid)
-                key = ("mimic_distribution", id_str)
-                if key in observed_keys:
-                    continue
-                observed_keys.add(key)
-                observed.append(Citation(
-                    source="mimic_distribution",
-                    id=id_str,
-                    title=None,
-                    url=None,
-                ))
+                if itemid is not None:
+                    source, id_str = "mimic_distribution", str(itemid)
+            elif tool_name in ("snomed_search", "snomed_expand_ecl"):
+                concept_id = str(rec.get("concept_id") or "")
+                if concept_id:
+                    source, id_str = "snomed", concept_id
+                    title = rec.get("preferred_term") or None
+            elif tool_name == "rxnorm_lookup":
+                rxcui = str(rec.get("rxcui") or "")
+                if rxcui:
+                    source, id_str = "rxnorm", rxcui
+                    title = rec.get("name") or None
+            elif tool_name in ("icd_lookup", "icd_autocode"):
+                icd_code = str(rec.get("code") or "")
+                if icd_code:
+                    source, id_str = "icd", icd_code
+                    title = rec.get("title") or None
+            elif tool_name == "openfda_drug_label":
+                # OpenFDA records lack a stable id in the normalized
+                # envelope; fall back to brand → generic name.
+                drug_id = str(rec.get("brand_name") or rec.get("generic_name") or "")
+                if drug_id:
+                    source, id_str = "openfda", drug_id
+                    title = rec.get("generic_name") or rec.get("brand_name") or None
+            elif tool_name == "trials_search":
+                nct_id = str(rec.get("nct_id") or "")
+                if nct_id:
+                    source, id_str = "clinicaltrials", nct_id
+                    title = rec.get("brief_title") or None
+                    url = (
+                        f"https://clinicaltrials.gov/study/{nct_id}"
+                        if nct_id else None
+                    )
+            # code_map: intentionally not cited — it's a mapping, not a record.
+
+            if source is None or not id_str:
+                continue
+            key = (source, id_str)
+            if key in observed_keys:
+                continue
+            observed_keys.add(key)
+            observed.append(Citation(
+                source=source,  # type: ignore[arg-type]
+                id=id_str,
+                title=title,
+                url=url,
+            ))
 
     @staticmethod
     def _record_tool_call(

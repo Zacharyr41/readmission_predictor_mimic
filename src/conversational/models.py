@@ -313,13 +313,25 @@ class CriticVerdict(BaseModel):
     # critic response never crashes a turn.
     suggested_loinc: str | None = None
     correction_rationale: str | None = None
-    # Externally-grounded evidence: when the critic invokes ``pubmed_search``
-    # (or other future tools), it can cite the records it consulted. Each
-    # entry: ``{"type": "pubmed", "pmid": str, "title": str, "url": str}``.
-    # The validator does shape-only checks (drops malformed entries); the
-    # critic loop is responsible for filtering against actually-observed
-    # PMIDs to prevent the model from fabricating citations.
+    # Externally-grounded evidence: when the critic invokes any of its
+    # tools (pubmed_search, loinc_reference_range, mimic_distribution_lookup,
+    # snomed_*, rxnorm_lookup, icd_*, openfda_drug_label, trials_search,
+    # code_map), it can cite the records it consulted. Each entry uses
+    # either the multi-source shape ``{"source": <registry>, "id": <id>,
+    # "title"?, "url"?}`` or the legacy PubMed shape ``{"type": "pubmed",
+    # "pmid": <digits>, "title"?, "url"?}``. The validator does shape-only
+    # checks (drops malformed entries); upstream
+    # ``EvidenceResult.filter_claimed_citations`` drops citations not
+    # backed by an observed tool result, preventing the model from
+    # fabricating references.
     cited_sources: list[dict] | None = None
+    # Phase H: per-tool telemetry from the critic's tool-use loop. Each
+    # entry: ``{"name": <tool>, "status": "ok"|"unavailable",
+    # "n_results": int}``. Populated by ``critique()`` from the underlying
+    # ``EvidenceResult.tool_calls``; drained by the orchestrator into
+    # cumulative counters. Debug-level data; safe to expose in the chat
+    # UI debug pane but not surfaced in user-visible verdict text.
+    tool_calls: list[dict] | None = None
 
     @field_validator("suggested_loinc", mode="before")
     @classmethod
@@ -335,10 +347,20 @@ class CriticVerdict(BaseModel):
     def _validate_cited_sources_shape(cls, v):
         """Drop malformed entries; coerce empty list to None.
 
-        Accepts entries that are dicts with a string-coercible ``pmid``
-        consisting of digits. Other entries are silently dropped. If the
-        list ends up empty after filtering, returns None to keep the
-        no-citations state distinguishable from the empty-list state."""
+        Two accepted shapes (filter_claimed_citations already dropped
+        hallucinated entries upstream — this validator only enforces a
+        sane schema for downstream rendering):
+
+        * Legacy PubMed: ``{"type": "pubmed", "pmid": "<digits>", ...}``.
+          ``pmid`` is coerced to a string of digits; non-digit pmids drop.
+        * Multi-source: ``{"source": "<registry>", "id": "<str>", ...}``
+          where ``source`` and ``id`` are non-empty strings. Used for
+          loinc / mimic_distribution / snomed / rxnorm / icd / openfda /
+          clinicaltrials citations.
+
+        If the list ends up empty after filtering, returns None to keep
+        the no-citations state distinguishable from the empty-list state.
+        """
         if v is None or v == "":
             return None
         if not isinstance(v, list):
@@ -347,6 +369,13 @@ class CriticVerdict(BaseModel):
         for item in v:
             if not isinstance(item, dict):
                 continue
+            # Multi-source shape: {source, id, ...}
+            source = item.get("source")
+            id_val = item.get("id")
+            if isinstance(source, str) and source and id_val not in (None, ""):
+                cleaned.append({**item, "id": str(id_val)})
+                continue
+            # Legacy PubMed shape: {type: "pubmed", pmid: digits, ...}
             pmid = item.get("pmid")
             if pmid is None:
                 continue

@@ -137,6 +137,14 @@ class ConversationalPipeline:
         self._clarify_enrichments: int = 0
         self._contextualizations: int = 0
         self._sub_agent_consultations: int = 0
+        # Phase H: critic tool-use telemetry. Cumulative across ask() calls.
+        # ``_critic_invocations`` counts critique() calls that produced a
+        # verdict (None returns don't count — they're failure-mode
+        # telemetry on a different surface). Per-tool dicts track each
+        # tool's invocation count and unavailable subset.
+        self._critic_invocations: int = 0
+        self._critic_tool_calls: dict[str, int] = {}
+        self._critic_tool_unavailable: dict[str, int] = {}
         # Per-turn cache: maps a CQ identity (id() at decomp time) to the
         # list of partial Disambiguation objects produced for it. The
         # clarify short-circuit reads this so it can pass partials to the
@@ -504,6 +512,18 @@ class ConversationalPipeline:
         verdict = critique(self._client, cq, sub, fallback_warning=fallback_warning)
         if verdict is not None:
             sub.critic_verdict = verdict
+            self._critic_invocations += 1
+            for tc in verdict.tool_calls or []:
+                name = tc.get("name") or ""
+                if not name:
+                    continue
+                self._critic_tool_calls[name] = (
+                    self._critic_tool_calls.get(name, 0) + 1
+                )
+                if tc.get("status") == "unavailable":
+                    self._critic_tool_unavailable[name] = (
+                        self._critic_tool_unavailable.get(name, 0) + 1
+                    )
         return sub
 
     def _contextualize(

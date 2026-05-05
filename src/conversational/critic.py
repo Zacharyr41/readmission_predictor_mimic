@@ -34,13 +34,25 @@ from typing import Any
 import anthropic
 from pydantic import ValidationError
 
-# Public alias kept at the module top so existing tests that monkeypatch
-# ``src.conversational.critic.pubmed_search`` continue to work — the
-# dispatch built below resolves the tool name through this module's
-# globals at call time.
+# Public aliases kept at the module top so existing tests that monkeypatch
+# ``src.conversational.critic.<tool_name>`` continue to work — the dispatch
+# built below resolves each tool name through this module's globals at call
+# time.
 from src.conversational.health_evidence import EvidenceAgent
-from src.conversational.health_evidence.tool_defs import PUBMED_SEARCH_TOOL_DEF
-from src.conversational.health_evidence.tools import pubmed_search  # noqa: F401  (test monkeypatch hook)
+from src.conversational.health_evidence.tool_defs import ALL_TOOL_DEFS
+from src.conversational.health_evidence.tools import (  # noqa: F401  (test monkeypatch hooks)
+    code_map,
+    icd_autocode,
+    icd_lookup,
+    loinc_reference_range,
+    mimic_distribution_lookup,
+    openfda_drug_label,
+    pubmed_search,
+    rxnorm_lookup,
+    snomed_expand_ecl,
+    snomed_search,
+    trials_search,
+)
 from src.conversational.models import (
     AnswerResult,
     CompetencyQuestion,
@@ -61,23 +73,50 @@ _RAW_RESPONSE_TRUNCATE = 500
 _MAX_TOOL_ITERATIONS = 3
 
 
+# Tools the critic has access to. Adding a new tool is a one-line change
+# here PLUS a corresponding ``from ... import <name>  # noqa: F401`` so
+# tests can monkeypatch ``src.conversational.critic.<name>``.
+_CRITIC_TOOLS: tuple[str, ...] = (
+    "pubmed_search",
+    "loinc_reference_range",
+    "mimic_distribution_lookup",
+    "snomed_search",
+    "snomed_expand_ecl",
+    "rxnorm_lookup",
+    "code_map",
+    "trials_search",
+    "openfda_drug_label",
+    "icd_lookup",
+    "icd_autocode",
+)
+
+
+# Tool definitions filtered from the canonical registry. The model receives
+# this list in its system block; the dispatch below routes invocations.
+_CRITIC_TOOL_DEFS: list[dict[str, Any]] = [
+    d for d in ALL_TOOL_DEFS if d["name"] in _CRITIC_TOOLS
+]
+
+
 def _critic_tool_dispatch() -> dict[str, Any]:
     """Build a per-call tool_dispatch that resolves names through THIS
     module's globals.
 
     This preserves the existing test pattern: tests monkeypatch
-    ``src.conversational.critic.pubmed_search`` to inject canned tool
-    responses. The lambda looks up ``pubmed_search`` in the module dict
-    at *call* time, so the patch takes effect even though the function
-    object was imported at module load.
+    ``src.conversational.critic.<tool_name>`` to inject canned tool
+    responses. Each lambda looks up its tool in the module dict at *call*
+    time, so the patch takes effect even though the function object was
+    imported at module load.
 
-    Without this indirection, the EvidenceAgent's default ``TOOL_DISPATCH``
-    captures the unpatched function reference at import time and the
-    monkeypatch would silently no-op.
+    The ``_n=name`` default-arg trick is the standard fix for Python's
+    late-binding closure pitfall — without it, every lambda in this
+    comprehension would close over the same ``name`` and dispatch to
+    whichever tool happened to be last in the iteration.
     """
     module_dict = sys.modules[__name__].__dict__
     return {
-        "pubmed_search": lambda **kw: module_dict["pubmed_search"](**kw),
+        name: (lambda _n=name, **kw: module_dict[_n](**kw))
+        for name in _CRITIC_TOOLS
     }
 
 
@@ -120,7 +159,7 @@ def critique(
             max_tokens=_MAX_TOKENS,
             max_iterations=_MAX_TOOL_ITERATIONS,
             timeout=timeout,
-            tools=[PUBMED_SEARCH_TOOL_DEF],
+            tools=list(_CRITIC_TOOL_DEFS),
             tool_dispatch=_critic_tool_dispatch(),
         )
         result = agent.consult(CRITIC_SYSTEM_PROMPT, user_message)
@@ -136,10 +175,15 @@ def critique(
         parsed["cited_sources"] = result.filter_claimed_citations(
             parsed.get("cited_sources"),
         )
+        # Drop tool_calls if the model emitted one — the field is
+        # populated post-construction from the agent's ground-truth
+        # ``EvidenceResult.tool_calls``, not from the model's claim.
+        parsed.pop("tool_calls", None)
         try:
             verdict = CriticVerdict(
                 **parsed,
                 raw_response=result.final_text[:_RAW_RESPONSE_TRUNCATE],
+                tool_calls=[tc.model_dump() for tc in result.tool_calls] or None,
             )
         except ValidationError as exc:
             logger.warning(
