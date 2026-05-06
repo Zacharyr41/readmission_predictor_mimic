@@ -20,6 +20,21 @@ question."
   fine with zero of them — the LOINC + MIMIC + PubMed offline path
   is the floor.
 
+## ⚠️ Tier D: `DATA_SOURCE` must match your session backend
+
+The on-the-fly cohort compute fallback reads `DATA_SOURCE` from
+`.env` (not from the streamlit sidebar). For the critic's compute
+results to match what the chat UI is actually querying:
+
+```bash
+# In .env — match this to whichever backend your sidebar normally uses
+DATA_SOURCE=bigquery   # or "local" for DuckDB
+```
+
+Restart streamlit after changing this so the env var gets re-sourced.
+The catalog cache is source-agnostic and works regardless; only the
+on-the-fly path is affected.
+
 ## 0 — Pre-flight
 
 ```bash

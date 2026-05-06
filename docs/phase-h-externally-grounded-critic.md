@@ -277,6 +277,22 @@ populated `diagnoses_icd` table.
 - **Snapshot test.** `tests/test_conversational/fixtures/critic_prompt_snapshot.txt`
   was regenerated. Future prompt edits will fail the snapshot test
   with a clear "rm snapshot, re-run, commit" path.
+- **Sidebar / `DATA_SOURCE` mismatch (Tier D).** The streamlit chat-UI
+  sidebar lets the user pick `local` vs `BigQuery` for the *pipeline*
+  (the part that runs the user's question). The on-the-fly cohort
+  compute helper reads `DATA_SOURCE` from the environment directly —
+  it does NOT watch the sidebar. If the two disagree, the catalog
+  cache still works fine (it's source-agnostic), but the on-the-fly
+  fallback would query the "wrong" backend. Set `DATA_SOURCE` in
+  your `.env` to match the sidebar mode you typically use:
+  ```bash
+  # In .env — match this to your normal sidebar selection
+  DATA_SOURCE=bigquery
+  ```
+  When the user toggles between modes, restart streamlit after
+  changing `DATA_SOURCE` so the env var is re-sourced. (Future
+  improvement: thread the active backend through to the critic at
+  call time so this mismatch can't arise. Bucket 6 territory.)
 
 ## Verification (when this lands)
 
