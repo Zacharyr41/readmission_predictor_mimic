@@ -1196,6 +1196,128 @@ class TestCriticPromptShape:
             or "registry" in CRITIC_SYSTEM_PROMPT.lower()
         )
 
+    def test_prompt_teaches_cohort_p95_overshoot_handling(self):
+        """When mimic_distribution_lookup returns a cohort distribution
+        and the answer's value sits above the cohort p95, the model
+        must NOT auto-flag as pollution. Cohort distributions have
+        right tails; sub-cohorts shift further (sepsis p95=6.9 →
+        septic_shock p95=8.5 → hepatic_failure p95=10.2 for lactate).
+        Exceeding p95 alone is not sufficient evidence of pollution.
+
+        Without this guidance the critic flagged lactate=7.99 mmol/L
+        in sepsis as 'warn / unit-pooling pollution' even though the
+        value is well within published lactate-mortality strata for
+        severe septic shock and below septic_shock cohort p95."""
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        # The prompt must contain at least one explicit phrase that
+        # tells the model "above cohort p95 alone isn't pollution."
+        # Use a tight whitelist — substring of a phrase, not single
+        # words like "exceed" that could appear incidentally.
+        explicit_signals = [
+            "above p95",
+            "above the p95",
+            "above cohort p95",
+            "exceed.*p95",      # regex-ish hint; checked literally below
+            "right tail",
+            "right-tail",
+            "p95 alone",
+            "exceed p95",
+            "p95 is not sufficient",
+            "p95 is not enough",
+            "sit above p95",
+        ]
+        has_explicit_signal = any(
+            signal in prompt_lower for signal in explicit_signals
+        )
+        assert has_explicit_signal, (
+            "prompt must contain an explicit 'above cohort p95 alone "
+            "is not pollution' phrase — currently the model defaults "
+            "to interpreting any p95 overshoot as pollution. Substring "
+            f"checked: any of {explicit_signals!r}"
+        )
+
+    def test_prompt_has_lactate_sepsis_worked_example(self):
+        """Worked example anchoring the canonical case from
+        ``memory/project_critic_external_grounding.md``: lactate 7-8
+        mmol/L in sepsis is shifted-but-plausible. The prompt must
+        spell this out concretely so the model has a pattern to
+        match — abstract cohort-selection rules aren't enough.
+
+        Specifically: the example must mention septic shock as the
+        more-severe sibling cohort (since sepsis p95=6.9 but
+        septic_shock p95=8.5 — that comparison is the calibration
+        anchor)."""
+        prompt = CRITIC_SYSTEM_PROMPT
+        prompt_lower = prompt.lower()
+        # Septic-shock mention is the load-bearing piece.
+        assert "septic shock" in prompt_lower, (
+            "worked example must mention 'septic shock' as the "
+            "sibling cohort with higher p95 — this is the comparison "
+            "the model needs to make to avoid false-flagging"
+        )
+        # The worked example must connect lactate to a concrete value
+        # in the 7-8 mmol/L range. Find a paragraph that mentions
+        # both "worked example" (or "lactate") AND a 7/8 anchor near
+        # the septic-shock comparison.
+        idx_septic_shock = prompt_lower.find("septic shock")
+        # Search a window AROUND the septic-shock mention since that's
+        # where the worked example lives.
+        window_start = max(0, idx_septic_shock - 400)
+        window_end = min(len(prompt), idx_septic_shock + 600)
+        window = prompt[window_start:window_end].lower()
+        has_lactate_in_window = "lactate" in window
+        assert has_lactate_in_window, (
+            "lactate must appear near the septic-shock mention "
+            "(worked example location)"
+        )
+        has_concrete_number = any(
+            token in window for token in (
+                "7.99", "7-8", "7 mmol", "8 mmol",
+                "≈ 6.9", "≈6.9", "8.5",
+                "p95 ≈", "p95 ~", "~6.9", "~8.5",
+            )
+        )
+        assert has_concrete_number, (
+            "worked example must include concrete numbers (7.99, "
+            "p95 ≈ 6.9, p95 ≈ 8.5, etc.) so the model has a numeric "
+            "anchor"
+        )
+
+    def test_prompt_specifies_concrete_warn_threshold(self):
+        """The pre-Tier-D cohort-selection rule said 'high enough to
+        suggest pollution' but didn't quantify. The prompt must give
+        a concrete signal so the model has a calibration anchor —
+        either a multiplier (3×, 5×) over cohort p95 OR a
+        sibling-cohort check (compare against the more-severe
+        cohort's distribution before flagging)."""
+        prompt = CRITIC_SYSTEM_PROMPT
+        prompt_lower = prompt.lower()
+        # At least one concrete signal must be present. Tighten by
+        # requiring multi-word phrases, not just "3x" which could be
+        # incidental.
+        explicit_signals = [
+            "sibling cohort",
+            "sibling-cohort",
+            "more-severe",
+            "more severe cohort",
+            "more severe sub-cohort",
+            "sub-cohort",
+            "subcohort",
+            "3× p95",
+            "3x p95",
+            "5× p95",
+            "5x p95",
+            "two to three times",
+            "2-3× p95",
+            "twice the p95",
+        ]
+        has_concrete = any(s in prompt_lower for s in explicit_signals)
+        assert has_concrete, (
+            "prompt must give a concrete warn threshold or "
+            "sibling-cohort comparison rule. Substring checked: any "
+            f"of {explicit_signals!r}"
+        )
+
     def test_prompt_documents_cohort_param_for_mimic_lookup(self):
         """Phase H Tier D — prompt teaches the model that
         mimic_distribution_lookup accepts cohort= for natural medical

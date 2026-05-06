@@ -91,10 +91,86 @@ backend means the scenario didn't trip the model — not necessarily a
 bug. Re-run once or twice; if a configured backend never fires across
 3 runs, investigate.
 
-## 2 — Inspect what the critic actually did
+## 2 — Canonical case: single-patient lactate 7.99 in sepsis (→ info)
 
-Run the canonical lactate-in-sepsis case directly through `critique()`
-to see the verdict structure. Copy-paste:
+The canonical case from `memory/project_critic_external_grounding.md`:
+**a single patient** in sepsis with a lactate measurement of 7.99 mmol/L.
+This is a right-tail individual value — published lactate-mortality
+strata (J Thorac Dis 2016;8(7):1388 etc.) put 4–8 mmol/L as typical
+for severe septic shock. Expected verdict: `severity="info"`.
+
+Note the `scope="single_patient"` and `n=1` framing — this is what
+makes it a per-row distribution question, not an aggregate.
+
+```bash
+.venv/bin/python <<'PY'
+import os, json, anthropic
+from src.conversational.critic import critique
+from src.conversational.models import (
+    AnswerResult, ClinicalConcept, CompetencyQuestion,
+)
+
+api_key = os.environ.get("ANTHROPIC_API_KEY") or open(".env").read().split("ANTHROPIC_API_KEY=")[1].split("\n")[0].strip()
+client = anthropic.Anthropic(api_key=api_key)
+
+cq = CompetencyQuestion(
+    original_question="A sepsis patient's lactate reading was 7.99 mmol/L. Is that plausible?",
+    clinical_concepts=[ClinicalConcept(name="lactate", concept_type="biomarker")],
+    return_type="text_and_table", scope="single_patient",
+    interpretation_summary="Single sepsis admission, individual lactate measurement.",
+)
+answer = AnswerResult(
+    text_summary="The patient's lactate was 7.99 mmol/L (single measurement, n=1) — they have sepsis.",
+    data_table=[{"lactate_mmol_per_L": 7.99, "patient_count": 1}],
+)
+verdict = critique(client, cq, answer)
+print(json.dumps(verdict.model_dump() if verdict else None, indent=2, default=str))
+PY
+```
+
+**What success looks like** for this scenario:
+
+- `severity: "info"` (the value is shifted-but-plausible for a sepsis
+  patient — right tail of the cohort distribution).
+- `tool_calls` non-null and non-empty, ideally including a
+  `mimic_distribution_lookup` call with `cohort="sepsis"` so the model
+  is consulting the empirical distribution (not just recalling
+  training-data ranges).
+- If the model also called `pubmed_search`, that's a bonus — sepsis
+  lactate-mortality literature is the right population-level evidence.
+
+For reference (from the Tier-D production catalog):
+- All-MIMIC lactate p95: **4.7 mmol/L**
+- Sepsis-cohort lactate p95: **6.9 mmol/L**
+- Septic-shock-cohort lactate p95: **8.5 mmol/L**
+- Hepatic-failure-cohort lactate p95: **10.2 mmol/L**
+
+So a single-patient value of 7.99 mmol/L sits below septic_shock p95
+and well below hepatic_failure p95 — clearly within the right-tail of
+severity-selected distributions.
+
+**What failure looks like:**
+
+- `severity: "warn"` or `"block"` for this question would be a
+  regression — the critic ignored the cohort-selection principle.
+- `cited_sources: null` AND the verdict reasoning mentions a specific
+  range — that means the model recalled instead of looking up. Check
+  the `tool_calls` field; if it's empty, the prompt isn't routing the
+  model to tools strongly enough.
+- `verdict is None` means `critique()` failed entirely. Check the log;
+  the agent's exception is logged at WARNING level.
+
+## 2b — Counter-case: cohort *mean* of 7.99 across 512 sepsis patients (→ warn)
+
+Same value, different question: instead of a single patient, this is
+a *cohort mean* across 512 sepsis admissions. That distinction matters
+hugely. Sepsis-cohort lactate **mean** in MIMIC is ~2.4 mmol/L; even
+septic_shock cohort mean is ~2.8 mmol/L. A cohort mean of 7.99 means
+the *entire distribution* has shifted up — which suggests pollution
+(e.g., LDH-pooled values), units mismatch, or unusually narrow
+selection that the user should justify. Expected: `severity="warn"`.
+
+Note the `scope="cohort"` and `n=512` framing.
 
 ```bash
 .venv/bin/python <<'PY'
@@ -117,50 +193,28 @@ answer = AnswerResult(
     text_summary="Mean lactate 7.99 mmol/L (n=512) in sepsis cohort.",
     data_table=[{"mean_lactate_mmol_per_L": 7.99, "n": 512}],
 )
-
 verdict = critique(client, cq, answer)
 print(json.dumps(verdict.model_dump() if verdict else None, indent=2, default=str))
 PY
 ```
 
-**What success looks like** for this scenario:
+**What success looks like:**
 
-- `severity: "info"` (the value is shifted-but-plausible for sepsis,
-  per the cohort-selection principle).
-- `cited_sources` non-null with at least one entry, ideally referencing
-  `mimic_distribution` or `pubmed`. A `loinc` citation alone is a yellow
-  flag — the LOINC normal range says 0.5–2.2 mmol/L, so the model
-  citing only LOINC suggests it didn't account for cohort selection.
-- `tool_calls` non-null and non-empty, with at least one `status: "ok"`
-  entry.
-- **Tier D bonus:** the model should pass `cohort="sepsis"` (or a
-  natural alias like `"septicemia"`) to `mimic_distribution_lookup`,
-  not just `mimic_distribution_lookup(itemid=50813)` with no cohort.
-  Inspect the `tool_calls` entry's `input` field — `cohort` should be
-  present. If it isn't, the prompt's cohort guidance isn't biting.
-
-For reference (from the Tier-D production catalog):
-- All-MIMIC lactate p95: **4.7 mmol/L**
-- Sepsis-cohort lactate p95: **6.9 mmol/L**
-- Septic-shock-cohort lactate p95: **8.5 mmol/L**
-- Hepatic-failure-cohort lactate p95: **10.2 mmol/L**
-
-So 7.99 mmol/L sits between sepsis p95 and septic-shock p95 — high
-but not implausible for the cohort. The critic should reach this
-conclusion via the tool, not from training recall.
+- `severity: "warn"` with a concern that **distinguishes the mean
+  from per-row p95** — the model should explicitly note that 7.99 is
+  ~3× the cohort mean (2.4) and that a cohort mean shifted that far
+  isn't right-tail variance, it's distributional shift.
+- `tool_calls` includes `mimic_distribution_lookup(cohort="sepsis")`
+  AND ideally `cohort="septic_shock"` (the model should sibling-check
+  before flagging — see the prompt's worked example).
 
 **What failure looks like:**
 
-- `severity: "warn"` or `"block"` for this question would be a
-  regression — pre-Phase-H the critic could have flagged it as
-  "polluted with LDH" without checking the cohort distribution. Phase
-  H should call `mimic_distribution_lookup` first.
-- `cited_sources: null` AND the verdict reasoning mentions a specific
-  range — that means the model recalled instead of looking up. Check
-  the `tool_calls` field; if it's empty, the prompt isn't routing the
-  model to tools strongly enough.
-- `verdict is None` means `critique()` failed entirely. Check the log;
-  the agent's exception is logged at WARNING level.
+- `severity: "info"` — the model conflated single-row right-tail
+  with cohort-mean shift. The cohort-mean signal is the load-bearing
+  reason this should warn.
+- The concern says "above p95" without distinguishing mean vs p95 —
+  that's an apples-to-oranges comparison the prompt now warns against.
 
 ## 3 — Niche-analyte scenario (forces a LOINC lookup)
 

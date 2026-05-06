@@ -65,7 +65,15 @@ logger = logging.getLogger(__name__)
 
 # Sonnet 4.6 is the right tier for clinical-judgment tasks.
 _CRITIC_MODEL = "claude-sonnet-4-6"
-_MAX_TOKENS = 600
+# Bumped from 600 → 1500 in Tier-D follow-up: cohort-stratified
+# reasoning (single-patient vs cohort-mean distinction, sibling-cohort
+# checks, multi-tool deliberation) regularly needed > 600 tokens to
+# both reason AND emit clean JSON. The 600-token ceiling caused
+# verdicts to come back as None because the model spent its budget
+# thinking and never reached the JSON output. Cost impact: ~2.5×
+# critic tokens per call worst case; mitigated by Sonnet 4.6 prompt
+# caching on the system block.
+_MAX_TOKENS = 1500
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 _MAX_DATA_TABLE_ROWS = 10
 _RAW_RESPONSE_TRUNCATE = 500

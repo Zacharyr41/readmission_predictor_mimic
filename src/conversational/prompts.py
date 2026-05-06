@@ -578,7 +578,26 @@ Decision rule for severity in selected cohorts:
   2. Reserve ``severity="warn"`` for values that are *high enough* to suggest pollution OR units mismatch, even after accounting for cohort selection.
   3. Reserve ``severity="block"`` for **biologically impossible** values AND **clear pollution signatures** (LDH ~150-300 U/L masquerading as lactate, urine ~100 mg/dL pooled with serum ~1 mg/dL creatinine).
 
-When in doubt — when you can't distinguish "shifted but plausible for this cohort" from "pollution" — call ``mimic_distribution_lookup`` for the cohort-typical distribution before deciding. If you still can't tell, default to ``severity="info"`` with the concern noting the ambiguity. The user-visible warning surface already exists for genuine grounding failures (LIKE-fallback warnings appear regardless of critic severity); the critic's job is to flag bugs, not add cautious notes to legitimate answers.
+### Calibrating against `mimic_distribution_lookup` results
+
+When you call ``mimic_distribution_lookup`` and the answer's value sits **above the returned cohort p95**, that is *not by itself* sufficient evidence of pollution. By construction, p95 means 5% of the cohort sits above it — the right tail of a severity-selected cohort distribution can extend much further. Two specific calibration anchors before flagging:
+
+  1. **Sibling-cohort check.** Many clinical cohorts have a more-severe sibling whose distribution shifts further: ``sepsis`` → ``septic_shock``; ``heart_failure`` → ``cardiogenic_shock``; ``aki`` → ``ckd`` (for chronic-on-acute); ``copd`` → ``respiratory_failure``. If the value sits below the sibling cohort's p95, it's still a single-cohort right-tail value — keep ``severity="info"``. Call ``mimic_distribution_lookup`` again with ``cohort="<sibling>"`` to confirm.
+
+  2. **Magnitude rule of thumb.** Plain "above p95" → still plausible (right tail). "Above p95 by ~3× the cohort mean" or "above the most-severe sibling cohort's p95 by 50%+" → starts to suggest pollution / units mismatch. Above the universal-impossibility floor → ``severity="block"`` regardless of cohort.
+
+### Match the comparison to the question's aggregation level
+
+`mimic_distribution_lookup` returns per-record stats (n, mean, p50, p95, units) — these describe the distribution of *individual measurements* for the cohort, NOT the distribution of *cohort means*. So:
+
+  - A **single-patient** value compares against the cohort's **p50 / p95 / individual-value range**. The question is "where in the cohort distribution does this one measurement sit?"
+  - An **aggregate** like a cohort mean compares against the cohort's **mean**, not its p95. A cohort mean of X mmol/L is roughly comparable to the catalog's mean for the same cohort — within a factor of ~1.5× either way is unremarkable, ~2-3× is suspicious, ~5×+ is almost certainly pollution. **NEVER compare a cohort-mean value against the cohort's p95** — that's apples-to-oranges (an aggregate vs a per-row quantile) and is the most common false-positive failure mode.
+
+**Worked example A — single-patient lactate 7.99 mmol/L in a sepsis admission.** Question: "Is this individual lactate value plausible for this sepsis patient?" The catalog reports sepsis lactate p95 ≈ 6.9 mmol/L (n=2936). 7.99 sits above sepsis p95, which on its own *might* suggest a problem. But: the more-severe sibling cohort ``septic_shock`` has p95 ≈ 8.5 mmol/L, and ``hepatic_failure`` has p95 ≈ 10.2 mmol/L — both above 7.99. Published lactate-mortality strata (J Thorac Dis 2016;8(7):1388 and similar) report 4–8 mmol/L as typical for severe septic shock. **Verdict: ``severity="info"``**, concern noting cohort is on the severe end (likely septic-shock subtype overlap). Do NOT flag — this is right-tail variance, not pollution.
+
+**Worked example B — cohort *mean* of lactate = 7.99 mmol/L across 512 sepsis admissions.** Same number, *very different* question: "Is the AVERAGE lactate across an entire sepsis cohort 7.99?" Sepsis cohort mean is ~2.4 mmol/L; even septic_shock mean is ~2.8 mmol/L. A cohort mean of 7.99 is ~3.3× the sepsis cohort mean and ~2.8× the septic_shock cohort mean. That is *not* right-tail variance — for the cohort mean to land at 7.99, the entire distribution would have shifted up dramatically, which strongly suggests pollution (e.g., LDH-pooled values), units mismatch, or a cohort filter that's too narrow to be calling itself "sepsis." **Verdict: ``severity="warn"``**, concern explicitly distinguishing cohort-mean from per-row p95 and noting the ~3× inflation relative to the sepsis cohort mean. Don't be misled by the value being "below septic_shock p95 = 8.5" — that p95 is a per-row statistic, not a cohort-mean expectation.
+
+When in doubt — when you can't distinguish "shifted but plausible for this cohort" from "pollution" — call ``mimic_distribution_lookup`` for the cohort-typical distribution before deciding, then check the more-severe sibling cohort. If the value sits below the sibling cohort's p95 OR within published clinical literature ranges (call ``pubmed_search`` if uncertain), default to ``severity="info"`` with the concern noting the cohort-adjusted expectation. The user-visible warning surface already exists for genuine grounding failures (LIKE-fallback warnings appear regardless of critic severity); the critic's job is to flag bugs, not add cautious notes to legitimate answers.
 
 # Available tools
 
