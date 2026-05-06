@@ -64,11 +64,26 @@ MIMIC_DISTRIBUTION_TOOL_DEF: dict[str, Any] = {
     "name": "mimic_distribution_lookup",
     "description": (
         "Look up the empirical distribution of a MIMIC laboratory or vital "
-        "by ``itemid``. Returns aggregate statistics (n, mean, median, p95, "
-        "units) computed offline from the full MIMIC cohort. Use to verify "
-        "that an aggregate value (e.g. 'mean creatinine 1.4 mg/dL') is in "
-        "line with the population. Returns {status: 'unavailable'} if the "
-        "distribution registry is missing or the itemid is not present."
+        "by ``itemid``, optionally narrowed to a clinical cohort (sepsis, "
+        "AKI, MI, heart failure, COVID-19, etc.). Returns aggregate "
+        "statistics (n, mean, median, p95, units) plus the cohort label "
+        "and source ('catalog' or 'computed').\n\n"
+        "Pass ``cohort='<medical phrase>'`` to get the cohort-typical "
+        "distribution. Natural phrases work — 'sepsis', 'myocardial "
+        "infarction', 'heart attack', 'CHF', 'COVID' all resolve to the "
+        "right canonical cohort via aliases. The user types medical "
+        "terminology; you are the translator. Use this when the answer "
+        "is over a severity-selected cohort and you need to settle "
+        "'shifted but plausible vs polluted' — sepsis lactate p95 is far "
+        "above general-MIMIC lactate p95, and that's selection bias not "
+        "a bug.\n\n"
+        "For cohorts not in the registry, you can pass raw "
+        "``icd10_prefixes=[...]`` and/or ``icd9_prefixes=[...]`` to "
+        "compute against any ICD-codable subset. (You can chain "
+        "``icd_lookup`` first to resolve a diagnosis name to ICD codes.)\n\n"
+        "Default ``cohort=None`` returns the unstratified ('all') bucket. "
+        "Returns ``{status: 'unavailable'}`` if the registry is missing, "
+        "the itemid isn't present, or the cohort can't be resolved."
     ),
     "input_schema": {
         "type": "object",
@@ -78,6 +93,33 @@ MIMIC_DISTRIBUTION_TOOL_DEF: dict[str, Any] = {
                 "description": (
                     "MIMIC labitem or chartitem id (the value joined to "
                     "``labevents.itemid`` / ``chartevents.itemid``)."
+                ),
+            },
+            "cohort": {
+                "type": "string",
+                "description": (
+                    "Optional medical phrase naming a clinical cohort — "
+                    "natural phrases are accepted (e.g. 'sepsis', "
+                    "'myocardial infarction', 'heart failure', 'COVID-19'). "
+                    "Default is the unstratified 'all' bucket."
+                ),
+            },
+            "icd10_prefixes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional ICD-10 code prefixes for arbitrary cohorts "
+                    "not in the registry. Standard dotted form accepted "
+                    "(e.g. ['A41.', 'R65.21'])."
+                ),
+            },
+            "icd9_prefixes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional ICD-9 code prefixes (e.g. ['995.91', '995.92']). "
+                    "Combine with icd10_prefixes for cohorts that span both "
+                    "ICD versions."
                 ),
             },
         },

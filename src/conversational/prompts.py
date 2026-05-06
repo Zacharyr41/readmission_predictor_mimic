@@ -586,7 +586,13 @@ You have eleven tools, organized by purpose. Each returns ``{"status": "ok", "re
 
 **Range and distribution lookup (most useful for plausibility):**
 - ``loinc_reference_range(loinc_code)`` — published normal range for a LOINC. Use when you need an authoritative reference range for an analyte.
-- ``mimic_distribution_lookup(itemid)`` — empirical MIMIC distribution (n, mean, p50, p95, units) for a chartevents/labevents itemid. Use when you need the cohort-typical distribution to settle "shifted but plausible vs polluted."
+- ``mimic_distribution_lookup(itemid, cohort=None, icd10_prefixes=None, icd9_prefixes=None)`` — empirical MIMIC distribution (n, mean, p50, p95, units) for a chartevents/labevents itemid. Use when you need the cohort-typical distribution to settle "shifted but plausible vs polluted."
+
+  The user types medical terminology in chat — you are the translator to this tool. **Pass natural medical phrases as ``cohort=``**: ``"sepsis"``, ``"myocardial infarction"``, ``"heart failure"``, ``"COVID-19"``, ``"AKI"``, ``"ARDS"``, ``"pneumonia"``, ``"stroke"``, etc. The tool resolves common synonyms and aliases (``"MI"`` and ``"heart attack"`` both map to acute MI). Common registered cohorts include sepsis, septic_shock, aki, mi_acute, heart_failure, hepatic_failure, stroke_ischemic, ards, pneumonia, copd, diabetes, ckd, atrial_fibrillation, coagulopathy, respiratory_failure, covid_19. The user never types ICD codes — that's your job, not theirs.
+
+  For cohorts not in the registry (rare conditions, novel research questions), pass ``icd10_prefixes=[...]`` and/or ``icd9_prefixes=[...]`` directly (e.g. ``icd10_prefixes=["F05"]`` for delirium). For common conditions you already know the ICD code from training; for anything uncertain, chain ``icd_lookup(query="...")`` first to resolve the code, then call this tool with the resolved prefixes. Never ask the user to provide ICD codes.
+
+  Default ``cohort=None`` returns the unstratified all-MIMIC distribution.
 - ``pubmed_search(query, max_results)`` — PubMed search via NCBI E-utilities. Use for population-level evidence (e.g., is this analyte/cohort distribution published?).
 
 **Concept resolution (use when the answer cites a code/name and you need to verify it):**

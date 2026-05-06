@@ -1,0 +1,119 @@
+{
+  "_metadata": {
+    "source": "Phase H Tier D — hand-curated clinical cohorts",
+    "schema_version": "1",
+    "icd_format": "Prefixes are stored in the standard dotted form (e.g. 'A41.', '995.91') for human readability against ICD references. The runtime SQL builder strips dots before pattern-matching MIMIC's no-dot storage.",
+    "reserved_names": ["all", "custom"]
+  },
+  "sepsis": {
+    "icd10_prefixes": ["A41.", "R65.20", "R65.21"],
+    "icd9_prefixes": ["995.91", "995.92"],
+    "aliases": ["sepsis", "septicemia", "bacteremia with sepsis", "severe sepsis"]
+  },
+  "septic_shock": {
+    "icd10_prefixes": ["R65.21"],
+    "icd9_prefixes": ["785.52"],
+    "aliases": ["septic shock"]
+  },
+  "aki": {
+    "icd10_prefixes": ["N17."],
+    "icd9_prefixes": ["584."],
+    "aliases": ["aki", "acute kidney injury", "acute renal failure", "arf"]
+  },
+  "mi_acute": {
+    "icd10_prefixes": ["I21.", "I22."],
+    "icd9_prefixes": ["410."],
+    "aliases": [
+      "mi", "myocardial infarction", "heart attack",
+      "stemi", "nstemi", "ami", "acute mi"
+    ]
+  },
+  "heart_failure": {
+    "icd10_prefixes": ["I50."],
+    "icd9_prefixes": ["428."],
+    "aliases": [
+      "heart failure", "chf", "congestive heart failure",
+      "cardiac failure", "hfref", "hfpef"
+    ]
+  },
+  "hepatic_failure": {
+    "icd10_prefixes": ["K72.", "K70.4"],
+    "icd9_prefixes": ["570", "572.2"],
+    "aliases": [
+      "hepatic failure", "liver failure",
+      "acute liver failure", "fulminant hepatic failure"
+    ]
+  },
+  "stroke_ischemic": {
+    "icd10_prefixes": ["I63."],
+    "icd9_prefixes": ["433.", "434."],
+    "aliases": [
+      "ischemic stroke", "stroke", "cva",
+      "cerebrovascular accident", "brain infarction"
+    ]
+  },
+  "ards": {
+    "icd10_prefixes": ["J80"],
+    "icd9_prefixes": ["518.5", "518.81", "518.82"],
+    "aliases": ["ards", "acute respiratory distress syndrome"]
+  },
+  "pneumonia": {
+    "icd10_prefixes": ["J18.", "J15.", "J13", "J14"],
+    "icd9_prefixes": ["480", "481", "482", "483", "484", "485", "486"],
+    "aliases": [
+      "pneumonia", "lung infection",
+      "community acquired pneumonia", "cap",
+      "hospital acquired pneumonia", "hap"
+    ]
+  },
+  "copd": {
+    "icd10_prefixes": ["J44."],
+    "icd9_prefixes": ["491.", "492.", "496"],
+    "aliases": [
+      "copd", "chronic obstructive pulmonary disease",
+      "emphysema", "chronic bronchitis"
+    ]
+  },
+  "diabetes": {
+    "icd10_prefixes": ["E11.", "E10."],
+    "icd9_prefixes": ["250."],
+    "aliases": [
+      "diabetes", "dm", "type 2 diabetes",
+      "type 1 diabetes", "t2dm", "t1dm", "diabetes mellitus"
+    ]
+  },
+  "ckd": {
+    "icd10_prefixes": ["N18."],
+    "icd9_prefixes": ["585."],
+    "aliases": ["ckd", "chronic kidney disease", "chronic renal failure", "esrd"]
+  },
+  "atrial_fibrillation": {
+    "icd10_prefixes": ["I48."],
+    "icd9_prefixes": ["427.31"],
+    "aliases": ["afib", "atrial fibrillation", "a fib", "af"]
+  },
+  "coagulopathy": {
+    "icd10_prefixes": ["D68.", "D69."],
+    "icd9_prefixes": ["286.", "287."],
+    "aliases": [
+      "coagulopathy", "bleeding disorder",
+      "thrombocytopenia", "platelet disorder"
+    ]
+  },
+  "respiratory_failure": {
+    "icd10_prefixes": ["J96."],
+    "icd9_prefixes": ["518.81", "518.82", "518.84"],
+    "aliases": [
+      "respiratory failure", "acute respiratory failure",
+      "hypoxemic respiratory failure"
+    ]
+  },
+  "covid_19": {
+    "icd10_prefixes": ["U07.1"],
+    "icd9_prefixes": [],
+    "aliases": [
+      "covid", "covid 19", "covid-19", "sars-cov-2",
+      "coronavirus", "novel coronavirus"
+    ]
+  }
+}

@@ -1195,3 +1195,39 @@ class TestCriticPromptShape:
             or "source =" in CRITIC_SYSTEM_PROMPT
             or "registry" in CRITIC_SYSTEM_PROMPT.lower()
         )
+
+    def test_prompt_documents_cohort_param_for_mimic_lookup(self):
+        """Phase H Tier D — prompt teaches the model that
+        mimic_distribution_lookup accepts cohort= for natural medical
+        phrases AND icd10_prefixes for arbitrary ICD-defined cohorts.
+        Goal: the user types medical terminology and the model is the
+        translator. The user must never need to know ICD codes."""
+        # cohort= parameter explicitly mentioned for mimic_distribution_lookup
+        assert "cohort" in CRITIC_SYSTEM_PROMPT
+        assert "mimic_distribution_lookup" in CRITIC_SYSTEM_PROMPT
+
+        # The prompt explicitly tells the model natural phrases work
+        # (so it doesn't ask the user for canonical names).
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        assert (
+            "natural" in prompt_lower
+            or "medical phrase" in prompt_lower
+            or "alias" in prompt_lower
+        )
+
+        # The icd_prefixes escape hatch is advertised so the model can
+        # handle cohorts not in the registry.
+        assert "icd10_prefixes" in CRITIC_SYSTEM_PROMPT
+
+        # At least three example cohort phrases so the model has a
+        # vocabulary to draw on without consulting the registry first.
+        cohort_phrases_present = sum(
+            1 for c in (
+                "sepsis", "aki", "myocardial infarction",
+                "heart failure", "ards", "pneumonia", "covid",
+            )
+            if c.lower() in prompt_lower
+        )
+        assert cohort_phrases_present >= 3, (
+            f"only {cohort_phrases_present} cohort phrases in prompt"
+        )

@@ -118,6 +118,21 @@ PY
   citing only LOINC suggests it didn't account for cohort selection.
 - `tool_calls` non-null and non-empty, with at least one `status: "ok"`
   entry.
+- **Tier D bonus:** the model should pass `cohort="sepsis"` (or a
+  natural alias like `"septicemia"`) to `mimic_distribution_lookup`,
+  not just `mimic_distribution_lookup(itemid=50813)` with no cohort.
+  Inspect the `tool_calls` entry's `input` field — `cohort` should be
+  present. If it isn't, the prompt's cohort guidance isn't biting.
+
+For reference (from the Tier-D production catalog):
+- All-MIMIC lactate p95: **4.7 mmol/L**
+- Sepsis-cohort lactate p95: **6.9 mmol/L**
+- Septic-shock-cohort lactate p95: **8.5 mmol/L**
+- Hepatic-failure-cohort lactate p95: **10.2 mmol/L**
+
+So 7.99 mmol/L sits between sepsis p95 and septic-shock p95 — high
+but not implausible for the cohort. The critic should reach this
+conclusion via the tool, not from training recall.
 
 **What failure looks like:**
 
@@ -172,6 +187,52 @@ that source.
 **Failure:** verdict references a hard-coded "0.0–0.5 ng/mL" with no
 tool call — the model recalled. The prompt's "don't recall, look up"
 instruction isn't biting hard enough.
+
+## 3b — Tier D raw-prefix scenario (cohort not in registry)
+
+This exercises the on-the-fly compute fallback. We pick a cohort
+that's deliberately NOT in `clinical_cohorts.json` — delirium
+(ICD-10 F05) — and ask the critic to reason about creatinine in
+delirium patients. The critic has two paths: (a) chain
+`icd_lookup(query="delirium")` to resolve, then call
+`mimic_distribution_lookup(icd10_prefixes=["F05"])`; (b) recall the
+ICD code from training and pass prefixes directly. Either path is
+valid — the user never sees ICD codes.
+
+```bash
+.venv/bin/python <<'PY'
+import os, json, anthropic
+from src.conversational.critic import critique
+from src.conversational.models import (
+    AnswerResult, ClinicalConcept, CompetencyQuestion,
+)
+
+api_key = os.environ.get("ANTHROPIC_API_KEY") or open(".env").read().split("ANTHROPIC_API_KEY=")[1].split("\n")[0].strip()
+client = anthropic.Anthropic(api_key=api_key)
+
+cq = CompetencyQuestion(
+    original_question="Mean creatinine in our delirium patients",
+    clinical_concepts=[ClinicalConcept(name="creatinine", concept_type="biomarker")],
+    return_type="text_and_table", scope="cohort",
+    interpretation_summary="Cohort: ICU admissions with delirium (ICD F05). Aggregate: mean serum creatinine.",
+)
+answer = AnswerResult(
+    text_summary="Mean creatinine 1.6 mg/dL (n=320) in delirium patients.",
+    data_table=[{"mean_creatinine_mg_dl": 1.6, "n": 320}],
+)
+verdict = critique(client, cq, answer)
+print(json.dumps(verdict.model_dump() if verdict else None, indent=2, default=str))
+PY
+```
+
+**Success:** `tool_calls` includes `mimic_distribution_lookup` with
+either `cohort="delirium"` (which falls through to compute) or
+`icd10_prefixes=["F05"]`. The result record has `source: "computed"`
+(not `"catalog"`). Latency ~50–200ms locally, ~1–3s on BigQuery.
+
+**Failure:** the critic guesses or skips the lookup entirely. Or:
+`source: "computed"` but `units` is wrong — that suggests the
+fixture path is broken; check `MIMIC_COMPUTE_DUCKDB_PATH`.
 
 ## 4 — Cohort-canonicalization scenario (only if SNOMED/RxNorm/ICD configured)
 

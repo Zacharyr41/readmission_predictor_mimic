@@ -330,19 +330,76 @@ def _pubmed_direct(query: str, max_results: int = 5) -> dict[str, Any]:
 MIMIC_DISTRIBUTIONS_PATH: Path = _DEFAULT_MIMIC_DISTRIBUTIONS_PATH
 
 
-def mimic_distribution_lookup(itemid: int) -> dict[str, Any]:
+# On-the-fly cohort compute (Phase H Tier D — Inc 4). When the catalog
+# doesn't have the requested (itemid, cohort) pair, the tool opens the
+# MIMIC duckdb read-only and computes stats fresh. Module-level so tests
+# can monkeypatch alongside MIMIC_DISTRIBUTIONS_PATH.
+_DEFAULT_MIMIC_COMPUTE_DUCKDB_PATH = (
+    _REPO_ROOT / "data" / "processed" / "mimiciv.duckdb"
+)
+MIMIC_COMPUTE_DUCKDB_PATH: Path = _DEFAULT_MIMIC_COMPUTE_DUCKDB_PATH
+
+# Min-n threshold for on-the-fly compute. Same value the generator uses
+# for its cohort-stratified buckets, so cache hits and compute hits are
+# directly comparable.
+_COMPUTE_MIN_N: int = 30
+
+
+def mimic_distribution_lookup(
+    itemid: int,
+    cohort: str | None = None,
+    icd10_prefixes: list[str] | None = None,
+    icd9_prefixes: list[str] | None = None,
+) -> dict[str, Any]:
     """Look up the empirical MIMIC distribution for a given lab/chart itemid.
 
-    Reads from ``MIMIC_DISTRIBUTIONS_PATH`` — a JSON dict keyed by stringified
-    itemid mapping to ``{n, mean, p50, p95, units}``. Returns
-    ``{"status": "ok", "results": [{...}]}`` on hit, ``unavailable`` envelope
-    on miss / file absent / malformed file. Never raises.
+    Reads from ``MIMIC_DISTRIBUTIONS_PATH``. Two schemas are accepted:
+
+    * **Legacy flat** — ``{itemid: {n, mean, p50, p95, units}}``. The
+      single record is treated as the unstratified bucket;
+      ``cohort=None`` returns it tagged ``cohort="all"``,
+      ``source="catalog"``.
+    * **Nested (Tier D)** — ``{itemid: {cohort_name: {n, mean, p50,
+      p95, units}}}``. ``cohort=None`` returns the ``"all"`` bucket;
+      ``cohort="<name_or_alias>"`` resolves via the cohort registry
+      and returns the stratified bucket.
+
+    The ``cohort`` parameter accepts canonical cohort names (``"sepsis"``,
+    ``"mi_acute"``) AND natural medical phrases (``"MI"``,
+    ``"myocardial infarction"``, ``"heart attack"``) — they all
+    resolve to the canonical record via
+    :func:`src.conversational.health_evidence.cohorts.resolve_cohort_name`.
+    The reserved name ``"all"`` always means the unstratified bucket.
+
+    Result records carry ``itemid``, ``cohort``, ``source`` ("catalog"
+    or "computed"), and the standard ``n``/``mean``/``p50``/``p95``/
+    ``units`` stats. Returns ``unavailable`` on miss / file absent /
+    malformed file / unknown cohort. Never raises.
     """
     try:
         itemid_int = int(itemid)
     except (TypeError, ValueError):
         return {"status": "unavailable", "error": f"invalid itemid: {itemid!r}"}
 
+    # Tier D path 1: raw ICD prefixes — skip catalog entirely. Caller
+    # is asking about an arbitrary cohort that may or may not have a
+    # name. Compute on the fly. ``cohort=`` is ignored if also passed.
+    has_raw_prefixes = bool(icd10_prefixes) or bool(icd9_prefixes)
+    if has_raw_prefixes:
+        stats, err = _compute_cohort_stats_on_the_fly(
+            itemid_int,
+            icd10_prefixes=icd10_prefixes,
+            icd9_prefixes=icd9_prefixes,
+        )
+        if stats is None:
+            return {"status": "unavailable", "error": err or "compute failed"}
+        echoed = list(icd10_prefixes or []) + list(icd9_prefixes or [])
+        return _stats_to_envelope(
+            itemid_int, "custom", "computed", stats,
+            icd_prefixes=echoed,
+        )
+
+    # Catalog read for the named-cohort and default paths.
     path = MIMIC_DISTRIBUTIONS_PATH
     if not path.exists():
         return {
@@ -353,32 +410,382 @@ def mimic_distribution_lookup(itemid: int) -> dict[str, Any]:
         registry = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
         logger.warning("mimic_distribution_lookup read failed: %s", exc)
-        return {"status": "unavailable", "error": f"registry read error: {exc}"}
+        return {
+            "status": "unavailable",
+            "error": f"registry read error: {exc}",
+        }
     if not isinstance(registry, dict):
         return {
             "status": "unavailable",
             "error": "registry is not a JSON object",
         }
-    record = registry.get(str(itemid_int))
-    if record is None or not isinstance(record, dict):
+    candidate = registry.get(str(itemid_int))
+    if not isinstance(candidate, dict):
         return {
             "status": "unavailable",
             "error": f"itemid {itemid_int} not in registry",
         }
-    payload = {
-        "status": "ok",
-        "results": [
-            {
-                "itemid": itemid_int,
-                "n": record.get("n"),
-                "mean": record.get("mean"),
-                "p50": record.get("p50"),
-                "p95": record.get("p95"),
-                "units": record.get("units"),
+    catalog_record: dict = candidate
+
+    # Detect schema shape. Flat record has stat fields directly
+    # (``n``, ``mean``, …); nested record's values are themselves dicts
+    # (``{"all": {...}, "sepsis": {...}}``). Use ``"n"`` as the marker
+    # since every legitimate flat record carries it.
+    is_flat = bool(catalog_record) and "n" in catalog_record and not (
+        isinstance(catalog_record.get("all"), dict)
+        and "n" in (catalog_record.get("all") or {})
+    )
+
+    if is_flat:
+        # Legacy flat schema — only the unstratified bucket is cached.
+        if cohort is None or (
+            isinstance(cohort, str) and cohort.strip().lower() == "all"
+        ):
+            return _stats_to_envelope(
+                itemid_int, "all", "catalog", catalog_record,
+            )
+        # Cohort requested but flat catalog can't serve it → try L2.
+        target = _resolve_target_cohort(cohort)
+        if target is None or target == "all":
+            return {
+                "status": "unavailable",
+                "error": _unknown_cohort_error(cohort),
             }
-        ],
+        return _l2_compute_named_cohort(itemid_int, target)
+
+    # Nested schema (Tier D).
+    requested = cohort  # original phrase for error messages
+    target = _resolve_target_cohort(requested)
+    if target is None:
+        return {
+            "status": "unavailable",
+            "error": _unknown_cohort_error(requested),
+        }
+
+    stats = catalog_record.get(target)
+    if isinstance(stats, dict):
+        return _stats_to_envelope(itemid_int, target, "catalog", stats)
+
+    # Catalog miss for a known cohort → L2 compute. Only attempt this
+    # for non-``all`` cohorts (``all`` should always be in the catalog;
+    # if it's not, the catalog is broken — don't paper over it).
+    if target == "all":
+        return {
+            "status": "unavailable",
+            "error": (
+                f"itemid {itemid_int} catalog entry missing 'all' bucket"
+            ),
+        }
+    return _l2_compute_named_cohort(itemid_int, target)
+
+
+def _l2_compute_named_cohort(
+    itemid: int, canonical_cohort_name: str,
+) -> dict:
+    """Resolve a registered cohort name to its ICD prefixes and run
+    on-the-fly compute. Returns the standard tool envelope (ok or
+    unavailable)."""
+    from src.conversational.health_evidence.cohorts import load_cohorts
+
+    cohorts = load_cohorts()
+    defn = cohorts.get(canonical_cohort_name)
+    if defn is None:
+        # Should be unreachable (caller already resolved the name),
+        # but defensive — never raise from a tool.
+        return {
+            "status": "unavailable",
+            "error": f"cohort {canonical_cohort_name!r} not in registry",
+        }
+    stats, err = _compute_cohort_stats_on_the_fly(
+        itemid,
+        icd10_prefixes=defn.get("icd10_prefixes"),
+        icd9_prefixes=defn.get("icd9_prefixes"),
+    )
+    if stats is None:
+        return {"status": "unavailable", "error": err or "compute failed"}
+    return _stats_to_envelope(itemid, canonical_cohort_name, "computed", stats)
+
+
+def _resolve_target_cohort(cohort: str | None) -> str | None:
+    """Map the caller's ``cohort=`` argument to a target bucket name.
+
+    - ``None`` → ``"all"`` (default unstratified bucket).
+    - ``"all"`` (any case) → ``"all"`` (reserved).
+    - Any other phrase → resolved to canonical name via the registry's
+      alias matcher; returns ``None`` if no match (the tool turns that
+      into an "unknown cohort" error)."""
+    if cohort is None:
+        return "all"
+    from src.conversational.health_evidence.cohorts import resolve_cohort_name
+    if cohort.strip().lower() == "all":
+        return "all"
+    return resolve_cohort_name(cohort)
+
+
+def _unknown_cohort_error(requested: str | None) -> str:
+    """Build the helpful error message for an unrecognised cohort.
+    Lists known canonical names and points at the icd_prefixes escape
+    hatch."""
+    from src.conversational.health_evidence.cohorts import known_cohort_names
+    names = sorted(known_cohort_names())
+    return (
+        f"could not resolve cohort {requested!r}. "
+        f"Known names: {names}. Each has aliases — try natural medical "
+        "phrases like 'sepsis', 'myocardial infarction', 'heart failure'. "
+        "For an arbitrary cohort, pass icd10_prefixes=[...] and/or "
+        "icd9_prefixes=[...]."
+    )
+
+
+def _stats_to_envelope(
+    itemid: int, cohort: str, source: str, stats: dict,
+    *, icd_prefixes: list[str] | None = None,
+) -> dict:
+    """Pack a stats dict into the standard tool envelope. ``source`` is
+    ``"catalog"`` for catalog hits, ``"computed"`` for on-the-fly
+    results. When ``icd_prefixes`` is supplied (raw-prefix lookups),
+    they are echoed back in the result record for audit-trail purposes.
+    """
+    record: dict[str, Any] = {
+        "itemid": itemid,
+        "cohort": cohort,
+        "source": source,
+        "n": stats.get("n"),
+        "mean": stats.get("mean"),
+        "p50": stats.get("p50"),
+        "p95": stats.get("p95"),
+        "units": stats.get("units"),
     }
-    return _enforce_size_budget(payload)
+    if icd_prefixes is not None:
+        record["icd_prefixes"] = list(icd_prefixes)
+    return _enforce_size_budget({"status": "ok", "results": [record]})
+
+
+# ---------------------------------------------------------------------------
+# On-the-fly cohort compute (Phase H Tier D — Inc 4)
+# ---------------------------------------------------------------------------
+
+
+# BigQuery fully-qualified MIMIC table identifiers. Mirrors
+# ``extractor._BQ_TABLES`` so both the extractor and the cohort
+# compute helper hit the same physionet-data dataset.
+_BQ_DIAGNOSES_ICD = "`physionet-data.mimiciv_3_1_hosp.diagnoses_icd`"
+_BQ_LABEVENTS = "`physionet-data.mimiciv_3_1_hosp.labevents`"
+_BQ_CHARTEVENTS = "`physionet-data.mimiciv_3_1_icu.chartevents`"
+
+
+def _get_bigquery_module():
+    """Lazy import of ``google.cloud.bigquery`` (patchable for tests).
+    Mirrors ``extractor._get_bigquery_module`` so tests can mock with
+    the same recipe."""
+    from google.cloud import bigquery as bq
+
+    return bq
+
+
+def _compute_cohort_stats_on_the_fly(
+    itemid: int,
+    *,
+    icd10_prefixes: list[str] | None,
+    icd9_prefixes: list[str] | None,
+    min_n: int = _COMPUTE_MIN_N,
+) -> tuple[dict | None, str | None]:
+    """Backend-aware on-the-fly compute. Returns ``(stats, error)``:
+
+    - On success: ``({"n", "mean", "p50", "p95", "units"}, None)``.
+    - On failure: ``(None, "<error message>")``.
+
+    Backend is chosen by the ``DATA_SOURCE`` env var (``"local"`` /
+    ``"bigquery"``) — same dispatch the rest of the conversational
+    pipeline uses. The ``BIGQUERY_PROJECT`` env var is required when
+    ``DATA_SOURCE="bigquery"``.
+
+    Both paths share the ``build_cohort_subquery_sql`` validator —
+    invalid ICD prefixes are rejected before any backend is opened.
+    """
+    data_source = os.environ.get("DATA_SOURCE", "local").lower()
+    if data_source == "bigquery":
+        return _compute_via_bigquery(
+            itemid,
+            icd10_prefixes=icd10_prefixes,
+            icd9_prefixes=icd9_prefixes,
+            min_n=min_n,
+        )
+    return _compute_via_duckdb(
+        itemid,
+        icd10_prefixes=icd10_prefixes,
+        icd9_prefixes=icd9_prefixes,
+        min_n=min_n,
+    )
+
+
+def _compute_via_duckdb(
+    itemid: int,
+    *,
+    icd10_prefixes: list[str] | None,
+    icd9_prefixes: list[str] | None,
+    min_n: int,
+) -> tuple[dict | None, str | None]:
+    """Local DuckDB compute path. Returns ``(stats, error)``."""
+    from src.conversational.health_evidence.cohorts import (
+        build_cohort_subquery_sql,
+    )
+
+    if not MIMIC_COMPUTE_DUCKDB_PATH.exists():
+        return None, (
+            f"compute backend (MIMIC duckdb) not available at "
+            f"{MIMIC_COMPUTE_DUCKDB_PATH}"
+        )
+    try:
+        cohort_subquery = build_cohort_subquery_sql(
+            icd10_prefixes=icd10_prefixes,
+            icd9_prefixes=icd9_prefixes,
+        )
+    except ValueError as exc:
+        return None, f"invalid prefix: {exc}"
+
+    sql = f"""
+        WITH cohort_hadms AS ({cohort_subquery}),
+             vals AS (
+                 SELECT valuenum, valueuom FROM labevents
+                 WHERE itemid = ? AND valuenum IS NOT NULL
+                   AND hadm_id IN (SELECT hadm_id FROM cohort_hadms)
+                 UNION ALL
+                 SELECT valuenum, valueuom FROM chartevents
+                 WHERE itemid = ? AND valuenum IS NOT NULL
+                   AND hadm_id IN (SELECT hadm_id FROM cohort_hadms)
+             )
+        SELECT COUNT(*) AS n,
+               AVG(valuenum) AS mean,
+               quantile_cont(valuenum, 0.5) AS p50,
+               quantile_cont(valuenum, 0.95) AS p95,
+               mode() WITHIN GROUP (ORDER BY valueuom) AS units
+        FROM vals
+    """
+    try:
+        import duckdb  # local import — kept off the module top because
+        # health_evidence is otherwise duckdb-free in v1.
+
+        con = duckdb.connect(str(MIMIC_COMPUTE_DUCKDB_PATH), read_only=True)
+        try:
+            row = con.execute(sql, [itemid, itemid]).fetchone()
+        finally:
+            con.close()
+    except Exception as exc:  # noqa: BLE001 — never raise to caller
+        logger.warning(
+            "on-the-fly mimic_distribution_lookup duckdb failed: %s", exc,
+        )
+        return None, f"duckdb compute failed: {exc}"
+
+    if row is None or row[0] is None or int(row[0]) < min_n:
+        n = int(row[0]) if row and row[0] is not None else 0
+        return None, (
+            f"insufficient cohort data for itemid {itemid}: "
+            f"n={n} (min {min_n})"
+        )
+    return {
+        "n": int(row[0]),
+        "mean": float(row[1]) if row[1] is not None else None,
+        "p50": float(row[2]) if row[2] is not None else None,
+        "p95": float(row[3]) if row[3] is not None else None,
+        "units": str(row[4]) if row[4] is not None else "",
+    }, None
+
+
+def _compute_via_bigquery(
+    itemid: int,
+    *,
+    icd10_prefixes: list[str] | None,
+    icd9_prefixes: list[str] | None,
+    min_n: int,
+) -> tuple[dict | None, str | None]:
+    """BigQuery compute path. Returns ``(stats, error)``."""
+    from src.conversational.health_evidence.cohorts import (
+        build_cohort_subquery_sql,
+    )
+
+    project = os.environ.get("BIGQUERY_PROJECT")
+    if not project:
+        return None, (
+            "DATA_SOURCE=bigquery but BIGQUERY_PROJECT is unset — "
+            "cannot run BigQuery compute"
+        )
+    try:
+        cohort_subquery = build_cohort_subquery_sql(
+            icd10_prefixes=icd10_prefixes,
+            icd9_prefixes=icd9_prefixes,
+            diagnoses_icd_table=_BQ_DIAGNOSES_ICD,
+        )
+    except ValueError as exc:
+        return None, f"invalid prefix: {exc}"
+
+    # BigQuery uses APPROX_QUANTILES instead of quantile_cont; ARRAY[2]
+    # gives the median, ARRAY[19] gives p95 (when num_buckets=20).
+    sql = f"""
+        WITH cohort_hadms AS ({cohort_subquery}),
+             vals AS (
+                 SELECT valuenum, valueuom FROM {_BQ_LABEVENTS}
+                 WHERE itemid = @itemid AND valuenum IS NOT NULL
+                   AND hadm_id IN (SELECT hadm_id FROM cohort_hadms)
+                 UNION ALL
+                 SELECT valuenum, valueuom FROM {_BQ_CHARTEVENTS}
+                 WHERE itemid = @itemid AND valuenum IS NOT NULL
+                   AND hadm_id IN (SELECT hadm_id FROM cohort_hadms)
+             )
+        SELECT COUNT(*) AS n,
+               AVG(valuenum) AS mean,
+               APPROX_QUANTILES(valuenum, 100)[OFFSET(50)] AS p50,
+               APPROX_QUANTILES(valuenum, 100)[OFFSET(95)] AS p95,
+               APPROX_TOP_COUNT(valueuom, 1)[OFFSET(0)].value AS units
+        FROM vals
+    """
+    try:
+        bq = _get_bigquery_module()
+        client = bq.Client(project=project)
+        # ScalarQueryParameter — keep the @itemid placeholder safe even
+        # though itemid is already an int. Tests mock the whole SDK so
+        # the param-shape isn't enforced; production runs use the SDK's
+        # real binding.
+        try:
+            params = [bq.ScalarQueryParameter("itemid", "INT64", itemid)]
+            job_config = bq.QueryJobConfig(query_parameters=params)
+            job = client.query(sql, job_config=job_config)
+        except (AttributeError, TypeError):
+            # Fallback for mocks that don't implement
+            # QueryJobConfig/ScalarQueryParameter — just substitute the
+            # itemid as a literal (safe since we already int()'d it).
+            job = client.query(sql.replace("@itemid", str(int(itemid))))
+        rows = list(job.result())
+    except Exception as exc:  # noqa: BLE001 — never raise
+        logger.warning(
+            "on-the-fly mimic_distribution_lookup bigquery failed: %s", exc,
+        )
+        return None, f"bigquery compute failed: {exc}"
+
+    if not rows:
+        return None, f"itemid {itemid} returned no rows from bigquery"
+    row = rows[0]
+    n_val = getattr(row, "n", None)
+    if n_val is None or int(n_val) < min_n:
+        return None, (
+            f"insufficient cohort data for itemid {itemid}: "
+            f"n={int(n_val) if n_val is not None else 0} (min {min_n})"
+        )
+    return {
+        "n": int(n_val),
+        "mean": (
+            float(row.mean) if getattr(row, "mean", None) is not None else None
+        ),
+        "p50": (
+            float(row.p50) if getattr(row, "p50", None) is not None else None
+        ),
+        "p95": (
+            float(row.p95) if getattr(row, "p95", None) is not None else None
+        ),
+        "units": (
+            str(row.units) if getattr(row, "units", None) is not None else ""
+        ),
+    }, None
 
 
 # ---------------------------------------------------------------------------

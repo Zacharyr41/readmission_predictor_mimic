@@ -28,11 +28,35 @@ repo:
 - **`loinc_reference_range`** — reads
   `data/ontology_cache/loinc_reference_ranges.json`.
 - **`mimic_distribution_lookup`** — reads
-  `data/processed/lab_distributions.json`.
+  `data/processed/lab_distributions.json`. The Tier-D catalog is
+  cohort-stratified (one entry per `(itemid, cohort)`). When the
+  requested cohort is in `data/mappings/clinical_cohorts.json` but
+  not in the cached catalog, the tool falls back to on-the-fly
+  compute against the session's MIMIC backend (DuckDB or BigQuery —
+  same dispatch as the rest of the pipeline via `DATA_SOURCE`).
 
 If both JSONs are present and you have internet for NCBI, you're at
 the floor of what Phase H needs. The smoke test passes its "at least
 one backend invoked" gate at this point.
+
+### Regenerating the Tier-D catalog
+
+The catalog is committed to the repo, but if you've added a new
+cohort to `clinical_cohorts.json` or want to refresh against a
+newer MIMIC snapshot, regenerate with:
+
+```bash
+.venv/bin/python scripts/build_phase_h_catalogs.py \
+    --min-rows 100 --top-n 2000 --stratify-by-cohort
+```
+
+Expected on a 16 GB MIMIC-IV duckdb: ~847 itemids, ~1.4 MB JSON,
+~10–15 minutes compute. Adds the unstratified `"all"` bucket per
+itemid plus per-cohort buckets where there are at least 30 rows.
+
+You can also run without `--stratify-by-cohort` to get the legacy
+flat schema (Tier B) — useful if your duckdb doesn't have a
+populated `diagnoses_icd` table.
 
 ## Tier 1 — instant wins (no install)
 

@@ -162,6 +162,101 @@ Mirrors the pre-existing `_pre_validator_*` counter pattern. The
 (safe to surface in the chat UI debug pane; not shown in user-visible
 verdict text).
 
+## Cohort-stratified distributions (Tier D)
+
+The MIMIC distribution catalog is **cohort-aware** and supports
+**on-the-fly compute** for cohorts not in the cache.
+
+The catalog file (`data/processed/lab_distributions.json`) maps each
+itemid to a nested dict of cohort buckets:
+
+```json
+{
+  "50813": {                          // serum lactate
+    "all":             {"n": 16045, "mean": 2.00, "p95": 4.70, ...},
+    "sepsis":          {"n": 2936,  "mean": 2.40, "p95": 6.90, ...},
+    "septic_shock":    {"n": 1495,  "mean": 2.83, "p95": 8.50, ...},
+    "hepatic_failure": {"n": 1150,  "mean": 3.05, "p95": 10.20, ...},
+    "aki":             {"n": 5084,  "mean": 2.23, "p95": 6.30, ...},
+    ...
+  }
+}
+```
+
+The critic calls `mimic_distribution_lookup` with a **natural medical
+phrase** as the cohort argument. The user never types ICD codes —
+that's the model's job:
+
+```python
+# Critic asks "is mean lactate 7.99 plausible in our sepsis cohort?"
+mimic_distribution_lookup(itemid=50813, cohort="sepsis")
+# → {n: 2936, mean: 2.40, p95: 6.90, units: "mmol/L", source: "catalog"}
+# 7.99 sits between sepsis p95 (6.90) and hepatic-failure p95 (10.20)
+# — shifted but plausible.
+```
+
+Aliases are baked in: `cohort="MI"`, `cohort="myocardial infarction"`,
+`cohort="heart attack"` all resolve to the canonical `mi_acute`
+record. Common synonyms cover sepsis, AKI, MI, heart failure,
+hepatic failure, stroke, ARDS, pneumonia, COPD, diabetes, CKD,
+atrial fibrillation, coagulopathy, respiratory failure, COVID-19.
+
+### Three-layer resolution (cache → fallback → error)
+
+1. **Cache hit** (~1ms): `(itemid, cohort_canonical)` is in the
+   catalog → return cached stats with `source="catalog"`.
+2. **On-the-fly compute** (~50–200ms locally, ~1–3s on BigQuery):
+   cohort name not cached, OR raw `icd10_prefixes`/`icd9_prefixes`
+   passed → open the session backend (DuckDB or BigQuery — same
+   dispatch as the rest of the pipeline via `DATA_SOURCE` env var)
+   and compute fresh. Result tagged `source="computed"`.
+3. **Error**: cohort name unknown AND no prefixes given → return
+   `unavailable` with a helpful error listing registered names and
+   pointing at the `icd10_prefixes` escape hatch.
+
+### Backend dispatch
+
+The compute path matches the user's session backend so the critic
+compares against the same data source the answer was computed from:
+
+- `DATA_SOURCE=local` → opens `MIMIC_COMPUTE_DUCKDB_PATH`
+  (default `data/processed/mimiciv.duckdb`) read-only.
+- `DATA_SOURCE=bigquery` → creates `bigquery.Client(project=BIGQUERY_PROJECT)`,
+  queries the `physionet-data.mimiciv_3_1_*` tables.
+
+PHI invariant unchanged either way — only aggregate stats leave the
+function.
+
+### Adding a new cohort
+
+Two paths, both keep the user typing medical terminology:
+
+1. **Permanent (slow first hit, fast on rebuild):** add a one-liner
+   to `data/mappings/clinical_cohorts.json` with ICD-10/ICD-9
+   prefixes and aliases. Works immediately via on-the-fly compute;
+   gets cached on the next `scripts/build_phase_h_catalogs.py
+   --stratify-by-cohort` run.
+2. **Ad-hoc:** the model can pass `icd10_prefixes=[...]` directly
+   without touching the registry. Useful for rare conditions or
+   research questions. The model can chain `icd_lookup(query="...")`
+   first to resolve a name to ICD codes.
+
+### Regenerating the Tier-D catalog
+
+Local DuckDB (default):
+
+```bash
+.venv/bin/python scripts/build_phase_h_catalogs.py \
+    --min-rows 100 --top-n 2000 --stratify-by-cohort
+```
+
+Expected output: ~847 unique itemids (257 lab + 590 chart),
+~1.4 MB JSON, ~10–15 min compute on a 16 GB MIMIC-IV duckdb.
+
+The generator can also emit the legacy flat schema (Tier B) by
+omitting `--stratify-by-cohort`; useful for environments without a
+populated `diagnoses_icd` table.
+
 ## Known caveats
 
 - **Latency ceiling.** `_MAX_TOOL_ITERATIONS=3` × per-MCP latency
