@@ -66,20 +66,24 @@ logger = logging.getLogger(__name__)
 
 # Sonnet 4.6 is the right tier for clinical-judgment tasks.
 _CRITIC_MODEL = "claude-sonnet-4-6"
-# Bumped from 600 → 1500 in Tier-D follow-up: cohort-stratified
-# reasoning (single-patient vs cohort-mean distinction, sibling-cohort
-# checks, multi-tool deliberation) regularly needed > 600 tokens to
-# both reason AND emit clean JSON. The 600-token ceiling caused
-# verdicts to come back as None because the model spent its budget
-# thinking and never reached the JSON output. Cost impact: ~2.5×
-# critic tokens per call worst case; mitigated by Sonnet 4.6 prompt
-# caching on the system block.
-_MAX_TOKENS = 1500
+# Per-call output token budget. Bumped 600 → 1500 → 2000 across two
+# Tier-D follow-ups: (1) cohort-stratified reasoning needed > 600
+# tokens to both reason AND emit clean JSON; (2) post-itemid_search
+# verdicts were occasionally truncating mid-sentence in raw_response,
+# so an extra 500 tokens of headroom keeps reasoning + JSON within
+# budget. Mitigated by Sonnet 4.6 prompt caching on the system block.
+_MAX_TOKENS = 2000
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 _MAX_DATA_TABLE_ROWS = 10
 _RAW_RESPONSE_TRUNCATE = 500
-# Hard cap on tool-use iterations per critique. Same as before refactor.
-_MAX_TOOL_ITERATIONS = 3
+# Hard cap on tool-use iterations per critique. Bumped 3 → 6 in the
+# Phase H follow-up: at 3 the procalcitonin smoke ran the budget to
+# the limit (1 itemid_search + 2 pubmed) with no headroom for
+# sibling-cohort checks or cross-vocab grounding. 6 gives the model
+# room for: itemid_search → distribution_lookup × 2 (sibling cohort)
+# + pubmed_search × 2 + 1 follow-up. Worst-case latency adds ~6s
+# (3 extra ~2s rounds) which is still under the chat-UI budget.
+_MAX_TOOL_ITERATIONS = 6
 
 
 # Tools the critic has access to. Adding a new tool is a one-line change

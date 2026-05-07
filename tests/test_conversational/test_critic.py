@@ -533,16 +533,25 @@ class TestCriticToolUse:
 
     def test_max_tool_calls_capped(self, monkeypatch):
         """Model keeps requesting tool_use; loop forces a final response
-        on the cap iteration via tool_choice={'type':'none'}."""
+        on the cap iteration via tool_choice={'type':'none'}.
+
+        Phase H follow-up bumped the cap from 3 → 6 to give the critic
+        room for sibling-cohort checks + cross-vocab grounding without
+        running out of budget."""
+        from src.conversational.critic import _MAX_TOOL_ITERATIONS
+        # Sanity: the cap is exactly what we expect (tests below count
+        # rounds based on this).
+        assert _MAX_TOOL_ITERATIONS == 6
+
         monkeypatch.setattr(
             "src.conversational.critic.pubmed_search",
             lambda **kw: {"status": "ok", "results": []},
         )
-        # Three tool_use rounds + one forced final = 4 LLM calls.
+        # Six tool_use rounds + one forced final = 7 LLM calls.
         client = mock_anthropic([
-            _tool_use_response(tool_input={"query": "q1"}, tool_id="t1"),
-            _tool_use_response(tool_input={"query": "q2"}, tool_id="t2"),
-            _tool_use_response(tool_input={"query": "q3"}, tool_id="t3"),
+            _tool_use_response(tool_input={"query": f"q{i}"}, tool_id=f"t{i}")
+            for i in range(_MAX_TOOL_ITERATIONS)
+        ] + [
             _end_turn_response({
                 "plausible": True, "severity": "info", "concern": None,
             }),
@@ -551,10 +560,17 @@ class TestCriticToolUse:
         answer = _make_answer("test")
         verdict = critique(client, cq, answer)
         assert verdict is not None
-        assert client.messages.create.call_count == 4
+        assert client.messages.create.call_count == _MAX_TOOL_ITERATIONS + 1
         # Final call carries tool_choice={"type":"none"}.
         final_call_kwargs = client.messages.create.call_args_list[-1].kwargs
         assert final_call_kwargs.get("tool_choice") == {"type": "none"}
+
+    def test_max_tokens_budget(self):
+        """Sanity-check the per-call output token budget. Bumped from
+        1500 → 2000 in the same follow-up that raised the iteration
+        cap so the model has more breathing room per round."""
+        from src.conversational.critic import _MAX_TOKENS
+        assert _MAX_TOKENS == 2000
 
     def test_tool_failure_does_not_block_verdict(self, monkeypatch):
         """When pubmed_search returns an unavailable envelope, the critic
