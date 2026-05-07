@@ -274,12 +274,25 @@ pre-Tier-D behaviour).
 
 This exercises the on-the-fly compute fallback. We pick a cohort
 that's deliberately NOT in `clinical_cohorts.json` — delirium
-(ICD-10 F05) — and ask the critic to reason about creatinine in
-delirium patients. The critic has two paths: (a) chain
-`icd_lookup(query="delirium")` to resolve, then call
-`mimic_distribution_lookup(icd10_prefixes=["F05"])`; (b) recall the
-ICD code from training and pass prefixes directly. Either path is
-valid — the user never sees ICD codes.
+(ICD-10 F05) — and frame the question with a **borderline-suspicious
+value** that compels the critic to verify against the actual cohort
+distribution rather than dismiss from training recall.
+
+> **Why a borderline value?** An uncontroversial number (e.g. mean
+> creatinine 1.6 mg/dL — well within population-typical ICU range)
+> won't trip the prompt's "use tools sparingly" discipline; the
+> critic will rightly skip the lookup. To exercise the on-the-fly
+> compute INFRASTRUCTURE, the value needs to be high enough that the
+> model can't confidently judge it without checking. **3.8 mg/dL** is
+> ~2.5× the all-MIMIC creatinine mean (~1.5) and sits near the AKI
+> cohort p95 (~3.9) — a delirium cohort might or might not have that
+> shifted distribution depending on renal-impairment overlap. Genuinely
+> needs lookup.
+
+The critic has two paths: (a) chain `icd_lookup(query="delirium")`
+to resolve, then call `mimic_distribution_lookup(icd10_prefixes=["F05"])`;
+(b) recall the ICD code from training and pass prefixes directly.
+Either path is valid — the user never sees ICD codes.
 
 ```bash
 .venv/bin/python <<'PY'
@@ -299,8 +312,8 @@ cq = CompetencyQuestion(
     interpretation_summary="Cohort: ICU admissions with delirium (ICD F05). Aggregate: mean serum creatinine.",
 )
 answer = AnswerResult(
-    text_summary="Mean creatinine 1.6 mg/dL (n=320) in delirium patients.",
-    data_table=[{"mean_creatinine_mg_dl": 1.6, "n": 320}],
+    text_summary="Mean creatinine 3.8 mg/dL (n=320) in delirium patients.",
+    data_table=[{"mean_creatinine_mg_dl": 3.8, "n": 320}],
 )
 verdict = critique(client, cq, answer)
 print(json.dumps(verdict.model_dump() if verdict else None, indent=2, default=str))
@@ -308,13 +321,31 @@ PY
 ```
 
 **Success:** `tool_calls` includes `mimic_distribution_lookup` with
-either `cohort="delirium"` (which falls through to compute) or
-`icd10_prefixes=["F05"]`. The result record has `source: "computed"`
-(not `"catalog"`). Latency ~50–200ms locally, ~1–3s on BigQuery.
+either `cohort="delirium"` (which falls through to compute since the
+cohort isn't in the registry) or `icd10_prefixes=["F05"]`. The result
+record has `source: "computed"` (not `"catalog"`). Latency ~50–200ms
+locally, ~1–3s on BigQuery.
 
-**Failure:** the critic guesses or skips the lookup entirely. Or:
-`source: "computed"` but `units` is wrong — that suggests the
-fixture path is broken; check `MIMIC_COMPUTE_DUCKDB_PATH`.
+The verdict itself can be `info` OR `warn` — both are defensible
+depending on what the live computed delirium-cohort distribution
+shows. What matters for this smoke is that **the lookup actually
+fired**, demonstrating the on-the-fly compute path works end-to-end
+with a real backend.
+
+**Failure:** `tool_calls` is empty (model dismissed from training
+recall — value wasn't suspicious enough to compel lookup; bump to a
+higher value like 5.0 mg/dL). Or: `source: "computed"` but `units`
+is wrong — that suggests the fixture path is broken; check
+`MIMIC_COMPUTE_DUCKDB_PATH`.
+
+**Note on uncontroversial values:** if you run this scenario with
+a value like 1.6 mg/dL instead, expect `severity=info` /
+`tool_calls=null`. That's correct behavior — the critic's
+`Tool-use discipline` section says only invoke tools when judgment
+genuinely turns on a quantitative question. 1.6 mg/dL in any ICU
+cohort doesn't, so tool use would be wasteful. The on-the-fly
+compute path is unit-tested separately; this live scenario tests
+that the integration works when the model decides it's needed.
 
 ## 4 — Cohort-canonicalization scenario (only if SNOMED/RxNorm/ICD configured)
 
