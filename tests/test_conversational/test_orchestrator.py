@@ -1732,6 +1732,7 @@ class TestPreValidatorIntegration:
 
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            data_source="bigquery",
             enable_pre_validator=True,
         )
         result = pipeline.ask("avg creatinine over 65")
@@ -1773,16 +1774,17 @@ class TestPreValidatorIntegration:
 
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            data_source="bigquery",
             enable_pre_validator=True,
         )
         # Mock backend.execute return so generate_answer-style path completes.
-        from src.conversational.orchestrator import _DuckDBBackend
-        _DuckDBBackend.return_value.execute.return_value = []
+        from src.conversational.orchestrator import _BigQueryBackend
+        _BigQueryBackend.return_value.execute.return_value = []
 
         pipeline.ask("avg creatinine over 65")
 
         # Execute and critic were both called (warn does NOT short-circuit).
-        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert _BigQueryBackend.return_value.execute.call_count == 1
         assert mock_critique.call_count == 1
         # The critic received the validator concern via fallback_warning kwarg.
         critic_kwargs = mock_critique.call_args.kwargs
@@ -1809,14 +1811,15 @@ class TestPreValidatorIntegration:
 
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            data_source="bigquery",
             enable_pre_validator=True,
         )
-        from src.conversational.orchestrator import _DuckDBBackend
-        _DuckDBBackend.return_value.execute.return_value = []
+        from src.conversational.orchestrator import _BigQueryBackend
+        _BigQueryBackend.return_value.execute.return_value = []
 
         pipeline.ask("avg creatinine over 65")
 
-        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert _BigQueryBackend.return_value.execute.call_count == 1
         assert mock_critique.call_count == 1
         # Counter: passed.
         assert pipeline._pre_validator_passes == 1
@@ -1840,15 +1843,16 @@ class TestPreValidatorIntegration:
 
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            data_source="bigquery",
             enable_pre_validator=True,
         )
-        from src.conversational.orchestrator import _DuckDBBackend
-        _DuckDBBackend.return_value.execute.return_value = []
+        from src.conversational.orchestrator import _BigQueryBackend
+        _BigQueryBackend.return_value.execute.return_value = []
 
         pipeline.ask("avg creatinine over 65")
 
         # Pipeline proceeds normally.
-        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert _BigQueryBackend.return_value.execute.call_count == 1
         assert mock_critique.call_count == 1
         # All counters stay at zero — None doesn't increment any.
         assert pipeline._pre_validator_blocks == 0
@@ -1889,6 +1893,46 @@ class TestPreValidatorIntegration:
         # Validator was NOT called — graph path doesn't go through
         # _run_with_critic_retry.
         assert mock_validator.call_count == 0
+
+    @_patch_for_validator
+    def test_local_data_source_skips_validator(
+        self,
+        mock_decompose, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, mock_critique, mock_validator,
+    ):
+        """The bq-validator hard-codes BigQuery dialect (sqlglot) + uses
+        the BigQuery dry-run API. Running it against DuckDB-flavored SQL
+        rejects valid local queries (e.g. ILIKE → BigQuery parse error).
+        When data_source='local', the orchestrator must skip the validator
+        even with enable_pre_validator=True; the DuckDB execution path
+        catches its own syntax errors and BQ cost gating doesn't apply."""
+        from src.conversational.models import DecompositionResult
+        cq = _make_fastpath_cq()
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_compile.return_value = _make_query_obj()
+        mock_answer.return_value = AnswerResult(text_summary="answer text")
+        mock_critique.return_value = None
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            data_source="local",
+            enable_pre_validator=True,  # explicitly ON; should still skip
+        )
+        from src.conversational.orchestrator import _DuckDBBackend
+        _DuckDBBackend.return_value.execute.return_value = []
+
+        pipeline.ask("avg creatinine over 65")
+
+        # Validator never invoked despite enable_pre_validator=True —
+        # the local-data-source guard short-circuited it.
+        assert mock_validator.call_count == 0
+        # Execution + critic ran normally.
+        assert _DuckDBBackend.return_value.execute.call_count == 1
+        assert mock_critique.call_count == 1
+        # Validator counters never incremented.
+        assert pipeline._pre_validator_blocks == 0
+        assert pipeline._pre_validator_warns == 0
+        assert pipeline._pre_validator_passes == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1981,12 +2025,13 @@ class TestPreValidatorRetryWithMutation:
 
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            data_source="bigquery",
             enable_critic=True, enable_pre_validator=True, critic_max_retries=1,
         )
         pipeline._client = client
 
-        from src.conversational.orchestrator import _DuckDBBackend
-        _DuckDBBackend.return_value.execute.return_value = []
+        from src.conversational.orchestrator import _BigQueryBackend
+        _BigQueryBackend.return_value.execute.return_value = []
 
         pipeline.ask("average lactate for sepsis")
 

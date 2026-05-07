@@ -405,6 +405,21 @@ class ConversationalPipeline:
                 pass
             backend.close()
 
+    def _pre_validator_active(self) -> bool:
+        """Whether the BigQuery pre-execution validator should run.
+
+        The validator parses with sqlglot dialect="bigquery" and dry-runs
+        against the BigQuery API; both reject DuckDB-flavored SQL (e.g.
+        ``ILIKE``). It only makes sense when ``data_source == "bigquery"``
+        — the cost-gating motivation also disappears for local execution.
+        Disabled here unconditionally for non-BQ sources, even when
+        ``enable_pre_validator=True``; the user opt-in is honored only
+        where the validator is actually applicable.
+        """
+        if not self._enable_pre_validator:
+            return False
+        return (self._data_source or "").lower() == "bigquery"
+
     def _make_extractor_validator(self):
         """Build the validator callable injected into ``_BigQueryBackend``.
 
@@ -412,7 +427,7 @@ class ConversationalPipeline:
         client is unavailable. The backend handles ``None`` cleanly
         (skips validation).
         """
-        if not self._enable_pre_validator:
+        if not self._pre_validator_active():
             return None
         client = self._get_bq_validator_client()
         if client is None:
@@ -720,7 +735,7 @@ class ConversationalPipeline:
             preview_query = None
             preview_itemids: list[int] | None = None
             preview_fb: str | None = None
-            if self._enable_pre_validator:
+            if self._pre_validator_active():
                 preview_query, preview_itemids, preview_fb = (
                     self._compile_fastpath_preview(
                         cq, backend, resolved_names=resolved_names,
