@@ -32,6 +32,10 @@ from src.conversational.health_evidence.tools import (
     pubmed_search,
 )
 
+# Imported below in test class — kept out of the top-level imports so
+# the import error in pre-RED state surfaces as a class-level fail
+# rather than blocking the whole module.
+
 
 # ---------------------------------------------------------------------------
 # Helpers (parallel to test_critic_tools.py shape)
@@ -973,3 +977,455 @@ class TestToolDefs:
             assert tool_def["input_schema"]["type"] == "object"
             assert "properties" in tool_def["input_schema"]
             assert "required" in tool_def["input_schema"]
+
+
+# ===========================================================================
+# mimic_itemid_search — analyte-name → itemid lookup (Phase H follow-up)
+# ===========================================================================
+
+
+def _make_itemid_search_duckdb(
+    tmp_path,
+    *,
+    labitems: list[tuple] = (),
+    chartitems: list[tuple] = (),
+):
+    """Build a tiny duckdb fixture with d_labitems + d_items so tests
+    can exercise the real SQL path against deterministic data."""
+    import duckdb
+    db_path = tmp_path / "mimic_for_itemid_search.duckdb"
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        "CREATE TABLE d_labitems ("
+        "  itemid INTEGER, label VARCHAR,"
+        "  fluid VARCHAR, category VARCHAR"
+        ")"
+    )
+    con.execute(
+        "CREATE TABLE d_items ("
+        "  itemid INTEGER, label VARCHAR,"
+        "  abbreviation VARCHAR, linksto VARCHAR,"
+        "  category VARCHAR, unitname VARCHAR,"
+        "  param_type VARCHAR,"
+        "  lownormalvalue DOUBLE, highnormalvalue DOUBLE"
+        ")"
+    )
+    for row in labitems:
+        # row: (itemid, label, fluid, category)
+        con.execute("INSERT INTO d_labitems VALUES (?, ?, ?, ?)", row)
+    for row in chartitems:
+        # row: (itemid, label, abbreviation, linksto, category, unitname,
+        #       param_type, lownormalvalue, highnormalvalue)
+        con.execute(
+            "INSERT INTO d_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row,
+        )
+    con.close()
+    return db_path
+
+
+class TestMimicItemidSearch:
+    """Phase H follow-up: maps a free-text analyte/measurement name to
+    canonical MIMIC itemid candidates. Backend dispatch mirrors the
+    on-the-fly cohort compute (DATA_SOURCE local vs bigquery)."""
+
+    def test_finds_lab_item_by_label(self, monkeypatch, tmp_path):
+        """Common case — query 'creatinine' returns the canonical lab
+        itemid (50912 in MIMIC-IV) with match='exact'."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[
+                (50912, "Creatinine", "Blood", "Chemistry"),
+                (51067, "24 hr Creatinine", "Urine", "Chemistry"),
+            ],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="creatinine")
+        assert r["status"] == "ok"
+        # At least one match
+        assert any(rec["itemid"] == 50912 for rec in r["results"])
+        # Exact match is reported as such
+        canonical = next(rec for rec in r["results"] if rec["itemid"] == 50912)
+        assert canonical["label"] == "Creatinine"
+        assert canonical["match"] == "exact"
+        assert canonical["table"] == "labevents"
+        assert canonical["fluid"] == "Blood"
+        assert canonical["category"] == "Chemistry"
+
+    def test_finds_chart_item(self, monkeypatch, tmp_path):
+        """Vital signs — query 'heart rate' returns chartevents itemid
+        with table='chartevents'."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            chartitems=[
+                (220045, "Heart Rate", "HR", "chartevents",
+                 "Routine Vital Signs", "bpm", "numeric", 60.0, 100.0),
+            ],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="heart rate")
+        assert r["status"] == "ok"
+        assert any(
+            rec["itemid"] == 220045 and rec["table"] == "chartevents"
+            for rec in r["results"]
+        )
+
+    def test_substring_match(self, monkeypatch, tmp_path):
+        """Substring queries find labels that contain the substring."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[
+                (50912, "Creatinine", "Blood", "Chemistry"),
+            ],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        # 'creat' is a substring of 'Creatinine'
+        r = mimic_itemid_search(query="creat")
+        assert r["status"] == "ok"
+        assert any(rec["itemid"] == 50912 for rec in r["results"])
+
+    def test_ranking_exact_before_prefix_before_substring(
+        self, monkeypatch, tmp_path,
+    ):
+        """When several rows match, exact-label hits rank above prefix
+        hits, which rank above substring hits."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[
+                (50912, "Creatinine", "Blood", "Chemistry"),                 # exact
+                (51067, "Creatinine, Whole Blood", "Blood", "Chemistry"),    # prefix
+                (52546, "Urine Creatinine", "Urine", "Chemistry"),           # substring
+            ],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="creatinine", max_results=10)
+        assert r["status"] == "ok"
+        # Order: exact → prefix → substring
+        ids_in_order = [rec["itemid"] for rec in r["results"]]
+        assert ids_in_order.index(50912) < ids_in_order.index(51067) < ids_in_order.index(52546)
+        # Match types reported
+        match_by_id = {rec["itemid"]: rec["match"] for rec in r["results"]}
+        assert match_by_id[50912] == "exact"
+        assert match_by_id[51067] == "prefix"
+        assert match_by_id[52546] == "substring"
+
+    def test_max_results_caps(self, monkeypatch, tmp_path):
+        """max_results limits the returned list."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        labitems = [
+            (50000 + i, f"Creatinine variant {i}", "Blood", "Chemistry")
+            for i in range(20)
+        ]
+        db = _make_itemid_search_duckdb(tmp_path, labitems=labitems)
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="creatinine", max_results=3)
+        assert r["status"] == "ok"
+        assert len(r["results"]) == 3
+
+    def test_loinc_enrichment_for_lab_items(self, monkeypatch, tmp_path):
+        """Lab itemids in labitem_to_snomed.json get enriched with
+        their LOINC code in the result record."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[(50912, "Creatinine", "Blood", "Chemistry")],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        # Override the labitem→loinc mapping path with a small fixture.
+        mapping_path = tmp_path / "labitem_to_snomed.json"
+        mapping_path.write_text(json.dumps({
+            "_metadata": {"source": "test fixture"},
+            "50912": {"loinc": "2160-0", "label": "Creatinine"},
+        }))
+        monkeypatch.setattr(he_tools, "LABITEM_TO_SNOMED_PATH", mapping_path)
+        r = mimic_itemid_search(query="creatinine")
+        rec = next(x for x in r["results"] if x["itemid"] == 50912)
+        assert rec.get("loinc") == "2160-0"
+
+    def test_chart_items_have_no_loinc(self, monkeypatch, tmp_path):
+        """Chart items aren't in labitem_to_snomed.json by convention,
+        so the result record has no 'loinc' field. The tool must NOT
+        invent one."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            chartitems=[
+                (220045, "Heart Rate", "HR", "chartevents",
+                 "Routine Vital Signs", "bpm", "numeric", 60.0, 100.0),
+            ],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        # Mapping doesn't cover chart itemids.
+        mapping_path = tmp_path / "labitem_to_snomed.json"
+        mapping_path.write_text(json.dumps({"_metadata": {}}))
+        monkeypatch.setattr(he_tools, "LABITEM_TO_SNOMED_PATH", mapping_path)
+        r = mimic_itemid_search(query="heart rate")
+        rec = next(x for x in r["results"] if x["itemid"] == 220045)
+        # Field is absent OR explicitly None — both acceptable shapes.
+        assert rec.get("loinc") is None
+
+    def test_not_in_mimic_returns_empty_ok(self, monkeypatch, tmp_path):
+        """Critical contract: when the analyte isn't in MIMIC at all
+        (procalcitonin is genuinely absent), the tool returns
+        status='ok' with results=[]. NOT status='unavailable'. The
+        model needs the distinction so it pivots to PubMed instead of
+        retrying with another guess."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        # Empty fixture — no labitems, no chartitems.
+        db = _make_itemid_search_duckdb(tmp_path)
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="procalcitonin")
+        assert r["status"] == "ok", (
+            "empty results MUST be ok (no match found), "
+            "NOT unavailable (which signals backend failure)"
+        )
+        assert r["results"] == []
+
+    def test_query_validation_rejects_sql_injection(
+        self, monkeypatch, tmp_path,
+    ):
+        """The query string is interpolated into SQL via charset-gated
+        sanitisation. Classic injection payloads must be refused
+        BEFORE backend is opened, AND duckdb file is unmodified."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[(50912, "Creatinine", "Blood", "Chemistry")],
+        )
+        size_before = db.stat().st_size
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        for bad in (
+            "'; DROP TABLE d_labitems; --",
+            "creatinine' OR 1=1 --",
+            "creat'; DELETE FROM d_labitems; --",
+        ):
+            r = mimic_itemid_search(query=bad)
+            assert r["status"] == "unavailable"
+            assert "invalid" in r["error"].lower() or "query" in r["error"].lower()
+        # File unchanged.
+        assert db.stat().st_size == size_before
+
+    def test_query_validation_rejects_sql_wildcards(
+        self, monkeypatch, tmp_path,
+    ):
+        """LIKE wildcards in the user's query would let the caller
+        scan unrelated rows. Reject % and _ in the input."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[(50912, "Creatinine", "Blood", "Chemistry")],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        for bad in ("%", "_", "%creat", "creat_"):
+            r = mimic_itemid_search(query=bad)
+            assert r["status"] == "unavailable", f"failed for {bad!r}"
+
+    def test_query_too_short_or_empty_rejected(
+        self, monkeypatch, tmp_path,
+    ):
+        """Empty / 1-char queries would match too many rows. Require
+        at least 2 chars after stripping whitespace."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[(50912, "Creatinine", "Blood", "Chemistry")],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        for bad in ("", " ", "a", "  "):
+            r = mimic_itemid_search(query=bad)
+            assert r["status"] == "unavailable"
+
+    def test_local_backend_used_when_data_source_local(
+        self, monkeypatch, tmp_path,
+    ):
+        """DATA_SOURCE=local routes to the duckdb path."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        db = _make_itemid_search_duckdb(
+            tmp_path,
+            labitems=[(50912, "Creatinine", "Blood", "Chemistry")],
+        )
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="creatinine")
+        assert r["status"] == "ok"
+        assert any(rec["itemid"] == 50912 for rec in r["results"])
+
+    def test_bigquery_backend_uses_bigquery_client(
+        self, monkeypatch, tmp_path,
+    ):
+        """DATA_SOURCE=bigquery routes to the BigQuery path. The
+        bigquery client is mocked — no live BQ call. Verify the FQN
+        d_labitems / d_items table identifiers appear in the SQL."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        monkeypatch.setenv("DATA_SOURCE", "bigquery")
+        monkeypatch.setenv("BIGQUERY_PROJECT", "test-project")
+
+        fake_row = MagicMock()
+        fake_row.itemid = 50912
+        fake_row.label = "Creatinine"
+        fake_row.fluid = "Blood"
+        fake_row.category = "Chemistry"
+        fake_row.source_table = "labevents"
+        fake_row.match_rank = 0
+        fake_job = MagicMock()
+        fake_job.result.return_value = iter([fake_row])
+        fake_client = MagicMock()
+        fake_client.query.return_value = fake_job
+        fake_bq_module = MagicMock()
+        fake_bq_module.Client.return_value = fake_client
+        monkeypatch.setattr(
+            he_tools, "_get_bigquery_module", lambda: fake_bq_module,
+        )
+
+        r = mimic_itemid_search(query="creatinine")
+        assert r["status"] == "ok"
+        assert any(rec["itemid"] == 50912 for rec in r["results"])
+        sql = fake_client.query.call_args[0][0]
+        assert "physionet-data" in sql or "d_labitems" in sql
+        assert "d_items" in sql
+
+    def test_bigquery_missing_project_returns_unavailable(
+        self, monkeypatch, tmp_path,
+    ):
+        """DATA_SOURCE=bigquery without BIGQUERY_PROJECT → unavailable."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        monkeypatch.setenv("DATA_SOURCE", "bigquery")
+        monkeypatch.delenv("BIGQUERY_PROJECT", raising=False)
+        r = mimic_itemid_search(query="creatinine")
+        assert r["status"] == "unavailable"
+
+    def test_duckdb_missing_returns_unavailable(
+        self, monkeypatch, tmp_path,
+    ):
+        """If the local duckdb path doesn't exist, return unavailable
+        cleanly — never raise."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        monkeypatch.setattr(
+            he_tools, "MIMIC_COMPUTE_DUCKDB_PATH",
+            tmp_path / "absent.duckdb",
+        )
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="creatinine")
+        assert r["status"] == "unavailable"
+
+    def test_size_budget_respected(self, monkeypatch, tmp_path):
+        """Result envelope stays under the 4 KB budget even with
+        many matches."""
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        labitems = [
+            (50000 + i, f"Creatinine variant {i:03d} long-label-text " * 2,
+             "Blood", "Chemistry")
+            for i in range(50)
+        ]
+        db = _make_itemid_search_duckdb(tmp_path, labitems=labitems)
+        monkeypatch.setattr(he_tools, "MIMIC_COMPUTE_DUCKDB_PATH", db)
+        monkeypatch.setenv("DATA_SOURCE", "local")
+        r = mimic_itemid_search(query="creatinine", max_results=20)
+        assert r["status"] == "ok"
+        size = len(json.dumps(r).encode("utf-8"))
+        assert size <= _MAX_TOOL_RESULT_BYTES, (
+            f"result envelope {size} bytes > 4KB budget"
+        )
+
+
+class TestMimicItemidSearchRegistry:
+    """Inc 3 — tool def + dispatch wiring."""
+
+    def test_in_all_tool_defs(self):
+        from src.conversational.health_evidence.tool_defs import ALL_TOOL_DEFS
+        assert any(
+            d["name"] == "mimic_itemid_search" for d in ALL_TOOL_DEFS
+        )
+
+    def test_in_tool_dispatch(self):
+        from src.conversational.health_evidence.tool_defs import TOOL_DISPATCH
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search,
+        )
+        assert "mimic_itemid_search" in TOOL_DISPATCH
+        assert TOOL_DISPATCH["mimic_itemid_search"] is mimic_itemid_search
+
+    def test_tool_def_advertises_query_and_max_results(self):
+        from src.conversational.health_evidence.tool_defs import ALL_TOOL_DEFS
+        td = next(
+            d for d in ALL_TOOL_DEFS if d["name"] == "mimic_itemid_search"
+        )
+        props = td["input_schema"]["properties"]
+        assert "query" in props
+        assert props["query"]["type"] == "string"
+        assert "max_results" in props
+        assert "query" in td["input_schema"]["required"]
+
+    def test_tool_def_description_explains_when_to_use(self):
+        """Description must teach the model: call this BEFORE
+        mimic_distribution_lookup when the itemid is unknown."""
+        from src.conversational.health_evidence.tool_defs import ALL_TOOL_DEFS
+        td = next(
+            d for d in ALL_TOOL_DEFS if d["name"] == "mimic_itemid_search"
+        )
+        desc = td["description"].lower()
+        assert "itemid" in desc
+        # Must connect to mimic_distribution_lookup so the model
+        # learns the chain.
+        assert "mimic_distribution_lookup" in desc
+        # Must say something about empty results signalling
+        # not-in-MIMIC, not failure.
+        assert (
+            "empty" in desc
+            or "not in mimic" in desc
+            or "no match" in desc
+        )
+
+    def test_reexported_from_health_evidence_init(self):
+        from src.conversational.health_evidence import mimic_itemid_search
+        from src.conversational.health_evidence.tools import (
+            mimic_itemid_search as direct,
+        )
+        assert mimic_itemid_search is direct

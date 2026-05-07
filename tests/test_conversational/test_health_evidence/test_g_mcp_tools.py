@@ -296,12 +296,13 @@ class TestIcdLookup:
 
 
 class TestToolRegistration:
-    def test_all_11_tools_in_dispatch(self):
+    def test_all_tools_in_dispatch(self):
         from src.conversational.health_evidence import TOOL_DISPATCH
 
         for name in [
             "pubmed_search",
             "mimic_distribution_lookup",
+            "mimic_itemid_search",
             "loinc_reference_range",
             "snomed_search",
             "snomed_expand_ecl",
@@ -314,12 +315,13 @@ class TestToolRegistration:
         ]:
             assert name in TOOL_DISPATCH, f"Missing dispatch for {name}"
 
-    def test_all_11_tool_defs_listed(self):
+    def test_all_tool_defs_listed(self):
         from src.conversational.health_evidence import ALL_TOOL_DEFS
 
         names = {td["name"] for td in ALL_TOOL_DEFS}
         assert names == {
             "pubmed_search", "mimic_distribution_lookup",
+            "mimic_itemid_search",
             "loinc_reference_range", "snomed_search", "snomed_expand_ecl",
             "rxnorm_lookup", "code_map", "trials_search",
             "openfda_drug_label", "icd_lookup", "icd_autocode",

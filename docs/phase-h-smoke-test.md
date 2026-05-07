@@ -249,13 +249,26 @@ table** — the pre-Phase-H critic would either skip the analyte or
 guess. Phase H should call `loinc_reference_range` (LOINC 33747-0) or
 `mimic_distribution_lookup`, or both, and cite the result.
 
-**Success:** `tool_calls` includes `loinc_reference_range` OR
-`mimic_distribution_lookup` (status=ok); `cited_sources` references
-that source.
+**Success (post-Tier-D):** `tool_calls` includes
+`mimic_itemid_search(query="procalcitonin")` returning `n=0`
+(procalcitonin is genuinely absent from MIMIC-IV), then a pivot
+to `pubmed_search` for population evidence. The critic should
+recognise that a "MIMIC-derived n=84 procalcitonin cohort" is
+contradictory and produce `severity="warn"` flagging the
+data-provenance mismatch — this is a sharper verdict than the
+pre-Tier-D version, which incorrectly accepted the fictional MIMIC
+sample as plausible based only on PubMed ranges.
+
+For analytes that ARE in MIMIC but the model doesn't already know
+the itemid, success is: `mimic_itemid_search` returns the itemid,
+then `mimic_distribution_lookup(itemid=<resolved>, cohort=...)`
+is called for the cohort distribution. The chain is
+`search → distribution_lookup`.
 
 **Failure:** verdict references a hard-coded "0.0–0.5 ng/mL" with no
-tool call — the model recalled. The prompt's "don't recall, look up"
-instruction isn't biting hard enough.
+tool call — the model recalled. OR: the critic guesses an itemid
+without calling `mimic_itemid_search` first (regression to the
+pre-Tier-D behaviour).
 
 ## 3b — Tier D raw-prefix scenario (cohort not in registry)
 

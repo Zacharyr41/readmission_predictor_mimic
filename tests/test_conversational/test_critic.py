@@ -1126,11 +1126,13 @@ class TestCriticPhaseGMcpTools:
         ):
             assert expected in tool_names, f"missing {expected!r}"
 
-    def test_critic_tool_count_is_eleven(self):
-        """Sanity: the critic now has exactly the 11 health-evidence tools."""
+    def test_critic_tool_count_is_twelve(self):
+        """Sanity: the critic now has exactly the 12 health-evidence
+        tools. Was 11; Inc 4 added mimic_itemid_search."""
         from src.conversational.critic import _CRITIC_TOOLS
-        assert len(_CRITIC_TOOLS) == 11
-        assert len(set(_CRITIC_TOOLS)) == 11  # no duplicates
+        assert len(_CRITIC_TOOLS) == 12
+        assert len(set(_CRITIC_TOOLS)) == 12  # no duplicates
+        assert "mimic_itemid_search" in _CRITIC_TOOLS
 
 
 class TestCriticPromptShape:
@@ -1352,4 +1354,47 @@ class TestCriticPromptShape:
         )
         assert cohort_phrases_present >= 3, (
             f"only {cohort_phrases_present} cohort phrases in prompt"
+        )
+
+    def test_prompt_documents_itemid_search_chain(self):
+        """Prompt teaches the model: when you don't know the itemid
+        for an analyte, call mimic_itemid_search FIRST (before
+        mimic_distribution_lookup). Without this guidance the model
+        guesses itemids from training and gets niche labs wrong."""
+        assert "mimic_itemid_search" in CRITIC_SYSTEM_PROMPT
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        # Chain order is the load-bearing teaching: search → distribution.
+        # Multiple acceptable phrasings; require at least one.
+        chain_signal = (
+            "before mimic_distribution_lookup" in prompt_lower
+            or "first call mimic_itemid_search" in prompt_lower
+            or "look up the itemid" in prompt_lower
+            or "resolve the itemid" in prompt_lower
+            or "first" in prompt_lower
+            and "mimic_itemid_search" in prompt_lower
+            and "mimic_distribution_lookup" in prompt_lower
+        )
+        assert chain_signal, (
+            "prompt must teach 'call mimic_itemid_search FIRST when "
+            "the itemid is unknown' — not a passing mention"
+        )
+
+    def test_prompt_documents_empty_results_means_not_in_mimic(self):
+        """When mimic_itemid_search returns empty results, the model
+        must know to pivot to PubMed (not retry with a guess).
+        Procalcitonin is the canonical 'absent from MIMIC' case."""
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        # The prompt must say something that connects empty results
+        # → pivot to PubMed. Multiple phrasings acceptable.
+        empty_signal = (
+            "not in mimic" in prompt_lower
+            or "absent from mimic" in prompt_lower
+            or "empty results" in prompt_lower
+            or "no match" in prompt_lower
+            or ("empty" in prompt_lower and "pubmed" in prompt_lower)
+        )
+        assert empty_signal, (
+            "prompt must teach: empty mimic_itemid_search results "
+            "means the analyte isn't in MIMIC — pivot to PubMed, "
+            "don't retry with another itemid guess"
         )

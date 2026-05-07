@@ -17,6 +17,7 @@ from src.conversational.health_evidence.tools import (
     icd_lookup,
     loinc_reference_range,
     mimic_distribution_lookup,
+    mimic_itemid_search,
     openfda_drug_label,
     pubmed_search,
     rxnorm_lookup,
@@ -402,9 +403,54 @@ ICD_AUTOCODE_TOOL_DEF: dict[str, Any] = {
 }
 
 
+MIMIC_ITEMID_SEARCH_TOOL_DEF: dict[str, Any] = {
+    "name": "mimic_itemid_search",
+    "description": (
+        "Search MIMIC's d_labitems and d_items for itemids whose "
+        "label matches a free-text analyte/measurement name (e.g. "
+        "'creatinine', 'heart rate', 'procalcitonin'). Returns ranked "
+        "candidates: each has itemid, label, table ('labevents' or "
+        "'chartevents'), category, and (for lab items) fluid + LOINC.\n\n"
+        "**Call this FIRST when you need to look up the cohort-typical "
+        "distribution of an analyte but don't know its canonical MIMIC "
+        "itemid** — then pass the resolved itemid to "
+        "``mimic_distribution_lookup``. Don't guess itemids from "
+        "training; common labs work but niche labs (procalcitonin, "
+        "etc.) and free-text descriptions don't, and a wrong itemid "
+        "wastes a tool call by returning data for a different analyte.\n\n"
+        "**Empty results means the analyte isn't in MIMIC at all** "
+        "(procalcitonin is genuinely absent in MIMIC-IV, for example) "
+        "— pivot to PubMed for population-level evidence. Don't retry "
+        "with a different itemid guess."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Free-text analyte / measurement name. Letters, "
+                    "digits, spaces, and basic punctuation only — SQL "
+                    "wildcards / quotes / semicolons are rejected. "
+                    "Minimum 2 non-whitespace characters."
+                ),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "How many candidates to return (default 5, max 25).",
+                "default": 5,
+                "maximum": 25,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
 ALL_TOOL_DEFS: list[dict[str, Any]] = [
     PUBMED_SEARCH_TOOL_DEF,
     MIMIC_DISTRIBUTION_TOOL_DEF,
+    MIMIC_ITEMID_SEARCH_TOOL_DEF,
     LOINC_REFERENCE_RANGE_TOOL_DEF,
     SNOMED_SEARCH_TOOL_DEF,
     SNOMED_EXPAND_ECL_TOOL_DEF,
@@ -420,6 +466,7 @@ ALL_TOOL_DEFS: list[dict[str, Any]] = [
 TOOL_DISPATCH: dict[str, Any] = {
     "pubmed_search": pubmed_search,
     "mimic_distribution_lookup": mimic_distribution_lookup,
+    "mimic_itemid_search": mimic_itemid_search,
     "loinc_reference_range": loinc_reference_range,
     "snomed_search": snomed_search,
     "snomed_expand_ecl": snomed_expand_ecl,

@@ -572,6 +572,26 @@ def _stats_to_envelope(
 _BQ_DIAGNOSES_ICD = "`physionet-data.mimiciv_3_1_hosp.diagnoses_icd`"
 _BQ_LABEVENTS = "`physionet-data.mimiciv_3_1_hosp.labevents`"
 _BQ_CHARTEVENTS = "`physionet-data.mimiciv_3_1_icu.chartevents`"
+_BQ_D_LABITEMS = "`physionet-data.mimiciv_3_1_hosp.d_labitems`"
+_BQ_D_ITEMS = "`physionet-data.mimiciv_3_1_icu.d_items`"
+
+# Path to the labitem→{loinc, label} mapping used for LOINC enrichment
+# in mimic_itemid_search. Generator script (build_phase_h_catalogs.py)
+# already loads this file; we share the constant so the two stay in sync.
+_DEFAULT_LABITEM_TO_SNOMED_PATH = (
+    _REPO_ROOT / "data" / "mappings" / "labitem_to_snomed.json"
+)
+LABITEM_TO_SNOMED_PATH: Path = _DEFAULT_LABITEM_TO_SNOMED_PATH
+
+# Charset whitelist for analyte-search queries. Letters, digits, ASCII
+# space, and basic punctuation that appears in lab/chart labels
+# (period, comma, hyphen, slash). Anything else (LIKE wildcards %/_,
+# quotes, semicolons, parentheses) is rejected before SQL composition
+# as a security gate.
+_VALID_SEARCH_QUERY_RE = re.compile(r"^[A-Za-z0-9 .,\-/]+$")
+_MIN_SEARCH_QUERY_CHARS = 2
+_DEFAULT_SEARCH_MAX_RESULTS = 5
+_SEARCH_MAX_RESULTS_CEILING = 25
 
 
 def _get_bigquery_module():
@@ -1470,3 +1490,296 @@ def loinc_reference_range(loinc_code: str) -> dict[str, Any]:
         ],
     }
     return _enforce_size_budget(payload)
+
+
+# ---------------------------------------------------------------------------
+# mimic_itemid_search: free-text analyte → MIMIC itemid lookup
+# (Phase H follow-up — fills the gap surfaced by the procalcitonin smoke).
+# ---------------------------------------------------------------------------
+
+
+def _validate_search_query(query: str) -> str:
+    """Charset gate for the user-facing analyte search query.
+
+    Returns the trimmed query on success; raises ``ValueError`` if the
+    input is None / empty / too short / contains characters outside
+    the safe set. SQL injection payloads, LIKE wildcards (% / _), and
+    classic quote-based escapes are all rejected here BEFORE any
+    backend connection is opened."""
+    if not isinstance(query, str):
+        raise ValueError(f"query must be a string, got {type(query).__name__}")
+    s = query.strip()
+    if len(s) < _MIN_SEARCH_QUERY_CHARS:
+        raise ValueError(
+            f"query too short: {s!r} (need at least "
+            f"{_MIN_SEARCH_QUERY_CHARS} non-whitespace characters)"
+        )
+    if not _VALID_SEARCH_QUERY_RE.match(s):
+        raise ValueError(
+            f"invalid query {query!r}: must match [A-Za-z0-9 .,\\-/]+ "
+            f"(no SQL wildcards / quotes / semicolons)"
+        )
+    return s
+
+
+# Lazy-cached mapping from itemid → LOINC code, populated from
+# data/mappings/labitem_to_snomed.json on first call. Only labevents
+# itemids are LOINC-coded; chart items don't appear in this mapping.
+# Tests can monkeypatch ``LABITEM_TO_SNOMED_PATH`` to point at a
+# fixture mapping; the cache is keyed on the path so test fixtures
+# don't bleed into one another.
+_ITEMID_TO_LOINC_CACHE: dict[str, dict[int, str]] = {}
+
+
+def _load_itemid_to_loinc() -> dict[int, str]:
+    """Load + cache the itemid → LOINC mapping. Cache is keyed on the
+    current ``LABITEM_TO_SNOMED_PATH`` so monkeypatching in tests
+    works as expected (different paths get separate caches)."""
+    cache_key = str(LABITEM_TO_SNOMED_PATH)
+    cached = _ITEMID_TO_LOINC_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    out: dict[int, str] = {}
+    path = LABITEM_TO_SNOMED_PATH
+    if not path.exists():
+        _ITEMID_TO_LOINC_CACHE[cache_key] = out
+        return out
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        _ITEMID_TO_LOINC_CACHE[cache_key] = out
+        return out
+    if not isinstance(raw, dict):
+        _ITEMID_TO_LOINC_CACHE[cache_key] = out
+        return out
+    for itemid_str, rec in raw.items():
+        if itemid_str == "_metadata":
+            continue
+        if not isinstance(rec, dict):
+            continue
+        loinc = rec.get("loinc")
+        if not loinc:
+            continue
+        try:
+            out[int(itemid_str)] = str(loinc)
+        except (TypeError, ValueError):
+            continue
+    _ITEMID_TO_LOINC_CACHE[cache_key] = out
+    return out
+
+
+def _match_label(label: str, query: str) -> str:
+    """Classify how a row matches the query — drives the result's
+    ``match`` field. Used by tests + the model when it picks among
+    candidates. Inputs are already normalised (both lowercase)."""
+    label_low = (label or "").lower()
+    query_low = (query or "").lower()
+    if label_low == query_low:
+        return "exact"
+    if label_low.startswith(query_low):
+        return "prefix"
+    return "substring"
+
+
+def mimic_itemid_search(
+    query: str,
+    max_results: int = _DEFAULT_SEARCH_MAX_RESULTS,
+) -> dict[str, Any]:
+    """Search MIMIC's ``d_labitems`` and ``d_items`` for itemids whose
+    label matches a free-text analyte/measurement name.
+
+    Returns a list of ranked candidates (exact > prefix > substring),
+    each carrying ``itemid``, ``label``, ``table`` (``"labevents"``
+    or ``"chartevents"``), optional ``fluid`` (lab items only),
+    ``category``, and (when available) the LOINC code from
+    ``data/mappings/labitem_to_snomed.json``.
+
+    **Empty results are NOT a failure.** When the analyte isn't in
+    MIMIC at all (procalcitonin is genuinely absent in MIMIC-IV), the
+    tool returns ``{status: "ok", results: []}`` so the model knows
+    to pivot to PubMed rather than retry with a guess.
+    ``status="unavailable"`` is reserved for backend failures
+    (duckdb missing, BigQuery auth, etc.).
+
+    Backend dispatch follows the same ``DATA_SOURCE`` env var as the
+    on-the-fly cohort compute — local DuckDB or BigQuery against
+    physionet-data.mimiciv_3_1_*.
+
+    PHI-safe: returns reference data only (itemid, label, fluid,
+    category, LOINC). Never returns row-level patient values.
+    """
+    try:
+        n = int(max_results)
+    except (TypeError, ValueError):
+        n = _DEFAULT_SEARCH_MAX_RESULTS
+    n = max(1, min(n, _SEARCH_MAX_RESULTS_CEILING))
+
+    try:
+        validated = _validate_search_query(query)
+    except ValueError as exc:
+        return {"status": "unavailable", "error": f"invalid query: {exc}"}
+
+    data_source = os.environ.get("DATA_SOURCE", "local").lower()
+    if data_source == "bigquery":
+        rows, err = _search_itemid_via_bigquery(validated, max_results=n)
+    else:
+        rows, err = _search_itemid_via_duckdb(validated, max_results=n)
+    if err is not None:
+        return {"status": "unavailable", "error": err}
+
+    # LOINC enrichment for lab items.
+    loinc_index = _load_itemid_to_loinc()
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        itemid = int(row["itemid"])
+        rec: dict[str, Any] = {
+            "itemid": itemid,
+            "label": row["label"] or "",
+            "table": row["source_table"],
+            "category": row.get("category") or "",
+            "match": _match_label(row["label"] or "", validated),
+        }
+        if row["source_table"] == "labevents":
+            rec["fluid"] = row.get("fluid") or ""
+            loinc = loinc_index.get(itemid)
+            if loinc:
+                rec["loinc"] = loinc
+        results.append(rec)
+
+    return _enforce_size_budget({"status": "ok", "results": results})
+
+
+def _search_itemid_via_duckdb(
+    query: str, *, max_results: int,
+) -> tuple[list[dict], str | None]:
+    """Local DuckDB path. Returns ``(rows, error)``. Rows are dicts
+    with keys: itemid, label, fluid, category, source_table,
+    match_rank."""
+    if not MIMIC_COMPUTE_DUCKDB_PATH.exists():
+        return [], (
+            f"compute backend (MIMIC duckdb) not available at "
+            f"{MIMIC_COMPUTE_DUCKDB_PATH}"
+        )
+    sql = """
+        WITH unioned AS (
+            SELECT itemid, label, fluid, category,
+                   'labevents' AS source_table,
+                   CASE
+                       WHEN LOWER(label) = LOWER(?) THEN 0
+                       WHEN LOWER(label) LIKE LOWER(?) || '%' THEN 1
+                       ELSE 2
+                   END AS match_rank
+            FROM d_labitems
+            WHERE LOWER(label) LIKE '%' || LOWER(?) || '%'
+            UNION ALL
+            SELECT itemid, label, NULL AS fluid, category,
+                   'chartevents' AS source_table,
+                   CASE
+                       WHEN LOWER(label) = LOWER(?) THEN 0
+                       WHEN LOWER(label) LIKE LOWER(?) || '%' THEN 1
+                       ELSE 2
+                   END AS match_rank
+            FROM d_items
+            WHERE LOWER(label) LIKE '%' || LOWER(?) || '%'
+        )
+        SELECT itemid, label, fluid, category, source_table, match_rank
+        FROM unioned
+        ORDER BY match_rank, length(label), label
+        LIMIT ?
+    """
+    try:
+        import duckdb
+
+        con = duckdb.connect(str(MIMIC_COMPUTE_DUCKDB_PATH), read_only=True)
+        try:
+            raw = con.execute(
+                sql,
+                [query, query, query, query, query, query, max_results],
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception as exc:  # noqa: BLE001 — never raise to caller
+        logger.warning("mimic_itemid_search duckdb failed: %s", exc)
+        return [], f"duckdb search failed: {exc}"
+
+    rows = [
+        {
+            "itemid": r[0],
+            "label": r[1] or "",
+            "fluid": r[2],
+            "category": r[3],
+            "source_table": r[4],
+            "match_rank": int(r[5]),
+        }
+        for r in raw
+    ]
+    return rows, None
+
+
+def _search_itemid_via_bigquery(
+    query: str, *, max_results: int,
+) -> tuple[list[dict], str | None]:
+    """BigQuery path. Returns ``(rows, error)``."""
+    project = os.environ.get("BIGQUERY_PROJECT")
+    if not project:
+        return [], (
+            "DATA_SOURCE=bigquery but BIGQUERY_PROJECT is unset — "
+            "cannot run BigQuery itemid search"
+        )
+    sql = f"""
+        SELECT itemid, label, fluid, category,
+               'labevents' AS source_table,
+               CASE
+                   WHEN LOWER(label) = LOWER(@q) THEN 0
+                   WHEN STARTS_WITH(LOWER(label), LOWER(@q)) THEN 1
+                   ELSE 2
+               END AS match_rank
+        FROM {_BQ_D_LABITEMS}
+        WHERE STRPOS(LOWER(label), LOWER(@q)) > 0
+        UNION ALL
+        SELECT itemid, label, NULL AS fluid, category,
+               'chartevents' AS source_table,
+               CASE
+                   WHEN LOWER(label) = LOWER(@q) THEN 0
+                   WHEN STARTS_WITH(LOWER(label), LOWER(@q)) THEN 1
+                   ELSE 2
+               END AS match_rank
+        FROM {_BQ_D_ITEMS}
+        WHERE STRPOS(LOWER(label), LOWER(@q)) > 0
+        ORDER BY match_rank, LENGTH(label), label
+        LIMIT @n
+    """
+    try:
+        bq = _get_bigquery_module()
+        client = bq.Client(project=project)
+        try:
+            params = [
+                bq.ScalarQueryParameter("q", "STRING", query),
+                bq.ScalarQueryParameter("n", "INT64", max_results),
+            ]
+            job_config = bq.QueryJobConfig(query_parameters=params)
+            job = client.query(sql, job_config=job_config)
+        except (AttributeError, TypeError):
+            # Mocks may not implement QueryJobConfig — fall back to
+            # interpolated values (safe since both are validated).
+            interpolated = (
+                sql.replace("@q", f"'{query}'").replace("@n", str(int(max_results)))
+            )
+            job = client.query(interpolated)
+        result_rows = list(job.result())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mimic_itemid_search bigquery failed: %s", exc)
+        return [], f"bigquery search failed: {exc}"
+
+    rows = []
+    for r in result_rows:
+        rows.append({
+            "itemid": int(getattr(r, "itemid", 0)),
+            "label": getattr(r, "label", "") or "",
+            "fluid": getattr(r, "fluid", None),
+            "category": getattr(r, "category", None),
+            "source_table": str(getattr(r, "source_table", "")),
+            "match_rank": int(getattr(r, "match_rank", 2)),
+        })
+    return rows, None

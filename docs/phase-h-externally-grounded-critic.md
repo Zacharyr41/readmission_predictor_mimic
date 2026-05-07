@@ -55,6 +55,7 @@ every Phase-G MCP gains a production consumer immediately — no
 | `pubmed_search` | ✓ | ✓ |
 | `loinc_reference_range` | – | ✓ |
 | `mimic_distribution_lookup` | – | ✓ |
+| `mimic_itemid_search` | – | ✓ (Tier D follow-up) |
 | `snomed_search` | – | ✓ |
 | `snomed_expand_ecl` | – | ✓ |
 | `rxnorm_lookup` | – | ✓ |
@@ -63,6 +64,14 @@ every Phase-G MCP gains a production consumer immediately — no
 | `openfda_drug_label` | – | ✓ |
 | `icd_lookup` | – | ✓ |
 | `icd_autocode` | – | ✓ |
+
+`mimic_itemid_search` was added as a Tier-D follow-up after the
+procalcitonin smoke surfaced that the critic was guessing itemids
+from training. It maps a free-text analyte name (e.g.
+`"procalcitonin"`, `"heart rate"`) to ranked MIMIC itemid
+candidates by querying `d_labitems ∪ d_items` live against the
+session backend. Empty results → analyte isn't in MIMIC → pivot to
+PubMed (no wasted itemid retry).
 
 ### Prompt deltas
 
@@ -226,6 +235,23 @@ compares against the same data source the answer was computed from:
 
 PHI invariant unchanged either way — only aggregate stats leave the
 function.
+
+### `mimic_itemid_search` → `mimic_distribution_lookup` chain (Tier D follow-up)
+
+When the model needs the cohort-typical distribution of an analyte
+but doesn't know the canonical MIMIC itemid, the prompt now teaches
+this chain:
+
+1. `mimic_itemid_search(query="<analyte>")` → resolves the itemid
+   (or returns empty results, which signals the analyte isn't in
+   MIMIC → pivot to `pubmed_search`).
+2. `mimic_distribution_lookup(itemid=<resolved>, cohort="<phrase>")`
+   → cohort-typical stats.
+
+This eliminates the "wasted tool call from a wrong itemid guess"
+failure mode the procalcitonin smoke surfaced. The chain is
+optional — for common labs (creatinine 50912, lactate 50813), the
+model knows the itemid from training and skips the search step.
 
 ### Adding a new cohort
 

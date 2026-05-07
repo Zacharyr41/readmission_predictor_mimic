@@ -34,6 +34,14 @@ repo:
   not in the cached catalog, the tool falls back to on-the-fly
   compute against the session's MIMIC backend (DuckDB or BigQuery —
   same dispatch as the rest of the pipeline via `DATA_SOURCE`).
+- **`mimic_itemid_search`** — Tier-D follow-up. Live SQL against
+  `d_labitems` + `d_items` to map a free-text analyte name (e.g.
+  `"procalcitonin"`, `"heart rate"`) to ranked MIMIC itemid
+  candidates. Same `DATA_SOURCE` dispatch as
+  `mimic_distribution_lookup` — no new env vars. The critic uses
+  this to chain `search → distribution_lookup` when it doesn't
+  already know the itemid; empty results signal "not in MIMIC" and
+  the model pivots to PubMed.
 
 If both JSONs are present and you have internet for NCBI, you're at
 the floor of what Phase H needs. The smoke test passes its "at least
