@@ -402,6 +402,143 @@ also work; the legacy dialect uses tool names `lookup` and
 `autocode` rather than OMOPHub's `search_concepts` /
 `semantic_search`.
 
+### 4a — Force `rxnorm_lookup` via implausible drug dose
+
+The previous §4 question (30% Levophed in HF) is uncontroversial
+enough that the model dismisses from training recall. To genuinely
+exercise the OMOPHub-backed `rxnorm_lookup` path, give the critic a
+drug dose that's biologically implausible — it'll need to look up
+the drug to verify.
+
+4.5 mcg/kg/hr is ~3× the labeled max for dexmedetomidine (~1.4
+mcg/kg/hr); the model should call `rxnorm_lookup("dexmedetomidine")`
+to verify the drug + likely `pubmed_search` for typical ranges, and
+return `severity=warn` flagging probable units bug (mcg/kg/hr vs
+mcg/kg/min is 60× off):
+
+```bash
+set -a && source .env && set +a && .venv/bin/python <<'PY'
+import json, anthropic
+from src.conversational.critic import critique
+from src.conversational.models import (
+    AnswerResult, ClinicalConcept, CompetencyQuestion,
+)
+api_key = open(".env").read().split("ANTHROPIC_API_KEY=")[1].split("\n")[0].strip()
+client = anthropic.Anthropic(api_key=api_key)
+
+cq = CompetencyQuestion(
+    original_question="Mean dexmedetomidine dose in our septic shock cohort",
+    clinical_concepts=[ClinicalConcept(name="dexmedetomidine", concept_type="drug")],
+    return_type="text_and_table", scope="cohort",
+    interpretation_summary="Cohort: ICU septic shock. Drug: dexmedetomidine. Aggregate: mean infusion dose.",
+)
+answer = AnswerResult(
+    text_summary="Mean dexmedetomidine dose 4.5 mcg/kg/hr (n=124) in septic shock cohort.",
+    data_table=[{"mean_dose_mcg_kg_hr": 4.5, "n": 124}],
+)
+v = critique(client, cq, answer)
+v = v.model_dump() if v else {"severity": None, "tool_calls": None}
+print(f"severity:  {v.get('severity')}")
+print(f"plausible: {v.get('plausible')}")
+print(f"concern:   {(v.get('concern') or '')[:250]}")
+print("tool_calls:")
+for tc in v.get("tool_calls") or []:
+    print(f"  {tc.get('name'):<30} status={tc.get('status'):<12} n={tc.get('n_results')}")
+PY
+```
+
+**Success:** `tool_calls` includes `rxnorm_lookup` AND
+`severity=warn`. The critic recognised the dose is impossibly high
+and verified via the new OMOPHub wiring rather than recalling the
+labeled max from training.
+
+### 4b — Force `icd_lookup` via diagnosis-code mismatch
+
+The interpretation says R57.0 (correct ICD-10 for cardiogenic
+shock) but the answer narrative cites I50.9 (heart failure
+unspecified — wrong code for cardiogenic shock). The model should
+call `icd_lookup("cardiogenic shock")` to verify R57.0 vs I50.9
+and return `severity=warn` flagging the mismatch:
+
+```bash
+set -a && source .env && set +a && .venv/bin/python <<'PY'
+import json, anthropic
+from src.conversational.critic import critique
+from src.conversational.models import (
+    AnswerResult, ClinicalConcept, CompetencyQuestion,
+)
+api_key = open(".env").read().split("ANTHROPIC_API_KEY=")[1].split("\n")[0].strip()
+client = anthropic.Anthropic(api_key=api_key)
+
+cq = CompetencyQuestion(
+    original_question="What's the cohort size for cardiogenic shock?",
+    clinical_concepts=[ClinicalConcept(name="cardiogenic shock", concept_type="diagnosis")],
+    return_type="text_and_table", scope="cohort",
+    interpretation_summary="Cohort definition: ICD-10 R57.0 (cardiogenic shock).",
+)
+answer = AnswerResult(
+    text_summary="Cardiogenic shock cohort (ICD-10 I50.9) has 4,127 hadm_ids in MIMIC-IV.",
+    data_table=[{"icd_code": "I50.9", "n_hadm_ids": 4127}],
+)
+v = critique(client, cq, answer)
+v = v.model_dump() if v else {"severity": None, "tool_calls": None}
+print(f"severity:  {v.get('severity')}")
+print(f"concern:   {(v.get('concern') or '')[:300]}")
+print("tool_calls:")
+for tc in v.get("tool_calls") or []:
+    print(f"  {tc.get('name'):<30} status={tc.get('status'):<12} n={tc.get('n_results')}")
+PY
+```
+
+**Success:** `tool_calls` includes `icd_lookup` (or `icd_autocode`)
+AND `severity=warn`. The critic noticed I50.9 is the wrong ICD code
+for "cardiogenic shock" and verified via OMOPHub's ICD-10-CM
+search.
+
+### 4c — Force `code_map` via cross-vocab claim
+
+The answer claims SNOMED 73211009 maps to ICD-10 E11.9. In fact,
+73211009 is "Diabetes mellitus" (the generic parent concept), not
+specifically T2DM — T2DM's SNOMED code is 44054006. The model
+should call `code_map(SNOMED 73211009 → ICD10CM)` to verify the
+mapping:
+
+```bash
+set -a && source .env && set +a && .venv/bin/python <<'PY'
+import json, anthropic
+from src.conversational.critic import critique
+from src.conversational.models import (
+    AnswerResult, ClinicalConcept, CompetencyQuestion,
+)
+api_key = open(".env").read().split("ANTHROPIC_API_KEY=")[1].split("\n")[0].strip()
+client = anthropic.Anthropic(api_key=api_key)
+
+cq = CompetencyQuestion(
+    original_question="Mortality rate for type 2 diabetes patients",
+    clinical_concepts=[ClinicalConcept(name="type 2 diabetes", concept_type="diagnosis")],
+    return_type="text_and_table", scope="cohort",
+    interpretation_summary="Cohort: T2DM (ICD-10 E11.9 mapped from SNOMED 73211009).",
+)
+answer = AnswerResult(
+    text_summary="In-hospital mortality for type 2 diabetes (ICD-10 E11.9, SNOMED 73211009) was 4.2% (n=8421).",
+    data_table=[{"mortality_pct": 4.2, "n": 8421}],
+)
+v = critique(client, cq, answer)
+v = v.model_dump() if v else {"severity": None, "tool_calls": None}
+print(f"severity:  {v.get('severity')}")
+print(f"concern:   {(v.get('concern') or '')[:300]}")
+print("tool_calls:")
+for tc in v.get("tool_calls") or []:
+    print(f"  {tc.get('name'):<30} status={tc.get('status'):<12} n={tc.get('n_results')}")
+PY
+```
+
+**Success:** `tool_calls` includes `code_map` (or `icd_lookup` /
+`snomed_search`) AND `severity=warn`. The critic recognised the
+SNOMED→ICD claim warranted verification and exercised the
+OMOPHub-backed cross-vocab path. The 4.2% mortality is fine; the
+flag is on the code-mapping claim, not the rate.
+
 ## 5 — Inspect telemetry (per-verdict + cumulative)
 
 Two flavours of telemetry are useful for understanding what the critic
