@@ -951,13 +951,150 @@ def snomed_expand_ecl(expression: str, max_results: int = 200) -> dict[str, Any]
 # --- rxnorm_lookup via OMOPHub (HTTP) --------------------------------------
 
 
+# OMOPHub's hosted MCP endpoint. Used as the default when the user
+# hasn't overridden via OMOPHUB_MCP_URL (e.g. for self-hosted Docker).
+_OMOPHUB_HOSTED_URL = "https://mcp.omophub.com"
+
+# OMOPHub's MCP wraps each tool response as a text blob with JSON
+# appended at the end. Format varies by tool:
+#
+#   search_concepts / semantic_search:
+#     "Found N concepts ... [markdown list] {"results":[{...}], "total":N,...}"
+#   get_concept_by_code / get_concept:
+#     "**Concept name** [markdown table] [{"concept_id":..., ...}]"
+#     (a JSON array, not wrapped in {"results": [...]})
+#
+# So we look for the trailing JSON — either an object containing a
+# "results" key, OR a bare array, OR a bare object — in that order
+# of preference. Greedy match anchored to end of string.
+_OMOPHUB_APPENDED_OBJECT_RE = re.compile(
+    r"(\{[\s\S]*\"results\"[\s\S]*\})\s*$",
+)
+_OMOPHUB_APPENDED_ARRAY_RE = re.compile(
+    r"(\[[\s\S]*\])\s*$",
+)
+_OMOPHUB_APPENDED_BARE_OBJECT_RE = re.compile(
+    r"(\{[\s\S]*\})\s*$",
+)
+
+
+def _unwrap_omophub_results(envelope: dict) -> list[dict]:
+    """Pull structured concept records out of OMOPHub's text-blob
+    response. OMOPHub returns ``results=[{"text": "<markdown> <JSON>"}]``
+    where the JSON tail carries the real records — either a
+    ``{"results": [...]}`` wrapper (search tools) or a bare array
+    (get-by-code tools). We parse and return the inner record list;
+    if the response is ALREADY in flat-records shape, we return as-is.
+    """
+    raw = envelope.get("results") or []
+    if not raw or not isinstance(raw[0], dict):
+        return []
+    first = raw[0]
+    # Already structured? Pass through.
+    if "text" not in first:
+        return [r for r in raw if isinstance(r, dict)]
+    text = first.get("text") or ""
+    if not isinstance(text, str):
+        return []
+
+    # Try the wrapped-object form first (search tools).
+    m = _OMOPHUB_APPENDED_OBJECT_RE.search(text)
+    if m:
+        try:
+            parsed = json.loads(m.group(1))
+            inner = parsed.get("results") if isinstance(parsed, dict) else None
+            if isinstance(inner, list):
+                return [r for r in inner if isinstance(r, dict)]
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+    # Try a bare JSON array (get-by-code tools).
+    m = _OMOPHUB_APPENDED_ARRAY_RE.search(text)
+    if m:
+        try:
+            parsed = json.loads(m.group(1))
+            if isinstance(parsed, list):
+                return [r for r in parsed if isinstance(r, dict)]
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+    # Last resort: bare JSON object (single-record return).
+    m = _OMOPHUB_APPENDED_BARE_OBJECT_RE.search(text)
+    if m:
+        try:
+            parsed = json.loads(m.group(1))
+            if isinstance(parsed, dict):
+                return [parsed]
+        except (ValueError, json.JSONDecodeError):
+            pass
+    return []
+
+
+def _filter_by_vocabulary(
+    records: list[dict], target_vocabulary: str,
+) -> list[dict]:
+    """Client-side filter for OMOPHub records by ``vocabulary_id``.
+    OMOPHub's ``vocabulary_ids`` query parameter doesn't reliably
+    filter the response in the hosted MCP — so we filter here.
+    Case-insensitive comparison; matches both bare names
+    (``"RxNorm"``) and ICD-10-CM with/without the ``-CM`` suffix.
+
+    Lenient mode: records that DON'T carry any vocabulary field at
+    all are kept (back-compat with legacy/hypothetical test fixtures
+    that don't include the OMOPHub field). Only records that
+    explicitly declare a different vocabulary are dropped.
+    """
+    if not target_vocabulary:
+        return records
+    target = target_vocabulary.lower().replace("-", "").replace(" ", "")
+    out = []
+    for r in records:
+        raw_v = r.get("vocabulary_id") or r.get("vocabulary")
+        if raw_v is None or raw_v == "":
+            # Record didn't declare a vocabulary — keep it (legacy
+            # / opaque records). The caller's downstream
+            # normalisation already defaults to the right vocab.
+            out.append(r)
+            continue
+        v_norm = str(raw_v).lower().replace("-", "").replace(" ", "")
+        if v_norm == target:
+            out.append(r)
+        # Allow ICD10 ↔ ICD10CM equivalence when target is one form.
+        elif (
+            target in ("icd10", "icd10cm")
+            and v_norm in ("icd10", "icd10cm")
+        ):
+            out.append(r)
+    return out
+
+
 def _omophub_config():
+    """Build the OMOPHub MCP client config.
+
+    Defaults to the hosted endpoint at https://mcp.omophub.com when
+    ``OMOPHUB_MCP_URL`` is unset; users with a self-hosted Docker
+    container override via that env var.
+
+    Authentication: OMOPHub's hosted MCP validates the client request
+    via ``Authorization: Bearer <key>`` where ``<key>`` is the user's
+    OMOPHub API key (prefix ``oh_``). Without ``OMOPHUB_API_KEY`` set,
+    the config returns None and the calling tool reports unavailable.
+    Self-hosted Docker containers also accept the same Bearer header
+    (they ignore it in favour of their own server-side env auth, but
+    sending the header is harmless).
+    """
     from src.conversational.health_evidence.mcp_client import McpServerConfig
 
-    url = os.environ.get("OMOPHUB_MCP_URL")
-    if not url:
+    api_key = os.environ.get("OMOPHUB_API_KEY")
+    if not api_key:
         return None
-    return McpServerConfig(name="omophub", transport="http", url=url)
+    url = os.environ.get("OMOPHUB_MCP_URL") or _OMOPHUB_HOSTED_URL
+    return McpServerConfig(
+        name="omophub",
+        transport="http",
+        url=url,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
 
 
 def rxnorm_lookup(drug_name: str, max_results: int = 5) -> dict[str, Any]:
@@ -977,29 +1114,65 @@ def rxnorm_lookup(drug_name: str, max_results: int = 5) -> dict[str, Any]:
     if client is None:
         return {
             "status": "unavailable",
-            "error": "OMOPHub MCP not configured (set OMOPHUB_MCP_URL)",
+            "error": "OMOPHub MCP not configured (set OMOPHUB_API_KEY)",
         }
+    # OMOPHub's actual MCP tool name is ``search_concepts`` (not
+    # ``search``); the vocabulary filter param is ``vocabulary_ids``
+    # (plural, accepts comma-separated multi-vocab) rather than the
+    # singular ``vocabulary``. Page-size param is ``page_size``, not
+    # ``max_results``. See https://docs.omophub.com/ai/mcp-tools.md.
     envelope = client.call_tool(
-        "search",
-        {"query": drug_name, "vocabulary": "RxNorm",
-         "max_results": max_results},
+        "search_concepts",
+        {
+            "query": drug_name,
+            "vocabulary_ids": "RxNorm",
+            "page_size": max_results,
+        },
         timeout=_HTTP_TIMEOUT_SECONDS,
     )
     if envelope.get("status") != "ok":
         return envelope
-    raw = envelope.get("results") or []
+    # OMOPHub wraps results in a text blob with JSON appended; unwrap
+    # to flat records, then filter to RxNorm only (the server's
+    # vocabulary_ids param doesn't reliably filter — it broadens to
+    # related vocabs like SPL, so we constrain client-side).
+    records = _unwrap_omophub_results(envelope)
+    records = _filter_by_vocabulary(records, "RxNorm") or records
+    # Fall back to the unfiltered records ONLY if the filter yielded
+    # zero matches AND the upstream returned non-empty — that way the
+    # critic still sees something useful when OMOPHub has only related
+    # vocabs (SPL etc.) for a brand-name query.
+    if not records:
+        records = _unwrap_omophub_results(envelope)
+
     normalized = []
-    for r in raw[:max_results]:
+    for r in records[:max_results]:
         if not isinstance(r, dict):
             continue
-        rxcui = str(r.get("rxcui") or r.get("concept_code") or r.get("id") or "")
+        # OMOPHub's response uses ``concept_code`` / ``concept_name`` /
+        # ``concept_class_id`` / ``vocabulary_id``. We also accept the
+        # legacy hypothetical shape (``rxcui`` / ``name`` / ``tty`` /
+        # ``vocabulary``) so existing tests + alternate gateways still
+        # work without touching downstream consumers.
+        rxcui = str(
+            r.get("rxcui") or r.get("concept_code") or r.get("id") or ""
+        )
         if not rxcui:
             continue
         normalized.append({
             "rxcui": rxcui,
             "name": str(r.get("name") or r.get("concept_name") or ""),
-            "tty": str(r.get("tty") or r.get("term_type") or ""),
-            "vocabulary": str(r.get("vocabulary") or "RxNorm"),
+            "tty": str(
+                r.get("tty")
+                or r.get("term_type")
+                or r.get("concept_class_id")
+                or ""
+            ),
+            "vocabulary": str(
+                r.get("vocabulary")
+                or r.get("vocabulary_id")
+                or "RxNorm"
+            ),
         })
     return _enforce_size_budget({"status": "ok", "results": normalized})
 
@@ -1021,66 +1194,156 @@ def code_map(
     - ICD-10 ↔ RxNorm  (treats-relationship pivot)
     - LOINC ↔ SNOMED   (specimen / analyte mapping)
 
-    Returns ``{"status": "ok", "results": [{source_code,
-    source_vocabulary, target_code, target_vocabulary, target_name,
-    relationship}, ...]}``. Returns ``unavailable`` when OMOPHUB_MCP_URL
-    is not set or the call fails.
+    OMOPHub's MCP doesn't expose a single ``map_code`` tool. It does
+    expose ``map_concept`` keyed on numeric OMOP ``concept_id``, plus
+    ``get_concept_by_code`` to resolve a (code, vocabulary) pair to a
+    concept_id. This function does the 2-step pivot:
+
+      1. ``get_concept_by_code(code, vocabulary)`` →
+         ``concept_id`` of the source concept.
+      2. ``map_concept(concept_id, target_vocabularies=[<target>])`` →
+         mapped concepts in the target vocabulary.
+
+    Step-1 miss (no concept for that code/vocab) returns ``unavailable``
+    cleanly without firing step 2. Returns ``{"status": "ok", "results":
+    [{source_code, source_vocabulary, target_code, target_vocabulary,
+    target_name, relationship}, ...]}``.
     """
     client = _get_mcp_client("omophub", _omophub_config)
     if client is None:
         return {
             "status": "unavailable",
-            "error": "OMOPHub MCP not configured (set OMOPHUB_MCP_URL)",
+            "error": "OMOPHub MCP not configured (set OMOPHUB_API_KEY)",
         }
-    envelope = client.call_tool(
-        "map_code",
-        {
-            "source_vocabulary": source_vocabulary,
-            "source_code": source_code,
-            "target_vocabulary": target_vocabulary,
-            "max_results": max_results,
-        },
+
+    # Step 1: resolve the source code to an OMOP concept_id. OMOPHub's
+    # ``get_concept_by_code`` expects ``concept_code`` and
+    # ``vocabulary_id`` (not ``code`` and ``vocabulary``) — verified
+    # against the live hosted endpoint's input-validation error.
+    step1 = client.call_tool(
+        "get_concept_by_code",
+        {"concept_code": source_code, "vocabulary_id": source_vocabulary},
         timeout=_HTTP_TIMEOUT_SECONDS,
     )
-    if envelope.get("status") != "ok":
-        return envelope
-    raw = envelope.get("results") or []
+    if step1.get("status") != "ok":
+        return step1
+    step1_records = _unwrap_omophub_results(step1)
+    if not step1_records:
+        return {
+            "status": "unavailable",
+            "error": (
+                f"OMOPHub: no concept for "
+                f"{source_vocabulary}/{source_code!r}"
+            ),
+        }
+    concept_id = step1_records[0].get("concept_id")
+    if concept_id is None:
+        return {
+            "status": "unavailable",
+            "error": (
+                f"OMOPHub: concept for {source_vocabulary}/{source_code!r} "
+                "missing concept_id"
+            ),
+        }
+
+    # Step 2: explore the source concept to get all its relationships
+    # — each relationship's ``concept_2`` carries the target's
+    # vocabulary-native code + name. (We use ``explore_concept``
+    # rather than ``map_concept`` because the latter returns OMOP
+    # concept_ids without vocab-native codes, requiring a 3rd call
+    # per mapping. ``explore_concept`` gives everything in one shot.)
+    step2 = client.call_tool(
+        "explore_concept",
+        {"concept_id": concept_id},
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if step2.get("status") != "ok":
+        return step2
+
+    # explore_concept's text-blob has trailing JSON shaped:
+    #   {"concept": {...}, "hierarchy": {...},
+    #    "relationships": {"relationships": [
+    #      {"relationship_id": "Maps to", "concept_2": {<target>}, ...}
+    #    ]}}
+    # We extract the inner `relationships` list and look at each
+    # ``concept_2`` for matches against ``target_vocabulary``.
+    relationships = _extract_explore_relationships(step2)
+
     normalized = []
-    for r in raw[:max_results]:
-        if not isinstance(r, dict):
+    for rel in relationships:
+        if not isinstance(rel, dict):
             continue
-        target_code = str(
-            r.get("target_code")
-            or r.get("target_concept_code")
-            or ""
-        )
+        c2 = rel.get("concept_2")
+        if not isinstance(c2, dict):
+            continue
+        # Match by vocabulary (case-insensitive, ICD10/ICD10CM equiv).
+        if not _vocab_matches(
+            c2.get("vocabulary_id"), target_vocabulary,
+        ):
+            continue
+        target_code = str(c2.get("concept_code") or "")
         if not target_code:
             continue
         normalized.append({
-            "source_code": str(
-                r.get("source_code")
-                or r.get("source_concept_code")
-                or source_code
-            ),
-            "source_vocabulary": str(
-                r.get("source_vocabulary")
-                or r.get("source_vocabulary_id")
-                or source_vocabulary
-            ),
+            "source_code": source_code,
+            "source_vocabulary": source_vocabulary,
             "target_code": target_code,
             "target_vocabulary": str(
-                r.get("target_vocabulary")
-                or r.get("target_vocabulary_id")
-                or target_vocabulary
+                c2.get("vocabulary_id") or target_vocabulary
             ),
-            "target_name": str(
-                r.get("target_name") or r.get("target_concept_name") or ""
-            ),
-            "relationship": str(
-                r.get("relationship") or r.get("relationship_id") or ""
-            ),
+            "target_name": str(c2.get("concept_name") or ""),
+            "relationship": str(rel.get("relationship_id") or ""),
         })
+        if len(normalized) >= max_results:
+            break
     return _enforce_size_budget({"status": "ok", "results": normalized})
+
+
+def _extract_explore_relationships(envelope: dict) -> list[dict]:
+    """Pull the ``relationships`` list out of OMOPHub's
+    ``explore_concept`` response. The trailing JSON shape is:
+
+      {"concept": {...}, "hierarchy": {...},
+       "relationships": {"relationships": [<list>]}}
+    """
+    raw = envelope.get("results") or []
+    if not raw or not isinstance(raw[0], dict):
+        return []
+    text = raw[0].get("text") or ""
+    if not isinstance(text, str):
+        return []
+    m = _OMOPHUB_APPENDED_BARE_OBJECT_RE.search(text)
+    if not m:
+        return []
+    try:
+        parsed = json.loads(m.group(1))
+    except (ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    rel_outer = parsed.get("relationships")
+    # The outer key is itself a dict with "relationships" inside.
+    if isinstance(rel_outer, dict):
+        rel_inner = rel_outer.get("relationships")
+        if isinstance(rel_inner, list):
+            return rel_inner
+    if isinstance(rel_outer, list):
+        return rel_outer
+    return []
+
+
+def _vocab_matches(actual: str | None, target: str) -> bool:
+    """Case-insensitive vocab equality with ICD10 ↔ ICD10CM equivalence.
+    Used by code_map to filter mapped concepts to the target vocab."""
+    if not actual or not target:
+        return False
+    a = str(actual).lower().replace("-", "").replace(" ", "")
+    t = str(target).lower().replace("-", "").replace(" ", "")
+    if a == t:
+        return True
+    if t in ("icd10", "icd10cm") and a in ("icd10", "icd10cm"):
+        return True
+    return False
 
 
 # --- trials_search via cyanheads ClinicalTrials MCP (stdio) ----------------
@@ -1330,58 +1593,146 @@ def openfda_drug_label(drug_name: str) -> dict[str, Any]:
     return _enforce_size_budget({"status": "ok", "results": normalized})
 
 
-# --- icd_lookup via self-hosted ICD MCP (HTTP) -----------------------------
+# --- icd_lookup / icd_autocode (dialect-aware: OMOPHub OR self-hosted) ----
+
+
+def _icd_dialect() -> str | None:
+    """Return the dialect to use for ICD calls.
+
+    Resolution order (matches `_icd_config` below):
+    - ``ICD_MCP_URL`` set → ``"legacy"`` (user has self-hosted ICD MCP
+      that knows the legacy `lookup`/`autocode` tool names).
+    - ``OMOPHUB_API_KEY`` set → ``"omophub"`` (route through OMOPHub's
+      `search_concepts`/`semantic_search` filtered to ICD10CM).
+    - Else → ``None`` (tool returns unavailable).
+    """
+    if os.environ.get("ICD_MCP_URL"):
+        return "legacy"
+    if os.environ.get("OMOPHUB_API_KEY"):
+        return "omophub"
+    return None
 
 
 def _icd_config():
+    """Build an MCP config for ICD lookups with a fallback chain.
+
+    1. ``ICD_MCP_URL`` set → self-hosted ICD MCP (legacy dialect, no
+       headers, ICD-11 supported per the user's server).
+    2. Else if ``OMOPHUB_API_KEY`` set → reuse the OMOPHub config
+       (Bearer auth, hosted endpoint by default). The same MCP client
+       handles RxNorm, code_map, and ICD lookups.
+    3. Else → None (tool returns unavailable).
+    """
     from src.conversational.health_evidence.mcp_client import McpServerConfig
 
     url = os.environ.get("ICD_MCP_URL")
-    if not url:
-        return None
-    return McpServerConfig(name="icd", transport="http", url=url)
+    if url:
+        return McpServerConfig(name="icd", transport="http", url=url)
+    # Fall through to OMOPHub for ICD-10 lookups when OMOPHub is
+    # configured. We use the same OMOPHub client the rxnorm_lookup +
+    # code_map paths share — the connection is reused, no new
+    # subprocess/handshake.
+    if os.environ.get("OMOPHUB_API_KEY"):
+        return _omophub_config()
+    return None
 
 
 def icd_lookup(query: str, version: str = "10", max_results: int = 10) -> dict[str, Any]:
-    """Look up ICD codes matching ``query`` via a self-hosted ICD MCP.
+    """Look up ICD codes matching ``query``.
 
-    ``version`` is "10" or "11". Returns ``{"status": "ok", "results":
-    [{code, title, version, chapter}, ...]}``. Returns ``unavailable``
-    when ``ICD_MCP_URL`` is not set.
+    Dialect-aware: routes through the user's self-hosted ICD MCP when
+    ``ICD_MCP_URL`` is set, else through OMOPHub's ``search_concepts``
+    when ``OMOPHUB_API_KEY`` is set. ``version`` is "10" or "11".
+    The OMOPHub path covers ICD-10 only (vocabulary_ids="ICD10CM");
+    ICD-11 on the OMOPHub path returns ``unavailable`` with a note.
+
+    Returns ``{"status": "ok", "results": [{code, title, version,
+    chapter}, ...]}``.
     """
+    dialect = _icd_dialect()
+    if dialect is None:
+        return {
+            "status": "unavailable",
+            "error": (
+                "ICD lookup not configured (set ICD_MCP_URL for a "
+                "self-hosted ICD MCP, or OMOPHUB_API_KEY to route "
+                "ICD-10 lookups through OMOPHub)"
+            ),
+        }
+    if dialect == "omophub" and str(version) == "11":
+        return {
+            "status": "unavailable",
+            "error": (
+                "OMOPHub does not carry ICD-11; for ICD-11 lookups "
+                "set ICD_MCP_URL to a self-hosted MCP that wraps the "
+                "WHO ICD-API"
+            ),
+        }
     client = _get_mcp_client("icd", _icd_config)
     if client is None:
         return {
             "status": "unavailable",
-            "error": "ICD MCP not configured (set ICD_MCP_URL)",
+            "error": "ICD MCP client init failed",
         }
-    envelope = client.call_tool(
-        "lookup",
-        {"query": query, "version": str(version), "max_results": max_results},
-        timeout=_HTTP_TIMEOUT_SECONDS,
-    )
+
+    if dialect == "omophub":
+        # OMOPHub's vocabulary_ids filter doesn't reliably constrain
+        # the response, so we fetch a wider page (~25) and filter
+        # client-side to the requested vocabulary. Without this, top
+        # results skew to LOINC / Nebraska Lexicon / SNOMED for many
+        # queries, leaving zero ICD10CM rows in the user-visible slice.
+        page_size = max(25, max_results * 5)
+        envelope = client.call_tool(
+            "search_concepts",
+            {
+                "query": query,
+                "vocabulary_ids": "ICD10CM",
+                "page_size": page_size,
+            },
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+    else:  # legacy self-hosted ICD MCP
+        envelope = client.call_tool(
+            "lookup",
+            {"query": query, "version": str(version), "max_results": max_results},
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
     if envelope.get("status") != "ok":
         return envelope
-    raw = envelope.get("results") or []
+    if dialect == "omophub":
+        # Unwrap text-blob → flat records, then client-side filter
+        # to ICD10CM (server's vocabulary_ids param is unreliable).
+        raw = _unwrap_omophub_results(envelope)
+        raw = _filter_by_vocabulary(raw, "ICD10CM")
+    else:
+        raw = envelope.get("results") or []
     normalized = []
     for r in raw[:max_results]:
         if not isinstance(r, dict):
             continue
-        code = str(r.get("code") or r.get("icd_code") or "")
+        # OMOPHub: concept_code/concept_name; legacy: code/title.
+        code = str(
+            r.get("code")
+            or r.get("icd_code")
+            or r.get("concept_code")
+            or ""
+        )
         if not code:
             continue
         normalized.append({
             "code": code,
             "title": _truncate_title(str(
-                r.get("title") or r.get("description") or ""
+                r.get("title")
+                or r.get("description")
+                or r.get("concept_name")
+                or ""
             )),
             "version": str(r.get("version") or version),
-            "chapter": str(r.get("chapter") or ""),
+            "chapter": str(
+                r.get("chapter") or r.get("domain_id") or ""
+            ),
         })
     return _enforce_size_budget({"status": "ok", "results": normalized})
-
-
-# --- icd_autocode via self-hosted ICD MCP (HTTP) --------------------------
 
 
 def icd_autocode(
@@ -1391,38 +1742,78 @@ def icd_autocode(
 ) -> dict[str, Any]:
     """Suggest ICD-10/11 codes for free-text clinical narrative.
 
-    The autocoding tool returns ranked candidates with relevance/confidence
-    scores — useful when the orchestrator needs to translate clinical
-    prose (a problem-list bullet, an admission note phrase) into structured
-    ICD codes for downstream filtering or billing-side reasoning.
+    Dialect-aware: routes through the user's self-hosted ICD MCP's
+    ``autocode`` tool when ``ICD_MCP_URL`` is set, else through
+    OMOPHub's ``semantic_search`` filtered to ICD10CM when
+    ``OMOPHUB_API_KEY`` is set. Returns ranked candidates with
+    relevance/confidence scores. The OMOPHub path covers ICD-10
+    only; ICD-11 returns ``unavailable`` with a note pointing at
+    the self-hosted alternative.
 
     Returns ``{"status": "ok", "results": [{code, title, version,
-    confidence}, ...]}``. ``confidence`` is None when the upstream did
-    not score the candidate. Returns ``unavailable`` when ``ICD_MCP_URL``
-    is not set.
+    confidence}, ...]}``. ``confidence`` is None when the upstream
+    didn't score the candidate.
     """
+    dialect = _icd_dialect()
+    if dialect is None:
+        return {
+            "status": "unavailable",
+            "error": (
+                "ICD autocode not configured (set ICD_MCP_URL or "
+                "OMOPHUB_API_KEY)"
+            ),
+        }
+    if dialect == "omophub" and str(version) == "11":
+        return {
+            "status": "unavailable",
+            "error": (
+                "OMOPHub does not carry ICD-11; for ICD-11 autocoding "
+                "set ICD_MCP_URL to a self-hosted MCP that wraps the "
+                "WHO ICD-API"
+            ),
+        }
     client = _get_mcp_client("icd", _icd_config)
     if client is None:
         return {
             "status": "unavailable",
-            "error": "ICD MCP not configured (set ICD_MCP_URL)",
+            "error": "ICD MCP client init failed",
         }
-    envelope = client.call_tool(
-        "autocode",
-        {"text": text, "version": str(version), "max_results": max_results},
-        timeout=_HTTP_TIMEOUT_SECONDS,
-    )
+
+    if dialect == "omophub":
+        envelope = client.call_tool(
+            "semantic_search",
+            {
+                "query": text,
+                "vocabulary_ids": "ICD10CM",
+                "limit": max_results,
+            },
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+    else:  # legacy
+        envelope = client.call_tool(
+            "autocode",
+            {"text": text, "version": str(version), "max_results": max_results},
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
     if envelope.get("status") != "ok":
         return envelope
-    raw = envelope.get("results") or []
+    if dialect == "omophub":
+        raw = _unwrap_omophub_results(envelope)
+        raw = _filter_by_vocabulary(raw, "ICD10CM")
+    else:
+        raw = envelope.get("results") or []
     normalized = []
     for r in raw[:max_results]:
         if not isinstance(r, dict):
             continue
-        code = str(r.get("code") or r.get("icd_code") or "")
+        code = str(
+            r.get("code")
+            or r.get("icd_code")
+            or r.get("concept_code")
+            or ""
+        )
         if not code:
             continue
-        # Confidence/score: keep as float when present; never synthesise.
         conf = r.get("confidence")
         if conf is None:
             conf = r.get("score")
@@ -1434,7 +1825,10 @@ def icd_autocode(
         normalized.append({
             "code": code,
             "title": _truncate_title(str(
-                r.get("title") or r.get("description") or ""
+                r.get("title")
+                or r.get("description")
+                or r.get("concept_name")
+                or ""
             )),
             "version": str(r.get("version") or version),
             "confidence": conf,

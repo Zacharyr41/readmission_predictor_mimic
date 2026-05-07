@@ -273,3 +273,111 @@ class TestEnvelopeConversion:
 
         result = _envelope_from_mcp_result(FakeResult())
         assert result == {"status": "ok", "results": []}
+
+
+# ===========================================================================
+# HTTP transport: headers pass-through (Phase H follow-up)
+# ===========================================================================
+
+
+class TestHttpTransportHeaders:
+    """Hosted MCP endpoints (e.g. https://mcp.omophub.com)
+    authenticate via Authorization: Bearer <key> headers from the
+    client. McpClient must forward configured headers to the
+    underlying streamablehttp_client transport so the hosted
+    endpoint accepts the request."""
+
+    def test_mcp_server_config_accepts_headers(self):
+        cfg = McpServerConfig(
+            name="omophub", transport="http",
+            url="https://mcp.omophub.com",
+            headers={"Authorization": "Bearer oh_test"},
+        )
+        assert cfg.headers == {"Authorization": "Bearer oh_test"}
+
+    def test_mcp_server_config_headers_default_none(self):
+        cfg = McpServerConfig(
+            name="omophub", transport="http",
+            url="https://mcp.omophub.com",
+        )
+        assert cfg.headers is None
+
+    def test_http_transport_passes_headers_to_streamable_client(
+        self, monkeypatch,
+    ):
+        """The configured headers reach streamablehttp_client(...) so
+        Bearer auth works against hosted endpoints."""
+        from contextlib import asynccontextmanager
+        captured: dict = {}
+
+        @asynccontextmanager
+        async def fake_streamable(url, *args, **kwargs):
+            captured["url"] = url
+            captured["headers"] = kwargs.get("headers")
+            captured["called"] = True
+            # Yield 3-tuple to match the SDK's contract.
+            yield (object(), object(), object())
+
+        monkeypatch.setattr(
+            "mcp.client.streamable_http.streamablehttp_client",
+            fake_streamable,
+        )
+
+        cfg = McpServerConfig(
+            name="omophub", transport="http",
+            url="https://mcp.omophub.com",
+            headers={"Authorization": "Bearer oh_test"},
+        )
+        client = McpClient(cfg)
+        try:
+            # Trigger init by calling a tool; init may fail past
+            # streamablehttp_client which is what we want to capture.
+            try:
+                client.call_tool("anything", {}, timeout=0.5)
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            client.close()
+
+        assert captured.get("called") is True
+        assert captured.get("url") == "https://mcp.omophub.com"
+        assert captured.get("headers") == {
+            "Authorization": "Bearer oh_test",
+        }
+
+    def test_http_transport_no_headers_when_config_omits_them(
+        self, monkeypatch,
+    ):
+        """When config.headers is None, the streamable_client call
+        passes None (or equivalent absence). Empty dict would be a
+        bug — some SDK versions might attach a malformed
+        Authorization header."""
+        from contextlib import asynccontextmanager
+        captured: dict = {"headers_kwarg": "MISSING"}
+
+        @asynccontextmanager
+        async def fake_streamable(url, *args, **kwargs):
+            captured["headers_kwarg"] = kwargs.get("headers", "MISSING")
+            yield (object(), object(), object())
+
+        monkeypatch.setattr(
+            "mcp.client.streamable_http.streamablehttp_client",
+            fake_streamable,
+        )
+
+        cfg = McpServerConfig(
+            name="legacy", transport="http",
+            url="https://example.com/mcp",
+        )
+        client = McpClient(cfg)
+        try:
+            try:
+                client.call_tool("anything", {}, timeout=0.5)
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            client.close()
+
+        # Either omitted entirely OR passed as None — both fine.
+        # Empty dict {} is NOT acceptable.
+        assert captured["headers_kwarg"] in (None, "MISSING")

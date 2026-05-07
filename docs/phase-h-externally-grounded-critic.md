@@ -111,10 +111,10 @@ the critic continues with whatever's left.
 |---|---|---|
 | `pubmed_search` | `PUBMED_BACKEND`, `NCBI_API_KEY`, `PUBMED_MCP_URL` | NCBI / Anthropic-hosted MCP / self-hosted |
 | `snomed_search`, `snomed_expand_ecl` | `HERMES_MCP_COMMAND`, `HERMES_MCP_DB` | Hermes (stdio) |
-| `rxnorm_lookup`, `code_map` | `OMOPHUB_MCP_URL`, `OMOPHUB_API_KEY` | OMOPHub (HTTP) |
+| `rxnorm_lookup`, `code_map`, `icd_lookup`, `icd_autocode` | `OMOPHUB_API_KEY` (URL defaults to `https://mcp.omophub.com`) | OMOPHub hosted (HTTP + Bearer auth) |
 | `trials_search` | `CLINICALTRIALS_MCP_COMMAND` (defaults to `bunx`/`npx clinicaltrialsgov-mcp-server@latest`) | cyanheads stdio MCP |
 | `openfda_drug_label` | `OPENFDA_MCP_COMMAND` (defaults to `npx openfda-mcp-server`), `OPENFDA_API_KEY` | npx stdio MCP |
-| `icd_lookup`, `icd_autocode` | `ICD_MCP_URL` | Self-hosted ICD MCP (WHO licensing) |
+| `icd_lookup`, `icd_autocode` (ICD-11 only) | `ICD_MCP_URL` | Self-hosted ICD MCP wrapping WHO ICD-11 API (optional; OMOPHub covers ICD-10) |
 
 ## Graceful degradation
 

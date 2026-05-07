@@ -154,24 +154,62 @@ Smoke test:
 .venv/bin/python -c "from src.conversational.health_evidence.tools import trials_search; print(trials_search(query='sepsis lactate', max_results=2))"
 ```
 
-## Tier 3 — moderate (paid or licensed service)
+## Tier 2 — hosted, zero-install (continued)
 
-### OMOPHub — RxNorm + cross-vocab code mapping
+### OMOPHub — RxNorm + ICD-10 + cross-vocab code mapping
 
-OMOPHub is the OHDSI-ecosystem managed vocabulary service. They sell
-hosted access at https://omophub.com. Self-hosting is possible if you
-have an Athena vocabulary dump.
+OMOPHub is the OHDSI-ecosystem managed vocabulary service. The
+default integration uses their **hosted MCP endpoint** at
+`https://mcp.omophub.com` — zero infrastructure, just an API key
+(prefix `oh_`) from https://dashboard.omophub.com.
 
 ```bash
 # .env
-OMOPHUB_MCP_URL=https://your-omophub-instance/mcp
-OMOPHUB_API_KEY=your_key
+OMOPHUB_API_KEY=oh_your_key_here
+# OMOPHUB_MCP_URL is optional — defaults to https://mcp.omophub.com.
+# Override only for self-hosted Docker (see below).
 ```
 
-What you lose by skipping this: drug-name disambiguation (`norepinephrine`
-vs `Levophed` vs `noradrenaline` all resolving to RXCUI 7980) and
-vocab cross-mapping (`code_map`). The critic falls back to PubMed for
-drug-name lookups — usable, just less precise.
+This single integration powers FOUR critic tools:
+- `rxnorm_lookup(drug_name)` — RxNorm via `search_concepts(vocabulary_ids="RxNorm")`
+- `code_map(source_vocabulary, source_code, target_vocabulary)` — 2-step pivot through `get_concept_by_code` → `explore_concept`
+- `icd_lookup(query, version="10")` — ICD-10-CM via `search_concepts(vocabulary_ids="ICD10CM")`
+- `icd_autocode(text, version="10")` — ICD-10-CM via `semantic_search(vocabulary_ids="ICD10CM")`
+
+**Auth:** the hosted endpoint authenticates the client request via
+`Authorization: Bearer <key>` headers. Our McpClient handles this
+automatically — `_omophub_config()` reads `OMOPHUB_API_KEY` and sets
+the header. Never hardcoded; never logged.
+
+**ICD-11 limitation:** OMOPHub doesn't carry ICD-11. Calling
+`icd_lookup(query=..., version="11")` returns `unavailable` with a
+note. For ICD-11 support, set `ICD_MCP_URL` to a self-hosted MCP
+that wraps the WHO ICD-API (out of scope; the legacy code path is
+preserved for users who do this).
+
+**Self-hosted Docker (optional, advanced):** if you have offline /
+privacy / rate-limit requirements, OMOPHub also publishes a Docker
+image:
+
+```yaml
+# docker-compose.yml (optional — the hosted path is the default)
+services:
+  omophub-mcp:
+    image: omophub/omophub-mcp
+    ports: ["3100:3100"]
+    env_file: .env
+```
+
+Then override the URL: `OMOPHUB_MCP_URL=http://localhost:3100/mcp` in
+`.env`. The same `Authorization: Bearer` header is sent (the
+container ignores it in favour of its own server-side env auth, but
+the header is harmless).
+
+What you lose by skipping this: drug-name disambiguation
+(`norepinephrine` vs `Levophed`), ICD-10 lookups (`heart failure` →
+`I50.x`), ICD autocoding for clinical narratives, and cross-vocab
+code mapping (ICD ↔ SNOMED ↔ RxNorm). The critic falls back to
+PubMed for drug-name lookups — usable, just less precise.
 
 ## Tier 4 — hard (install + license)
 
@@ -206,25 +244,35 @@ What you lose by skipping: cohort-canonicalization (e.g., resolving
 The critic falls back to free-text reasoning, which is acceptable for
 common cohorts.
 
-## Tier 5 — needs self-hosting (WHO licensing)
+## Tier 5 — ICD-11 self-hosted MCP (optional, advanced)
 
-### ICD MCP — ICD-10 / ICD-11 code lookup
-
-WHO's ICD-11 API requires registered access; ICD-10 is public-domain
-but there's no first-party MCP server we know of. You'd need to:
+ICD-10 is now covered by OMOPHub (Tier 2 above). For **ICD-11
+specifically**, OMOPHub doesn't ship the vocabulary, so users who
+need ICD-11 must self-host:
 
 1. Register for ICD-API access at https://icd.who.int/icdapi
-2. Run a self-hosted MCP server that wraps the WHO API (no public
-   reference implementation; build your own).
+2. Run a self-hosted MCP server that wraps the WHO ICD-11 API (no
+   public reference implementation; build your own — the
+   `mcp_servers/bq_validator/server.py` template in this repo is a
+   good FastMCP starting point).
 
 ```bash
-# .env (only when you have a server running)
+# .env (only when self-hosting ICD-11)
 ICD_MCP_URL=https://your-icd-mcp/mcp
 ```
 
-What you lose by skipping: ICD code verification when an answer cites
-a diagnosis code. The critic falls back to free-text reasoning over
-the diagnosis name, which is usually fine for plausibility checking.
+When `ICD_MCP_URL` is set, our `icd_lookup` / `icd_autocode` tools
+use the legacy dialect (calling tool names `lookup` / `autocode`
+with the legacy payload shape). Your MCP needs to expose those two
+tools. ICD-11 versions are supported via this path.
+
+When `ICD_MCP_URL` is unset but `OMOPHUB_API_KEY` is set, the tools
+route through OMOPHub for ICD-10 only. ICD-11 returns `unavailable`
+with a note pointing at this self-host path.
+
+What you lose by skipping ICD entirely: the critic falls back to
+free-text reasoning over the diagnosis name, which is usually fine
+for plausibility checking but doesn't verify codes.
 
 ## Recommended setup order
 

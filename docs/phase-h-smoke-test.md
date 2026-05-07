@@ -347,7 +347,7 @@ cohort doesn't, so tool use would be wasteful. The on-the-fly
 compute path is unit-tested separately; this live scenario tests
 that the integration works when the model decides it's needed.
 
-## 4 — Cohort-canonicalization scenario (only if SNOMED/RxNorm/ICD configured)
+## 4 — Cohort-canonicalization scenario (works once `OMOPHUB_API_KEY` is set)
 
 ```bash
 .venv/bin/python <<'PY'
@@ -378,15 +378,29 @@ print(json.dumps(verdict.model_dump() if verdict else None, indent=2, default=st
 PY
 ```
 
-**With ICD MCP configured:** `tool_calls` should show `icd_lookup`
-calling for "I50.9" or similar.
+**With OMOPHub configured (`OMOPHUB_API_KEY` set):** the model has
+both `rxnorm_lookup` and `icd_lookup` available, both routed through
+the hosted OMOPHub MCP. Whether they actually fire depends on the
+prompt's tool-use discipline — for a clearly-uncontroversial
+percentage like "30% Levophed in HF", the model may correctly skip
+tools and verdict from training recall (`severity=info`). To force
+tool use, change the percentage to something borderline (e.g. 90%
+or 5%) where the model can't dismiss from training.
 
-**With OMOPHub configured:** `rxnorm_lookup` should resolve
-"Levophed" → norepinephrine RXCUI 7980.
+If the model DOES invoke tools:
+- `rxnorm_lookup("Levophed")` returns SPL/RxNorm records (the OMOPHub
+  search ranks SPL high for brand names; both are drug-related and
+  useful for disambiguation).
+- `icd_lookup("heart failure")` returns ICD-10-CM codes like I50.814
+  (right heart failure due to left heart failure).
 
-**Without either configured:** the critic falls back to PubMed or
-returns severity=info without external citations. The verdict should
-still render — graceful degradation.
+**Without OMOPHub configured:** the critic falls back to training
+recall or PubMed. The verdict still renders — graceful degradation.
+
+**With a self-hosted ICD MCP (`ICD_MCP_URL` set):** ICD-11 lookups
+also work; the legacy dialect uses tool names `lookup` and
+`autocode` rather than OMOPHub's `search_concepts` /
+`semantic_search`.
 
 ## 5 — Inspect telemetry
 

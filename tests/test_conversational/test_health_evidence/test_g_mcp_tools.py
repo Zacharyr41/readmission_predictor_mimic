@@ -118,12 +118,47 @@ class TestSnomedSearch:
 # ===========================================================================
 
 
+class TestOmophubConfig:
+    """Phase H follow-up: _omophub_config defaults to the hosted MCP
+    endpoint (https://mcp.omophub.com) and constructs an Authorization:
+    Bearer header from OMOPHUB_API_KEY. The legacy OMOPHUB_MCP_URL env
+    var is preserved as an override path for users with a self-hosted
+    Docker container."""
+
+    def test_uses_hosted_default_when_url_unset(self, monkeypatch):
+        monkeypatch.delenv("OMOPHUB_MCP_URL", raising=False)
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test123")
+        cfg = he_tools._omophub_config()
+        assert cfg is not None
+        assert cfg.url == "https://mcp.omophub.com"
+        assert cfg.headers == {"Authorization": "Bearer oh_test123"}
+        assert cfg.transport == "http"
+
+    def test_respects_custom_url_for_self_hosted(self, monkeypatch):
+        """Self-hosted Docker users override via OMOPHUB_MCP_URL."""
+        monkeypatch.setenv("OMOPHUB_MCP_URL", "http://localhost:3100/mcp")
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_local_test")
+        cfg = he_tools._omophub_config()
+        assert cfg.url == "http://localhost:3100/mcp"
+        # Bearer header still attached regardless of URL — works for
+        # both hosted and self-hosted (the self-hosted container will
+        # ignore client headers since it auths via env, but no harm).
+        assert cfg.headers == {"Authorization": "Bearer oh_local_test"}
+
+    def test_returns_none_when_api_key_missing(self, monkeypatch):
+        monkeypatch.delenv("OMOPHUB_API_KEY", raising=False)
+        cfg = he_tools._omophub_config()
+        assert cfg is None
+
+
 class TestRxnormLookup:
-    def test_unavailable_when_url_missing(self, monkeypatch):
+    def test_unavailable_when_api_key_missing(self, monkeypatch):
+        monkeypatch.delenv("OMOPHUB_API_KEY", raising=False)
         monkeypatch.delenv("OMOPHUB_MCP_URL", raising=False)
         result = rxnorm_lookup("metformin")
         assert result["status"] == "unavailable"
-        assert "OMOPHUB_MCP_URL" in result["error"]
+        # Error message should point at the missing key.
+        assert "OMOPHUB_API_KEY" in result["error"]
 
     def test_happy_path_normalizes_results(self, monkeypatch):
         monkeypatch.setenv("OMOPHUB_MCP_URL", "https://omophub.example/mcp")
@@ -153,6 +188,60 @@ class TestRxnormLookup:
         assert result["results"][1]["rxcui"] == "11929"
         assert result["results"][1]["name"] == "Metformin Hydrochloride"
         assert result["results"][1]["tty"] == "PIN"
+
+    def test_calls_omophub_search_concepts_with_vocabulary_ids(
+        self, monkeypatch,
+    ):
+        """OMOPHub's actual MCP tool name is ``search_concepts``, not
+        ``search`` (which doesn't exist on OMOPHub). The param key for
+        the vocabulary filter is ``vocabulary_ids`` (plural, multi-vocab
+        comma-separated). Phase H follow-up fix."""
+        captured = []
+
+        def fake_call_tool(name, payload, **kw):
+            captured.append((name, payload))
+            return {"status": "ok", "results": []}
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake_call_tool
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        rxnorm_lookup("Levophed", max_results=3)
+        assert len(captured) == 1
+        tool_name, payload = captured[0]
+        assert tool_name == "search_concepts", (
+            f"OMOPHub MCP exposes 'search_concepts', not {tool_name!r}"
+        )
+        assert payload.get("vocabulary_ids") == "RxNorm"
+        assert "vocabulary" not in payload, (
+            "old single-key 'vocabulary' param is rejected by OMOPHub"
+        )
+
+    def test_normalises_omophub_response_shape(self, monkeypatch):
+        """OMOPHub returns concept records with ``concept_code``,
+        ``concept_name``, ``concept_class_id``, ``vocabulary_id``.
+        Our wrapper remaps to our envelope's stable field names
+        (``rxcui``, ``name``, ``tty``, ``vocabulary``)."""
+        client = _fake_client({
+            "status": "ok",
+            "results": [{
+                "concept_code": "7980",
+                "concept_name": "norepinephrine",
+                "concept_class_id": "Ingredient",
+                "vocabulary_id": "RxNorm",
+            }],
+        })
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        r = rxnorm_lookup("Levophed")
+        assert r["status"] == "ok"
+        rec = r["results"][0]
+        assert rec["rxcui"] == "7980"
+        assert rec["name"] == "norepinephrine"
+        assert rec["tty"] == "Ingredient"
+        assert rec["vocabulary"] == "RxNorm"
 
 
 # ===========================================================================
@@ -255,13 +344,22 @@ class TestOpenfdaDrugLabel:
 
 
 class TestIcdLookup:
-    def test_unavailable_when_url_missing(self, monkeypatch):
+    def test_unavailable_when_neither_icd_nor_omophub_configured(
+        self, monkeypatch,
+    ):
+        """Phase H follow-up: ICD lookup now has a fallback chain —
+        ICD_MCP_URL first (legacy self-hosted), then OMOPHUB_API_KEY
+        (route through OMOPHub's search_concepts with
+        vocabulary_ids=ICD10CM). Unavailable only when BOTH are unset."""
         monkeypatch.delenv("ICD_MCP_URL", raising=False)
+        monkeypatch.delenv("OMOPHUB_API_KEY", raising=False)
         result = icd_lookup("sepsis")
         assert result["status"] == "unavailable"
-        assert "ICD_MCP_URL" in result["error"]
 
-    def test_happy_path_normalizes_results(self, monkeypatch):
+    def test_legacy_path_when_icd_mcp_url_set(self, monkeypatch):
+        """When ICD_MCP_URL is set, calls the legacy `lookup` tool name
+        with the legacy payload shape — back-compat for users with a
+        self-hosted ICD MCP."""
         monkeypatch.setenv("ICD_MCP_URL", "https://icd.example/mcp")
         client = _fake_client({
             "status": "ok",
@@ -272,22 +370,106 @@ class TestIcdLookup:
                     "version": "10",
                     "chapter": "Certain infectious and parasitic diseases",
                 },
-                {
-                    "icd_code": "1G40",
-                    "description": "Sepsis without septic shock",
-                    "version": "11",
-                },
             ],
         })
         monkeypatch.setattr(
             he_tools, "_get_mcp_client", lambda *a, **kw: client,
         )
         result = icd_lookup("sepsis", version="10")
+        # Legacy `lookup` tool name + payload shape.
+        call = client.call_tool.call_args
+        assert call.args[0] == "lookup"
+        assert call.args[1].get("query") == "sepsis"
         assert result["status"] == "ok"
-        assert len(result["results"]) == 2
         assert result["results"][0]["code"] == "A41.9"
-        assert result["results"][1]["code"] == "1G40"
-        assert "Sepsis" in result["results"][1]["title"]
+
+    def test_omophub_path_when_only_omophub_configured(
+        self, monkeypatch,
+    ):
+        """When ICD_MCP_URL is unset but OMOPHUB_API_KEY is set, route
+        through OMOPHub's search_concepts with vocabulary_ids=ICD10CM."""
+        monkeypatch.delenv("ICD_MCP_URL", raising=False)
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test")
+        captured = []
+
+        def fake(name, payload, **kw):
+            captured.append((name, payload))
+            return {
+                "status": "ok",
+                "results": [{
+                    "concept_code": "A419",
+                    "concept_name": "Sepsis, unspecified organism",
+                    "vocabulary_id": "ICD10CM",
+                    "domain_id": "Condition",
+                }],
+            }
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        result = icd_lookup("sepsis", version="10")
+        assert captured[0][0] == "search_concepts"
+        assert captured[0][1].get("vocabulary_ids") == "ICD10CM"
+        assert result["status"] == "ok"
+        # Result normalized to the existing envelope shape (code/title/version).
+        assert result["results"][0]["code"] == "A419"
+        assert "Sepsis" in result["results"][0]["title"]
+        assert result["results"][0]["version"] == "10"
+
+    def test_omophub_path_rejects_icd_11(self, monkeypatch):
+        """OMOPHub doesn't carry ICD-11 vocabulary. version='11' on the
+        OMOPHub path returns unavailable with a clear note."""
+        monkeypatch.delenv("ICD_MCP_URL", raising=False)
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test")
+        # Even with a client mocked, the version check should short-circuit.
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client",
+            lambda *a, **kw: MagicMock(),
+        )
+        result = icd_lookup("anything", version="11")
+        assert result["status"] == "unavailable"
+        # Error mentions ICD-11 + the OMOPHub limitation
+        assert "11" in result["error"]
+        assert "icd" in result["error"].lower()
+
+    def test_legacy_path_supports_icd_11(self, monkeypatch):
+        """When using a self-hosted ICD MCP via ICD_MCP_URL, ICD-11
+        IS supported (the user's self-host knows ICD-11). Only the
+        OMOPHub path is restricted."""
+        monkeypatch.setenv("ICD_MCP_URL", "https://icd.example/mcp")
+        client = _fake_client({
+            "status": "ok",
+            "results": [{
+                "code": "1G40", "title": "Sepsis without septic shock",
+                "version": "11",
+            }],
+        })
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        result = icd_lookup("sepsis", version="11")
+        assert result["status"] == "ok"
+        assert result["results"][0]["code"] == "1G40"
+
+    def test_icd_mcp_url_takes_precedence_over_omophub(self, monkeypatch):
+        """When both ICD_MCP_URL AND OMOPHUB_API_KEY are set, the
+        legacy ICD path wins (so users with their own ICD MCP keep
+        getting their existing behaviour)."""
+        monkeypatch.setenv("ICD_MCP_URL", "https://icd.example/mcp")
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test")
+        client = _fake_client({
+            "status": "ok",
+            "results": [{"code": "A41.9", "title": "Sepsis"}],
+        })
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        icd_lookup("sepsis")
+        call = client.call_tool.call_args
+        # Legacy tool name (NOT search_concepts).
+        assert call.args[0] == "lookup"
 
 
 # ===========================================================================
@@ -423,38 +605,82 @@ class TestSnomedExpandEcl:
 
 
 class TestCodeMap:
-    def test_unavailable_when_url_missing(self, monkeypatch):
+    def test_unavailable_when_api_key_missing(self, monkeypatch):
+        """Phase H follow-up: OMOPHub now defaults to the hosted
+        endpoint, so URL-missing isn't the error condition anymore —
+        the missing API key is."""
+        monkeypatch.delenv("OMOPHUB_API_KEY", raising=False)
         monkeypatch.delenv("OMOPHUB_MCP_URL", raising=False)
         result = code_map(
             source_vocabulary="ICD10CM", source_code="E11.9",
             target_vocabulary="SNOMED",
         )
         assert result["status"] == "unavailable"
-        assert "OMOPHUB_MCP_URL" in result["error"]
+        assert "OMOPHUB_API_KEY" in result["error"]
 
-    def test_happy_path_normalizes_results(self, monkeypatch):
-        monkeypatch.setenv("OMOPHUB_MCP_URL", "https://omophub.example/mcp")
-        client = _fake_client({
-            "status": "ok",
-            "results": [
-                {
-                    "source_code": "E11.9",
-                    "source_vocabulary": "ICD10CM",
-                    "target_code": "44054006",
-                    "target_vocabulary": "SNOMED",
-                    "target_name": "Type 2 diabetes mellitus",
-                    "relationship": "Maps to",
-                },
-                {
-                    "source_concept_code": "E11.9",
-                    "source_vocabulary_id": "ICD10CM",
-                    "target_concept_code": "201826",
-                    "target_vocabulary_id": "RxNorm",
-                    "target_concept_name": "metformin",
-                    "relationship_id": "Treats",
-                },
-            ],
-        })
+    def test_uses_2step_get_concept_by_code_then_explore_concept(
+        self, monkeypatch,
+    ):
+        """OMOPHub's actual MCP exposes ``get_concept_by_code`` (code →
+        OMOP concept_id) and ``explore_concept`` (concept_id → full
+        relationships including ``concept_2`` with vocabulary-native
+        target codes). Our wrapper does the 2-step pivot.
+
+        We use ``explore_concept`` rather than ``map_concept`` because
+        the latter returns OMOP concept_ids without vocab-native
+        target codes, which would require a 3rd call per mapping."""
+        import json as _json
+        calls = []
+
+        # Explore-concept's response wraps mappings in a text blob with
+        # trailing JSON of shape {"concept": ..., "relationships":
+        # {"relationships": [...]}}.
+        explore_payload = {
+            "concept": {"concept_id": 35206882},
+            "relationships": {
+                "relationships": [
+                    {
+                        "relationship_id": "Maps to",
+                        "concept_2": {
+                            "concept_id": 201826,
+                            "concept_name": "Type 2 diabetes mellitus",
+                            "concept_code": "44054006",
+                            "vocabulary_id": "SNOMED",
+                        },
+                    },
+                    # Decoy — different vocab, must be filtered out.
+                    {
+                        "relationship_id": "Subsumes",
+                        "concept_2": {
+                            "concept_code": "E11",
+                            "vocabulary_id": "ICD10CM",
+                        },
+                    },
+                ],
+            },
+        }
+        get_by_code_payload = [{"concept_id": 35206882}]
+
+        def fake(name, payload, **kw):
+            calls.append((name, payload))
+            if name == "get_concept_by_code":
+                return {
+                    "status": "ok",
+                    "results": [{
+                        "text": "some markdown content...\n" + _json.dumps(get_by_code_payload),
+                    }],
+                }
+            if name == "explore_concept":
+                return {
+                    "status": "ok",
+                    "results": [{
+                        "text": "some markdown content...\n" + _json.dumps(explore_payload),
+                    }],
+                }
+            return {"status": "unavailable", "error": f"unknown tool {name}"}
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake
         monkeypatch.setattr(
             he_tools, "_get_mcp_client", lambda *a, **kw: client,
         )
@@ -462,31 +688,73 @@ class TestCodeMap:
             source_vocabulary="ICD10CM", source_code="E11.9",
             target_vocabulary="SNOMED",
         )
+        # Two tool calls happened in the right order.
+        assert calls[0][0] == "get_concept_by_code"
+        assert calls[0][1].get("concept_code") == "E11.9"
+        assert calls[0][1].get("vocabulary_id") == "ICD10CM"
+        assert calls[1][0] == "explore_concept"
+        assert calls[1][1].get("concept_id") == 35206882
+        # Result filtered to SNOMED only (the ICD10CM decoy got dropped).
         assert result["status"] == "ok"
-        assert len(result["results"]) == 2
-        # Both upstream field-name shapes accepted
+        assert len(result["results"]) == 1
         assert result["results"][0]["target_code"] == "44054006"
         assert result["results"][0]["target_vocabulary"] == "SNOMED"
-        assert result["results"][1]["target_code"] == "201826"
-        assert result["results"][1]["target_vocabulary"] == "RxNorm"
-        assert result["results"][1]["relationship"] == "Treats"
+        assert result["results"][0]["target_name"] == "Type 2 diabetes mellitus"
+        assert result["results"][0]["source_code"] == "E11.9"
+        assert result["results"][0]["source_vocabulary"] == "ICD10CM"
+        assert result["results"][0]["relationship"] == "Maps to"
 
-    def test_passes_args_to_server(self, monkeypatch):
-        monkeypatch.setenv("OMOPHUB_MCP_URL", "https://x")
-        client = _fake_client({"status": "ok", "results": []})
+    def test_step1_miss_returns_unavailable_without_step2(
+        self, monkeypatch,
+    ):
+        """If get_concept_by_code finds no concept for the source
+        code, return unavailable cleanly — don't waste step 2."""
+        import json as _json
+        calls = []
+
+        def fake(name, payload, **kw):
+            calls.append(name)
+            if name == "get_concept_by_code":
+                # Empty-array text blob means "not found"
+                return {"status": "ok", "results": [{"text": "[markdown][]"}]}
+            return {"status": "ok", "results": [{"text": "[markdown][]"}]}
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake
         monkeypatch.setattr(
             he_tools, "_get_mcp_client", lambda *a, **kw: client,
         )
-        code_map(
-            source_vocabulary="ICD10CM", source_code="E11.9",
+        r = code_map(
+            source_vocabulary="ICD10", source_code="ZZZZ",
             target_vocabulary="SNOMED",
         )
-        call = client.call_tool.call_args
-        assert call.args[0] == "map_code"
-        payload = call.args[1]
-        assert payload.get("source_vocabulary") == "ICD10CM"
-        assert payload.get("source_code") == "E11.9"
-        assert payload.get("target_vocabulary") == "SNOMED"
+        assert r["status"] == "unavailable"
+        # Step 2 NEVER fired
+        assert "explore_concept" not in calls
+
+    def test_step1_unavailable_propagates(self, monkeypatch):
+        """If get_concept_by_code itself returns unavailable (e.g.
+        OMOPHub hiccup), pass that through. Step 2 doesn't fire."""
+        calls = []
+
+        def fake(name, payload, **kw):
+            calls.append(name)
+            if name == "get_concept_by_code":
+                return {"status": "unavailable", "error": "rate limited"}
+            return {"status": "ok", "results": []}
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        r = code_map(
+            source_vocabulary="ICD10", source_code="E11.9",
+            target_vocabulary="SNOMED",
+        )
+        assert r["status"] == "unavailable"
+        assert "rate limited" in r["error"]
+        assert "explore_concept" not in calls
 
     def test_passes_through_unavailable_envelope(self, monkeypatch):
         monkeypatch.setenv("OMOPHUB_MCP_URL", "https://x")
@@ -502,20 +770,49 @@ class TestCodeMap:
         )
         assert result["status"] == "unavailable"
 
-    def test_drops_results_without_target_code(self, monkeypatch):
-        monkeypatch.setenv("OMOPHUB_MCP_URL", "https://x")
-        client = _fake_client({
-            "status": "ok",
-            "results": [
-                {
-                    "source_code": "x", "target_code": "y",
-                    "target_vocabulary": "SNOMED",
-                },
-                {  # missing target_code
-                    "source_code": "x", "target_vocabulary": "SNOMED",
-                },
-            ],
-        })
+    def test_drops_step2_results_without_target_code(self, monkeypatch):
+        """explore_concept entries whose ``concept_2`` lacks a
+        concept_code are filtered out."""
+        import json as _json
+
+        def fake(name, payload, **kw):
+            if name == "get_concept_by_code":
+                return {
+                    "status": "ok",
+                    "results": [{
+                        "text": "markdown blob..." + _json.dumps([{"concept_id": 999}]),
+                    }],
+                }
+            if name == "explore_concept":
+                payload = {
+                    "concept": {"concept_id": 999},
+                    "relationships": {
+                        "relationships": [
+                            {
+                                "relationship_id": "Maps to",
+                                "concept_2": {
+                                    "concept_code": "y",
+                                    "vocabulary_id": "SNOMED",
+                                },
+                            },
+                            {
+                                "relationship_id": "Maps to",
+                                "concept_2": {
+                                    "vocabulary_id": "SNOMED",
+                                    # missing concept_code
+                                },
+                            },
+                        ],
+                    },
+                }
+                return {
+                    "status": "ok",
+                    "results": [{"text": "markdown blob..." + _json.dumps(payload)}],
+                }
+            return {"status": "unavailable"}
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake
         monkeypatch.setattr(
             he_tools, "_get_mcp_client", lambda *a, **kw: client,
         )
@@ -523,7 +820,9 @@ class TestCodeMap:
             source_vocabulary="ICD10CM", source_code="x",
             target_vocabulary="SNOMED",
         )
+        assert result["status"] == "ok"
         assert len(result["results"]) == 1
+        assert result["results"][0]["target_code"] == "y"
 
 
 # ===========================================================================
@@ -532,11 +831,61 @@ class TestCodeMap:
 
 
 class TestIcdAutocode:
-    def test_unavailable_when_url_missing(self, monkeypatch):
+    def test_unavailable_when_neither_icd_nor_omophub_configured(
+        self, monkeypatch,
+    ):
+        """Same fallback chain as icd_lookup — unavailable only when
+        BOTH ICD_MCP_URL and OMOPHUB_API_KEY are unset."""
         monkeypatch.delenv("ICD_MCP_URL", raising=False)
+        monkeypatch.delenv("OMOPHUB_API_KEY", raising=False)
         result = icd_autocode("type 2 diabetes mellitus")
         assert result["status"] == "unavailable"
-        assert "ICD_MCP_URL" in result["error"]
+
+    def test_omophub_path_uses_semantic_search(self, monkeypatch):
+        """When only OMOPHUB_API_KEY is set, route through OMOPHub's
+        semantic_search filtered to vocabulary_ids=ICD10CM."""
+        monkeypatch.delenv("ICD_MCP_URL", raising=False)
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test")
+        captured = []
+
+        def fake(name, payload, **kw):
+            captured.append((name, payload))
+            return {
+                "status": "ok",
+                "results": [{
+                    "concept_code": "J96.00",
+                    "concept_name": "Acute respiratory failure, unspecified",
+                    "vocabulary_id": "ICD10CM",
+                    "score": 0.91,
+                }],
+            }
+
+        client = MagicMock()
+        client.call_tool.side_effect = fake
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client", lambda *a, **kw: client,
+        )
+        result = icd_autocode("acute respiratory failure")
+        assert captured[0][0] == "semantic_search"
+        assert captured[0][1].get("vocabulary_ids") == "ICD10CM"
+        assert result["status"] == "ok"
+        rec = result["results"][0]
+        assert rec["code"] == "J96.00"
+        assert "respiratory failure" in rec["title"].lower()
+        assert rec["confidence"] == pytest.approx(0.91)
+        assert rec["version"] == "10"
+
+    def test_omophub_path_rejects_icd_11(self, monkeypatch):
+        monkeypatch.delenv("ICD_MCP_URL", raising=False)
+        monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test")
+        monkeypatch.setattr(
+            he_tools, "_get_mcp_client",
+            lambda *a, **kw: MagicMock(),
+        )
+        result = icd_autocode("anything", version="11")
+        assert result["status"] == "unavailable"
+        assert "11" in result["error"]
+        assert "icd" in result["error"].lower()
 
     def test_happy_path_normalizes_results(self, monkeypatch):
         monkeypatch.setenv("ICD_MCP_URL", "https://icd.example/mcp")

@@ -60,6 +60,11 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] | None = None
     # http fields
     url: str | None = None
+    # Optional HTTP headers (e.g. ``{"Authorization": "Bearer ..."}``).
+    # Used by hosted MCPs that authenticate the client request rather
+    # than reading credentials from a server-side env var. Leave None
+    # for unauthenticated transports. Never logged.
+    headers: dict[str, str] | None = None
 
 
 # Track all live clients so we can cleanup at process exit (avoids zombie
@@ -213,7 +218,17 @@ class McpClient:
 
             if not self._config.url:
                 raise ValueError("http config missing url")
-            self._stream_ctx = streamablehttp_client(self._config.url)
+            # Pass ``headers`` only when configured (None / absent
+            # otherwise). Empty dict is NOT equivalent — some SDK
+            # versions attach malformed Authorization headers from
+            # empty mappings. The headers content is sensitive (Bearer
+            # tokens etc.) and is intentionally NEVER logged below.
+            if self._config.headers:
+                self._stream_ctx = streamablehttp_client(
+                    self._config.url, headers=self._config.headers,
+                )
+            else:
+                self._stream_ctx = streamablehttp_client(self._config.url)
             streams = await asyncio.wait_for(
                 self._stream_ctx.__aenter__(),
                 timeout=_INIT_TIMEOUT,
