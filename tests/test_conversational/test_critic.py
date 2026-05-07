@@ -1414,3 +1414,54 @@ class TestCriticPromptShape:
             "means the analyte isn't in MIMIC — pivot to PubMed, "
             "don't retry with another itemid guess"
         )
+
+    def test_prompt_includes_data_provenance_failure_mode(self):
+        """Phase H follow-up — Opus 4.7 was correctly identifying
+        data-provenance bugs (e.g. 'n=84 procalcitonin from MIMIC,
+        but MIMIC has no procalcitonin') but treating them as out of
+        scope. The fix: add data-provenance explicitly to the
+        failure-mode taxonomy so the model knows to flag with warn
+        regardless of whether the value is biologically plausible."""
+        prompt = CRITIC_SYSTEM_PROMPT
+        prompt_lower = prompt.lower()
+        # Look for explicit data-provenance / source-mismatch language.
+        provenance_signal = (
+            "data-provenance" in prompt_lower
+            or "data provenance" in prompt_lower
+            or "source mismatch" in prompt_lower
+            or "couldn't have been computed" in prompt_lower
+            or "could not have been computed" in prompt_lower
+            or ("registry that doesn't carry" in prompt_lower
+                or "registry that does not carry" in prompt_lower)
+        )
+        assert provenance_signal, (
+            "prompt must explicitly cover data-provenance as a "
+            "failure mode: a stat claimed from a source that doesn't "
+            "carry the analyte (e.g. mimic_itemid_search returns empty) "
+            "is a bug to flag, not 'out of scope'"
+        )
+
+    def test_prompt_links_empty_search_to_warn_verdict(self):
+        """The procalcitonin worked example must spell out: empty
+        mimic_itemid_search + MIMIC-claimed cohort = warn, NOT info,
+        even when the value is biologically plausible per PubMed."""
+        prompt_lower = CRITIC_SYSTEM_PROMPT.lower()
+        # Look for the verdict-level guidance attaching warn to
+        # empty-search-against-MIMIC-claim. Multiple phrasings
+        # acceptable; we require at least one specific signal.
+        signals = [
+            'biologically plausible' in prompt_lower
+            and 'warn' in prompt_lower,
+            'data-provenance' in prompt_lower
+            and 'warn' in prompt_lower,
+            'data provenance' in prompt_lower
+            and 'warn' in prompt_lower,
+            "doesn't redeem" in prompt_lower,
+            "does not redeem" in prompt_lower,
+        ]
+        assert any(signals), (
+            "prompt must teach that biological plausibility alone "
+            "doesn't redeem a data-provenance failure — empty "
+            "mimic_itemid_search against a MIMIC-claimed cohort "
+            "should warn, not info"
+        )
