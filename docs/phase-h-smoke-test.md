@@ -402,16 +402,85 @@ also work; the legacy dialect uses tool names `lookup` and
 `autocode` rather than OMOPHub's `search_concepts` /
 `semantic_search`.
 
-## 5 — Inspect telemetry
+## 5 — Inspect telemetry (per-verdict + cumulative)
 
-After running ≥1 of the above, the cumulative counters show the
-critic's tool reach. From a fresh Python REPL or the chat UI's debug
-pane:
+Two flavours of telemetry are useful for understanding what the critic
+did. The lightweight one — `verdict.tool_calls` — is populated on
+every `critique()` call and is what we usually inspect during smokes.
+The heavier cumulative counters (`pipeline._critic_*`) only populate
+when you go through the full orchestrator.ask() pipeline; useful for
+production monitoring but overkill for a quick check.
 
-```python
-from src.conversational.orchestrator import ConversationalPipeline
-from pathlib import Path
+### 5a — Per-verdict telemetry (lightweight, copy-paste in terminal)
+
+Run a critique against a synthetic question that compels tool use,
+then dump the per-verdict tool-call list:
+
+```bash
+set -a && source .env && set +a && .venv/bin/python <<'PY'
+import json, anthropic
+from src.conversational.critic import critique
+from src.conversational.models import (
+    AnswerResult, ClinicalConcept, CompetencyQuestion,
+)
+api_key = open(".env").read().split("ANTHROPIC_API_KEY=")[1].split("\n")[0].strip()
+client = anthropic.Anthropic(api_key=api_key)
+
+# A scenario the critic genuinely needs to verify (4.5 mcg/kg/hr is
+# ~3× the labeled max for dexmedetomidine — likely a units bug).
+cq = CompetencyQuestion(
+    original_question="Mean dexmedetomidine dose in septic shock",
+    clinical_concepts=[ClinicalConcept(name="dexmedetomidine", concept_type="drug")],
+    return_type="text_and_table", scope="cohort",
+    interpretation_summary="Cohort: septic shock. Drug: dexmedetomidine. Aggregate: mean infusion dose.",
+)
+answer = AnswerResult(
+    text_summary="Mean dexmedetomidine dose 4.5 mcg/kg/hr (n=124) in septic shock cohort.",
+    data_table=[{"mean_dose_mcg_kg_hr": 4.5, "n": 124}],
+)
+v = critique(client, cq, answer)
+v = v.model_dump() if v else {"severity": None, "tool_calls": None}
+
+print(f"severity:    {v.get('severity')}")
+print(f"plausible:   {v.get('plausible')}")
+print(f"concern:     {(v.get('concern') or '')[:200]}")
+print()
+print("tool_calls (per-verdict telemetry):")
+for tc in v.get("tool_calls") or []:
+    print(f"  {tc.get('name'):<30} status={tc.get('status'):<12} n={tc.get('n_results')}")
+PY
+```
+
+**Expected shape (when tools fire):**
+
+```
+severity:    warn
+plausible:   False
+concern:     Mean dose 4.5 mcg/kg/hr is ~3× the labeled max for ...
+tool_calls (per-verdict telemetry):
+  rxnorm_lookup                  status=ok           n=3
+  pubmed_search                  status=ok           n=4
+```
+
+If `tool_calls` is empty, the model dismissed the question from
+training recall — that's correct behaviour for clearly-uncontroversial
+values per the prompt's "use tools sparingly" rule. To force tools
+to fire, pick a question with a quantitative claim the model can't
+confidently judge (units mismatch, niche analyte, code verification).
+
+### 5b — Cumulative counters (full pipeline, optional)
+
+The orchestrator carries cumulative counters across all `ask()` calls
+in a session — useful for production monitoring or debugging "is the
+critic ever calling X tool?" patterns over multiple turns. These
+require the full pipeline (DB connection, ontology, etc.) so they're
+heavier:
+
+```bash
+set -a && source .env && set +a && .venv/bin/python <<'PY'
 import os
+from pathlib import Path
+from src.conversational.orchestrator import ConversationalPipeline
 
 pipeline = ConversationalPipeline(
     db_path=Path("data/processed/mimiciv.duckdb"),
@@ -420,24 +489,28 @@ pipeline = ConversationalPipeline(
     data_source="local",
     enable_critic=True,
 )
-result = pipeline.ask("What is the mean lactate in our sepsis cohort?")
+pipeline.ask("What is the mean lactate in our sepsis cohort?")
 
-print("invocations:", pipeline._critic_invocations)
-print("tool_calls:", pipeline._critic_tool_calls)
-print("unavailable:", pipeline._critic_tool_unavailable)
+print(f"invocations: {pipeline._critic_invocations}")
+print(f"tool_calls:  {pipeline._critic_tool_calls}")
+print(f"unavailable: {pipeline._critic_tool_unavailable}")
+PY
 ```
 
 **Expected shape:**
 - `invocations: 1` (one critique() returned a verdict)
 - `tool_calls: {'mimic_distribution_lookup': 1, 'pubmed_search': 1}` or similar
-- `unavailable: {}` if all configured backends worked, or a few entries
-  for the ones that aren't configured (e.g. `{'rxnorm_lookup': 1}` if
-  the model tried RxNorm and OMOPHub isn't set)
+- `unavailable: {}` when configured backends worked; entries appear
+  when the model tried a tool whose backend isn't set up
+  (e.g. `{'snomed_search': 1}` if Hermes isn't installed)
 
 **Red flag:** `invocations: 1` with `tool_calls: {}` means the critic
-ran but didn't call any tools. The prompt-shrink may have been
-too aggressive, or the scenario didn't compel a lookup. Iterate on the
-question to verify.
+ran but didn't call any tools. Either the question didn't compel a
+lookup (correct — try a more borderline scenario) or the prompt's
+discipline rule has shifted too aggressive in a recent edit.
+
+The same counters are visible in the chat UI's debug pane after each
+turn — no need to script anything for live debugging.
 
 ## 6 — Live chat-UI run (full pipeline)
 
