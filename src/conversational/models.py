@@ -8,6 +8,7 @@ import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 _LOINC_PATTERN = re.compile(r"^\d{1,7}-\d$")
+_ICD10_PATTERN = re.compile(r"^[A-TV-Z][0-9][0-9AB](\.?[0-9A-TV-Z]{0,4})?$")
 
 
 class ClinicalConcept(BaseModel):
@@ -18,6 +19,26 @@ class ClinicalConcept(BaseModel):
     attributes: list[str] = []
     resolved_from_category: bool = False
     loinc_code: str | None = None
+    icd_codes: list[str] | None = None
+
+    @field_validator("icd_codes")
+    @classmethod
+    def _validate_icd_codes(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        if not v:
+            raise ValueError(
+                "icd_codes must be None (not an empty list) for ungrounded "
+                "diagnoses; the distinction matters because the SQL emitter "
+                "treats None as 'fall back to LIKE' and a non-empty list as "
+                "'use IN-list'."
+            )
+        bad = [c for c in v if not _ICD10_PATTERN.match(c)]
+        if bad:
+            raise ValueError(
+                f"icd_codes contains malformed ICD-10 entries: {bad!r}"
+            )
+        return v
 
 
 class TemporalConstraint(BaseModel):

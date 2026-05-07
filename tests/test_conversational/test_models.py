@@ -51,6 +51,60 @@ class TestClinicalConcept:
         c2 = ClinicalConcept.model_validate_json(data)
         assert c == c2
 
+    def test_icd_codes_defaults_to_none(self):
+        """Front-half OMOPHub plumbing: icd_codes is a new optional field on
+        ClinicalConcept that lets the resolver carry grounded ICD codes for
+        diagnosis concepts. Default is None for back-compat with existing
+        constructions that omit the field."""
+        c = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        assert c.icd_codes is None
+
+    def test_icd_codes_accepts_list(self):
+        c = ClinicalConcept(
+            name="sepsis", concept_type="diagnosis",
+            icd_codes=["A41.9", "R65.21", "A40", "A41"],
+        )
+        assert c.icd_codes == ["A41.9", "R65.21", "A40", "A41"]
+
+    def test_icd_codes_round_trip(self):
+        c = ClinicalConcept(
+            name="sepsis", concept_type="diagnosis",
+            icd_codes=["A41.9"],
+        )
+        c2 = ClinicalConcept.model_validate_json(c.model_dump_json())
+        assert c == c2
+
+    def test_icd_codes_rejects_empty_list(self):
+        """Empty list is meaningless — use None for ungrounded. Forcing the
+        distinction at the validator avoids a class of bugs where an empty
+        list is treated as 'we tried but found nothing' vs. 'we never tried'."""
+        with pytest.raises(ValidationError):
+            ClinicalConcept(
+                name="sepsis", concept_type="diagnosis", icd_codes=[],
+            )
+
+    def test_icd_codes_rejects_malformed_code(self):
+        """ICD-10 codes follow a loose pattern: leading letter (not U), digit,
+        digit-or-A/B, optional dot + up to 4 alphanumerics. Reject obvious
+        garbage early to surface upstream resolver bugs (e.g. accidental
+        round-tripping of LOINC codes through the wrong field)."""
+        with pytest.raises(ValidationError):
+            ClinicalConcept(
+                name="sepsis", concept_type="diagnosis",
+                icd_codes=["not-a-code"],
+            )
+
+    def test_icd_codes_accepts_codes_without_dot(self):
+        """ICD-10 codes are commonly written both with and without the dot
+        separator (A419 vs A41.9). Accept both — the SQL fast-path matches
+        verbatim against MIMIC's diagnoses_icd table which stores codes
+        without dots."""
+        c = ClinicalConcept(
+            name="sepsis", concept_type="diagnosis",
+            icd_codes=["A419", "A41"],
+        )
+        assert c.icd_codes == ["A419", "A41"]
+
 
 # --- TemporalConstraint ---
 
