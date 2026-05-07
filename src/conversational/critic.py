@@ -64,8 +64,14 @@ from src.conversational.prompts import CRITIC_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
-# Sonnet 4.6 is the right tier for clinical-judgment tasks.
-_CRITIC_MODEL = "claude-sonnet-4-6"
+# Opus 4.7 for clinical-judgment depth. Per
+# memory/feedback_critic_model_choice.md, the critic / judge /
+# reviewer roles default to Sonnet 4.6 (or Opus 4.7 for depth);
+# Haiku is rejected for judgment work even though it's cheaper.
+# Opus is the chosen tier for the externally-grounded critic — the
+# multi-tool chain (itemid_search → distribution_lookup → sibling
+# cohort → pubmed) benefits from deeper reasoning.
+_CRITIC_MODEL = "claude-opus-4-7"
 # Per-call output token budget. Bumped 600 → 1500 → 2000 across two
 # Tier-D follow-ups: (1) cohort-stratified reasoning needed > 600
 # tokens to both reason AND emit clean JSON; (2) post-itemid_search
