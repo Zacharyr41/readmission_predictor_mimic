@@ -32,6 +32,12 @@ ENV/
 # else is generated at test time and would just create noise in PRs).
 tests/dashboard/reports/*
 !tests/dashboard/reports/.gitkeep
+# Earlier ``lib/`` Python-build pattern accidentally swallows the dashboard
+# test-suite's lib package — explicitly un-ignore source files. Bytecode
+# stays gitignored via the global __pycache__/ rule.
+!tests/dashboard/lib/
+!tests/dashboard/lib/*.py
+tests/dashboard/lib/__pycache__/
 htmlcov/
 .tox/
 .nox/
