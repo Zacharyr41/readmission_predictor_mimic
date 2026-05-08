@@ -933,3 +933,42 @@ class TestLiveOmophubFrontHalfGrounding:
             isinstance(p, str) and p.startswith(("A41", "R65", "A40", "A42"))
             for p in query.params
         ), f"expected sepsis-family ICD code in params; got {query.params!r}"
+
+    def test_live_compile_sql_grounds_filter_side_for_lactate_in_sepsis(
+        self, live_resolver,
+    ):
+        """Inc 9 smoking-gun verification: the originally-failing query
+        ('mean lactate in sepsis cohort') decomposes to a biomarker CQ
+        with diagnosis as a patient_filter. With Inc 9 wiring,
+        compile_sql(enable_mcp_grounding=True) routes the filter through
+        icd_autocode and the emitted SQL contains ``di.icd_code IN (...)``
+        in the cohort WHERE clause."""
+        from src.conversational.models import CompetencyQuestion, PatientFilter
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        from tests.test_conversational.test_sql_fastpath import _ConnBackend
+        import duckdb
+
+        cq = CompetencyQuestion(
+            original_question="mean lactate in sepsis",
+            clinical_concepts=[
+                ClinicalConcept(name="lactate", concept_type="biomarker"),
+            ],
+            patient_filters=[
+                PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        backend = _ConnBackend(duckdb.connect(":memory:"))
+
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["lactate"],
+            enable_mcp_grounding=True,
+        )
+        # Filter side now ICD-grounded.
+        assert "di.icd_code IN (" in query.sql
+        assert any(
+            isinstance(p, str) and p.startswith(("A41", "R65", "A40", "A42"))
+            for p in query.params
+        ), f"expected sepsis-family ICD codes in params; got {query.params!r}"
