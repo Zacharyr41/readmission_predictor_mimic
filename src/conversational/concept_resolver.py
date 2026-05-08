@@ -15,9 +15,47 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.conversational.health_evidence.tools import icd_autocode
 from src.conversational.models import ClinicalConcept
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DiagnosisResolution:
+    """Result of resolving a diagnosis concept to ICD codes for SQL emission.
+
+    Mirrors :class:`BiomarkerResolution` but narrower: ICD codes are the
+    grounding output, no LOINC/SNOMED layer.
+
+    Three terminal shapes:
+
+    * **Grounded:** ``icd_codes`` is a non-empty list. The SQL compiler
+      emits ``WHERE di.icd_code IN (...) OR <existing LIKE>`` — IN-list
+      runs as a parallel OR with LIKE so ICD-9 admissions still match.
+      ``fallback_reason`` is ``None``.
+    * **Silent fallback:** ``icd_codes`` is ``None``, ``fallback_reason``
+      is ``None``. Compiler uses ``names`` for LIKE-only filter. This is
+      the path when grounding is disabled or the concept is mid-resolve.
+    * **Loud fallback:** ``icd_codes`` is ``None``, ``fallback_reason``
+      describes why grounding failed (MCP unavailable, all candidates
+      below confidence threshold, etc.). Surfaced to the user via the
+      orchestrator's ``fallback_warning`` channel.
+
+    ``names`` is always populated for the parallel-OR LIKE clause that
+    catches ICD-9 admissions whose codes aren't in OMOPHub's ICD10CM-only
+    coverage.
+
+    ``confidence_floor`` records the minimum confidence among accepted
+    codes, for provenance/debugging. ``None`` when no MCP call was made
+    (concept-supplied codes path) or all returned confidences were
+    ``None``.
+    """
+
+    icd_codes: list[str] | None
+    names: list[str]
+    fallback_reason: str | None
+    confidence_floor: float | None
 
 
 @dataclass(frozen=True)
@@ -89,9 +127,17 @@ class ConceptResolver:
         self,
         mappings_dir: Path,
         hierarchy: object | None = None,
+        *,
+        enable_mcp_grounding: bool = False,
     ) -> None:
         self._mappings_dir = mappings_dir
         self._hierarchy = hierarchy
+        # When True, ``resolve_diagnosis`` calls the OMOPHub-backed
+        # ``icd_autocode`` MCP tool to ground diagnosis concepts to ICD
+        # code lists. Default is False so existing test fixtures keep
+        # offline-safe behavior; production wiring opts in via the
+        # orchestrator's ConceptResolver(...) construction.
+        self._enable_mcp_grounding = enable_mcp_grounding
         self._category_map: dict | None = None
         # Forward (name → SCTID) and reverse (SCTID → [names]) indices for
         # the SNOMED fallback path. Built lazily from the mapping files.
@@ -375,4 +421,53 @@ class ConceptResolver:
                 "MIMIC labitem coverage — falling back to label match; "
                 "result may pool unit-incompatible variants."
             ),
+        )
+
+    # -- ICD-grounded diagnosis resolution ---------------------------------
+
+    def resolve_diagnosis(
+        self, concept: ClinicalConcept,
+    ) -> DiagnosisResolution:
+        """Resolve a diagnosis concept to ICD codes for parallel-OR SQL emission.
+
+        Resolution order:
+          1. If ``concept.icd_codes`` is pre-populated (LLM-grounded or
+             test-supplied), use them directly. **No MCP call.**
+          2. If ``enable_mcp_grounding`` is False (default for tests),
+             return silent fallback so the SQL emitter falls back to LIKE
+             with no user-visible warning.
+          3. (Inc 3) Otherwise, call ``_ground_via_icd_autocode`` to query
+             OMOPHub's ``icd_autocode`` MCP tool with the concept name.
+
+        ``names`` is always populated via the existing ``resolve(...)``
+        category-expansion path; SQL uses it as the parallel-OR LIKE
+        clause that catches ICD-9 admissions whose codes aren't in
+        OMOPHub's ICD10CM-only coverage.
+        """
+        names = self.resolve(concept)  # always populated; LIKE-fallback names
+
+        if concept.icd_codes:
+            return DiagnosisResolution(
+                icd_codes=list(concept.icd_codes),
+                names=names,
+                fallback_reason=None,
+                confidence_floor=None,
+            )
+
+        if not self._enable_mcp_grounding:
+            return DiagnosisResolution(
+                icd_codes=None,
+                names=names,
+                fallback_reason=None,
+                confidence_floor=None,
+            )
+
+        # Inc 3 wires ``_ground_via_icd_autocode`` here. Until then, the
+        # MCP-enabled path returns the same silent fallback as offline
+        # mode (the test for Inc 3 will RED on this and force the wiring).
+        return DiagnosisResolution(
+            icd_codes=None,
+            names=names,
+            fallback_reason=None,
+            confidence_floor=None,
         )

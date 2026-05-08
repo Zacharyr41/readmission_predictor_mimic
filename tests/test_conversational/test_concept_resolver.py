@@ -403,3 +403,101 @@ class TestMappingsDataQuality:
         lowered = [k.lower() for k in keys]
         dupes = {k for k in lowered if lowered.count(k) > 1}
         assert not dupes, f"{filename}: case-insensitive duplicates: {dupes}"
+
+
+# ---------------------------------------------------------------------------
+# Front-half OMOPHub grounding — DiagnosisResolution + resolve_diagnosis
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnosisResolution:
+    """resolve_diagnosis mirrors resolve_biomarker but for diagnosis concepts.
+
+    Three terminal cases (mirroring BiomarkerResolution):
+      1. concept.icd_codes pre-populated → grounded path; **no MCP call**.
+      2. concept.icd_codes None and enable_mcp_grounding=False → silent
+         fallback (icd_codes=None, fallback_reason=None).
+      3. concept.icd_codes None and enable_mcp_grounding=True → delegated to
+         _ground_via_icd_autocode (Inc 3); for now this test class only
+         exercises (1) and (2).
+    """
+
+    def test_resolve_diagnosis_uses_concept_icd_codes_when_supplied(
+        self, resolver,
+    ):
+        """When the concept already carries icd_codes, the resolver returns
+        them directly. No MCP call. This is the test-friendly bypass that
+        also handles the (currently hypothetical) case where the LLM
+        pre-populates icd_codes itself."""
+        concept = ClinicalConcept(
+            name="sepsis", concept_type="diagnosis",
+            icd_codes=["A41.9", "R65.21"],
+        )
+        result = resolver.resolve_diagnosis(concept)
+        assert result.icd_codes == ["A41.9", "R65.21"]
+        # names is always populated for parallel-OR LIKE fallback in SQL.
+        assert result.names  # non-empty
+        assert result.fallback_reason is None
+        assert result.confidence_floor is None
+
+    def test_resolve_diagnosis_silent_fallback_when_mcp_disabled(
+        self, resolver,
+    ):
+        """No icd_codes on the concept AND grounding disabled → silent
+        fallback. icd_codes=None signals the SQL emitter to use LIKE-only.
+        fallback_reason=None signals 'we didn't try' (no warning surfaced)."""
+        concept = ClinicalConcept(
+            name="sepsis", concept_type="diagnosis",
+        )
+        # Default constructor has enable_mcp_grounding=False.
+        result = resolver.resolve_diagnosis(concept)
+        assert result.icd_codes is None
+        assert result.fallback_reason is None
+        assert result.names == ["sepsis"]
+
+    def test_resolve_diagnosis_returns_category_names_for_categories(
+        self, resolver,
+    ):
+        """When the concept is a curated category (e.g. 'liver disease' if
+        present), `names` should reflect the resolved members, not just the
+        category name. This shares the existing resolve() logic."""
+        # Use a category that's known to exist in category_to_snomed.json.
+        concept = ClinicalConcept(
+            name="electrolytes", concept_type="diagnosis",
+        )
+        result = resolver.resolve_diagnosis(concept)
+        # `names` should contain the category members from resolve(),
+        # since electrolytes IS a curated category (even though it's
+        # canonically a biomarker concept, resolve() doesn't gate on type).
+        assert "sodium" in result.names
+        assert "potassium" in result.names
+
+    def test_diagnosis_resolution_is_immutable(self):
+        """DiagnosisResolution should be a frozen dataclass like
+        BiomarkerResolution — prevents downstream mutation surprises."""
+        from dataclasses import FrozenInstanceError
+        from src.conversational.concept_resolver import DiagnosisResolution
+
+        r = DiagnosisResolution(
+            icd_codes=["A41.9"], names=["sepsis"],
+            fallback_reason=None, confidence_floor=None,
+        )
+        with pytest.raises(FrozenInstanceError):
+            r.icd_codes = ["X"]  # type: ignore[misc]
+
+    def test_resolve_diagnosis_does_not_call_icd_autocode_when_disabled(
+        self, resolver, monkeypatch,
+    ):
+        """Belt-and-suspenders: even if the MCP module is patched to track
+        calls, with grounding disabled we must not invoke it."""
+        from src.conversational import concept_resolver as cr
+
+        called: list = []
+        def fake_autocode(*args, **kwargs):
+            called.append((args, kwargs))
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        resolver.resolve_diagnosis(concept)
+        assert called == []
