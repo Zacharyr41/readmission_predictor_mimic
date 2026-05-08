@@ -437,6 +437,149 @@ class TestFilterCompilationReused:
         assert isinstance(rows[0]["count_value"], int)
 
 
+class TestDiagnosisCountIcdGrounded:
+    """Front-half OMOPHub grounding (Inc 4): when ``resolved_icd_codes``
+    is supplied, the diagnosis-count compile branch emits an IN-list as a
+    parallel OR with the existing title-LIKE clause. Defaults to
+    LIKE-only when codes are not supplied (back-compat).
+
+    The parallel-OR design (instead of replacement) catches ICD-9
+    admissions whose codes aren't in OMOPHub's ICD10CM-only coverage.
+    Net effect: grounded codes match precisely; LIKE catches the long
+    tail of legacy ICD-9 entries.
+    """
+
+    def test_emits_icd_in_when_codes_supplied(self, backend):
+        """Resolved ICD codes → ``di.icd_code IN (?, ?, ...)`` clause."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("sepsis", "diagnosis")],
+            aggregation="count",
+            scope="cohort",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["sepsis"],
+            resolved_icd_codes=["A41.9", "R65.21"],
+        )
+        # IN-list clause emitted with the supplied codes as params.
+        assert "di.icd_code IN (" in query.sql
+        assert "A41.9" in query.params
+        assert "R65.21" in query.params
+
+    def test_combines_icd_in_with_title_like_as_or(self, backend):
+        """Final WHERE shape: ``((di.icd_code IN (...)) OR (<existing LIKE>))``.
+        ICD-9 admissions whose codes aren't in OMOPHub still match via
+        the LIKE branch on dd.long_title."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("sepsis", "diagnosis")],
+            aggregation="count",
+            scope="cohort",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["sepsis"],
+            resolved_icd_codes=["A41.9"],
+        )
+        # Both clauses present.
+        assert "di.icd_code IN (" in query.sql
+        # The LIKE clause is backend-dependent (DuckDB ILIKE; BigQuery
+        # LOWER(...) LIKE LOWER(...)). Either form is acceptable.
+        sql_upper = query.sql.upper()
+        assert "ILIKE" in sql_upper or "LIKE" in sql_upper
+        # The label-substring param ("%sepsis%") is still emitted.
+        assert "%sepsis%" in query.params
+
+    def test_falls_back_to_like_only_when_codes_none(self, backend):
+        """Default behavior preserved: no resolved_icd_codes → LIKE-only.
+        Critical for back-compat — existing tests + production paths
+        without grounding must produce byte-identical SQL."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("sepsis", "diagnosis")],
+            aggregation="count",
+            scope="cohort",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["sepsis"],
+            # resolved_icd_codes intentionally omitted (default None).
+        )
+        # No IN-list clause. LIKE clause present.
+        assert "di.icd_code IN (" not in query.sql
+        assert "%sepsis%" in query.params
+
+    def test_falls_back_to_like_only_when_codes_empty_disallowed(self, backend):
+        """Empty list shouldn't reach compile_sql — the validator on
+        ClinicalConcept.icd_codes rejects empty lists. But compile_sql
+        treats `[]` defensively as 'no grounding' rather than emitting
+        ``IN ()`` (which most dialects reject). Guards against future
+        callers passing `[]` directly."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("sepsis", "diagnosis")],
+            aggregation="count",
+            scope="cohort",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["sepsis"],
+            resolved_icd_codes=[],
+        )
+        assert "di.icd_code IN (" not in query.sql
+
+    def test_diagnosis_list_unchanged_by_resolved_icd_codes(self, backend):
+        """Out-of-scope path: diagnosis-list (no aggregation) still uses
+        LIKE-only, doesn't pick up resolved_icd_codes. Same parallel-OR
+        pattern can be added later as a follow-up if/when needed."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("cerebral", "diagnosis")],
+            return_type="table",
+            scope="cohort",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["cerebral"],
+            resolved_icd_codes=["I63.9"],  # ignored
+        )
+        # IN-list NOT in the diagnosis-list path.
+        assert "di.icd_code IN (" not in query.sql
+
+    def test_executes_against_real_duckdb_with_grounded_codes(self, backend):
+        """Sanity: the IN-list SQL is actually executable against the test
+        DuckDB fixture. Uses 'cerebral' from the fixture (3 hadms) and a
+        code that overlaps to make sure SQL is valid even when the IN-list
+        finds no rows itself (LIKE branch carries the count)."""
+        from src.conversational.sql_fastpath import compile_sql
+        from src.conversational.operations import get_default_registry
+
+        cq = _cq(
+            concepts=[("cerebral", "diagnosis")],
+            aggregation="count",
+            scope="cohort",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["cerebral"],
+            resolved_icd_codes=["I63.9", "I63.0"],
+        )
+        rows = backend.execute(query.sql, query.params)
+        # Should execute without error and return one count row.
+        assert len(rows) == 1
+
+
 class TestDiagnosisList:
     """patient_list_by_diagnosis shape: a plain SELECT over diagnoses_icd."""
 

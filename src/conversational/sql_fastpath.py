@@ -65,6 +65,7 @@ def compile_sql(
     *,
     resolved_names: list[str] | None = None,
     resolved_itemids: list[int] | None = None,
+    resolved_icd_codes: list[str] | None = None,
 ) -> SqlFastpathQuery:
     """Dispatch to the right compile branch based on CQ shape.
 
@@ -93,6 +94,15 @@ def compile_sql(
         instead of a ``LIKE`` filter on ``d.label`` — avoids pooling
         unit-incompatible variants (e.g. serum vs urine creatinine).
         Ignored for non-biomarker concept types.
+    resolved_icd_codes:
+        Optional list of ICD codes for diagnosis concepts whose ``name``
+        was grounded via OMOPHub's ``icd_autocode`` (see
+        ``ConceptResolver.resolve_diagnosis``). When non-empty, the
+        diagnosis-count compile branch emits ``WHERE (di.icd_code IN
+        (?, …)) OR (<existing LIKE clause>)`` — IN-list as a parallel OR
+        with the title-LIKE fallback so ICD-9 admissions still match.
+        Ignored for non-diagnosis concept types and for the
+        diagnosis-list (no-aggregation) path.
     """
     # Defensive re-check: planner should already have gated these out,
     # but an explicit raise here surfaces misrouting instead of emitting
@@ -146,7 +156,10 @@ def compile_sql(
     if concept.concept_type == "microbiology":
         return _compile_microbiology_aggregate(cq, concept, names, sql_fn, backend, registry)
     if concept.concept_type == "diagnosis":
-        return _compile_diagnosis_count(cq, concept, names, sql_fn, backend, registry)
+        return _compile_diagnosis_count(
+            cq, concept, names, sql_fn, backend, registry,
+            icd_codes=resolved_icd_codes,
+        )
     if concept.concept_type == "outcome":
         return _compile_outcome_mortality(cq, concept, sql_fn, backend, registry)
 
@@ -485,6 +498,8 @@ def _compile_diagnosis_count(
     sql_fn: str,
     backend: Any,
     registry: OperationRegistry,
+    *,
+    icd_codes: list[str] | None = None,
 ) -> SqlFastpathQuery:
     if sql_fn != "COUNT":
         raise ValueError(
@@ -535,8 +550,24 @@ def _compile_diagnosis_count(
             f"({backend.ilike('dd.long_title')} OR di.icd_code LIKE ?)"
         )
         per_name_params.extend([f"%{n}%", f"{n}%"])
-    where_clauses: list[str] = ["(" + " OR ".join(per_name_clauses) + ")"]
-    params: list[Any] = list(per_name_params)
+    like_or = "(" + " OR ".join(per_name_clauses) + ")"
+
+    # When OMOPHub-grounded ICD codes are supplied, OR them in alongside
+    # the LIKE clause. Net WHERE shape:
+    #   ((di.icd_code IN (?,?,...)) OR <like_or>) AND <filters>
+    # The IN-list catches grounded ICD-10 admissions precisely; the LIKE
+    # branch catches ICD-9 admissions whose codes aren't in OMOPHub's
+    # ICD10CM-only coverage. Empty list defensively treated as "no
+    # grounding" rather than emitting ``IN ()``.
+    params: list[Any] = []
+    if icd_codes:
+        in_placeholders = ", ".join(["?"] * len(icd_codes))
+        cohort_clause = f"((di.icd_code IN ({in_placeholders})) OR {like_or})"
+        params.extend(icd_codes)
+    else:
+        cohort_clause = like_or
+    where_clauses: list[str] = [cohort_clause]
+    params.extend(per_name_params)
     where_clauses.extend(filter_where)
     params.extend(filter_params)
 
