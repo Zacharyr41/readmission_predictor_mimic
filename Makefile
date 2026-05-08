@@ -1,28 +1,50 @@
-.PHONY: setup test test-unit test-integration test-tier3 test-tier2 test-tier1 test-dashboard clean-reports ingest graph analyze features train pipeline all clean export-graph train-gnn run-experiment
+.PHONY: help setup test test-unit test-integration test-tier3 test-tier2 test-tier1 test-dashboard clean-reports ingest graph analyze features train pipeline all clean export-graph train-gnn run-experiment
+
+# Default target — `make` with no args prints the help summary.
+.DEFAULT_GOAL := help
 
 UV := uv
 PYTHON := $(UV) run python
 
-setup:
+# `make` (or `make help`) prints a per-target summary so a teammate can
+# orient without grepping the file. Each target's docstring lives in the
+# trailing-comment column ("## …"); the awk below extracts and aligns
+# them. New targets should keep the format.
+help:
+	@printf "\nUsage: make <target>\n\n"
+	@printf "Setup\n"
+	@grep -E '^(setup|clean):.*?##.*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@printf "\nFast tests\n"
+	@grep -E '^(test|test-unit|test-integration|test-tier3):.*?##.*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@printf "\nDashboard smoke (replaces docs/phase-h-smoke-test.md)\n"
+	@grep -E '^(test-dashboard|test-tier2|test-tier1|clean-reports):.*?##.*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@printf "\nPipeline stages\n"
+	@grep -E '^(ingest|graph|analyze|features|train|pipeline|all|export-graph|train-gnn|run-experiment):.*?##.*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@printf "\nReports written by Tier 1/2/3: tests/dashboard/reports/<test>.md\n"
+	@printf "Each is a paste-able markdown file with Q/A/SQL/verdict/assertions.\n\n"
+
+setup: ## Install editable package + dev/graph extras into a fresh .venv via uv
 	$(UV) venv
 	$(UV) pip install -e ".[dev,graph]"
 
-# Run unit tests only (excludes integration tests)
-test:
+test: ## Run unit tests (excludes tests/test_integration). General-purpose.
 	$(PYTHON) -m pytest tests/ -v --ignore=tests/test_integration
 
-# Run fast unit tests (excludes slow and integration tests)
-test-unit:
+test-unit: ## Fast unit tests only (-m "not integration and not slow")
 	$(PYTHON) -m pytest tests/ -v -m "not integration and not slow"
 
-# Run integration tests only
-test-integration:
+test-integration: ## Integration tests only (-m integration)
 	$(PYTHON) -m pytest tests/test_integration/ -v -m "integration"
 
 # ---- Dashboard 3-tier smoke suite -------------------------------------------
 # tests/dashboard/ replaces the manual phase-h-smoke-test.md walkthroughs.
 # Each test writes a paste-able markdown report at
-# tests/dashboard/reports/<test_name>.md.
+# tests/dashboard/reports/<test_name>.md so a teammate or reviewing agent
+# can qualitatively assess what the dashboard actually did.
 #
 # These targets call .venv/bin/python directly (bypassing uv) because
 # `uv run` re-resolves torch-scatter on every invocation, which is slow
@@ -30,67 +52,52 @@ test-integration:
 
 DASHBOARD_PY := .venv/bin/python -m pytest
 
-# Tier 3 (~5s, $0): SQL emission regression — runs every commit.
-test-tier3:
+test-tier3: ## Tier 3 (~5s, $0). No LLM. SQL-shape regression for Inc 4/7/9 wiring.
 	$(DASHBOARD_PY) tests/dashboard/test_tier3_sql_emission.py -v
 
-# Tier 2 (~30s, ~$0.30/run): real Anthropic critique() smoke — daily / PR.
-# Sources .env so ANTHROPIC_API_KEY + OMOPHUB_API_KEY are loaded.
-test-tier2:
+test-tier2: ## Tier 2 (~30s, ~$0.30). Real Anthropic critique() — §4a/4b/4c. Sources .env.
 	bash -c 'set -a && source .env && set +a && $(DASHBOARD_PY) tests/dashboard/test_tier2_critic_verdicts.py -v'
 
-# Tier 1 (~3-5min, ~$0.50/run): full AppTest end-to-end against live
-# pipeline — pre-release / on-demand. Requires DuckDB present.
-test-tier1:
+test-tier1: ## Tier 1 (~3-5min, ~$0.50). Full AppTest E2E. Sources .env, sets RUN_LIVE_DASHBOARD=1.
 	bash -c 'set -a && source .env && set +a && DATA_SOURCE=local RUN_LIVE_DASHBOARD=1 $(DASHBOARD_PY) tests/dashboard/test_tier1_dashboard_e2e.py -v'
 
-# All cheap dashboard tests (Tier 2 + Tier 3). Fast feedback for the hot
-# paths the team cares about. Tier 1 is opt-in via test-tier1.
-test-dashboard: test-tier3 test-tier2
+test-dashboard: test-tier3 test-tier2 ## Cheap dashboard tiers (3 + 2). Default pre-PR check.
 
-clean-reports:
+clean-reports: ## Wipe all generated tests/dashboard/reports/*.md
 	rm -f tests/dashboard/reports/*.md
 
-# Stage 1: Ingest MIMIC-IV CSVs to DuckDB
-ingest:
+# ---- Pipeline stages --------------------------------------------------------
+
+ingest: ## Stage 1: ingest MIMIC-IV CSVs into DuckDB
 	$(PYTHON) -m src.ingestion
 
-# Stage 2: Build RDF knowledge graph
-graph:
+graph: ## Stage 2: build the RDF knowledge graph
 	$(PYTHON) -m src.graph_construction
 
-# Stage 3: Generate graph analysis report
-analyze:
+analyze: ## Stage 3: generate the graph-analysis report
 	$(PYTHON) -m src.graph_analysis
 
-# Stage 4: Extract features from RDF graph
-features:
+features: ## Stage 4: extract features from the RDF graph
 	$(PYTHON) -m src.feature_extraction
 
-# Stage 5: Train and evaluate models
-train:
+train: ## Stage 5: train + evaluate readmission models
 	$(PYTHON) -m src.prediction
 
-# Run full pipeline via main orchestrator
-pipeline:
+pipeline: ## Run the full pipeline via src.main
 	$(PYTHON) -m src.main
 
-# Run all stages sequentially
-all: ingest graph analyze features train
+all: ingest graph analyze features train ## Run every pipeline stage sequentially
 
-# Stage 5b: Export RDF graph to PyG format
-export-graph:
+export-graph: ## Stage 5b: export RDF graph to PyG format
 	$(PYTHON) -m src.gnn.graph_export
 
-# Stage 5b: Train GNN model
-train-gnn:
+train-gnn: ## Stage 5b: train the GNN model
 	$(PYTHON) -m src.gnn.train
 
-# Stage 5b: Run GNN experiment
-run-experiment:
+run-experiment: ## Stage 5b: run a GNN experiment (pass via EXP=name)
 	$(PYTHON) -m src.gnn.experiments --run $(EXP)
 
-clean:
+clean: ## Remove .venv, caches, and all *.pyc / __pycache__ artifacts
 	rm -rf .venv __pycache__ .pytest_cache .coverage
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
