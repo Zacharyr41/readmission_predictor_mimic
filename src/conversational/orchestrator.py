@@ -848,6 +848,7 @@ class ConversationalPipeline:
         """
         try:
             resolved_itemids: list[int] | None = None
+            resolved_icd_codes: list[str] | None = None
             fallback_warning: str | None = None
             if cq.clinical_concepts:
                 concept = cq.clinical_concepts[0]
@@ -855,11 +856,16 @@ class ConversationalPipeline:
                     biom = self._resolver.resolve_biomarker(concept)
                     resolved_itemids = biom.itemids
                     fallback_warning = biom.fallback_reason
+                elif concept.concept_type == "diagnosis":
+                    diag = self._resolver.resolve_diagnosis(concept)
+                    resolved_icd_codes = diag.icd_codes
+                    fallback_warning = diag.fallback_reason
 
             query = compile_sql(
                 cq, backend, self._registry,
                 resolved_names=resolved_names,
                 resolved_itemids=resolved_itemids,
+                resolved_icd_codes=resolved_icd_codes,
             )
             return query, resolved_itemids, fallback_warning
         except Exception as exc:  # noqa: BLE001
@@ -905,6 +911,7 @@ class ConversationalPipeline:
         """
         if precompiled_query is None:
             resolved_itemids: list[int] | None = None
+            resolved_icd_codes: list[str] | None = None
             fallback_warning: str | None = None
             if cq.clinical_concepts:
                 concept = cq.clinical_concepts[0]
@@ -912,11 +919,16 @@ class ConversationalPipeline:
                     biom = self._resolver.resolve_biomarker(concept)
                     resolved_itemids = biom.itemids
                     fallback_warning = biom.fallback_reason
+                elif concept.concept_type == "diagnosis":
+                    diag = self._resolver.resolve_diagnosis(concept)
+                    resolved_icd_codes = diag.icd_codes
+                    fallback_warning = diag.fallback_reason
 
             query = compile_sql(
                 cq, backend, self._registry,
                 resolved_names=resolved_names,
                 resolved_itemids=resolved_itemids,
+                resolved_icd_codes=resolved_icd_codes,
             )
         else:
             query = precompiled_query

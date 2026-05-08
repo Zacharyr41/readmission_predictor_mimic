@@ -1679,6 +1679,181 @@ def _make_query_obj():
     )
 
 
+# ---------------------------------------------------------------------------
+# Front-half OMOPHub grounding (Inc 5): orchestrator wires resolve_diagnosis
+# ---------------------------------------------------------------------------
+
+
+def _make_diagnosis_cq(*, icd_codes=None) -> CompetencyQuestion:
+    """Diagnosis-cohort CQ for testing orchestrator grounding wiring."""
+    return CompetencyQuestion(
+        original_question="how many patients had sepsis?",
+        clinical_concepts=[
+            ClinicalConcept(
+                name="sepsis", concept_type="diagnosis",
+                icd_codes=icd_codes,
+            ),
+        ],
+        aggregation="count",
+        scope="cohort",
+    )
+
+
+class TestDiagnosisGroundingWiring:
+    """Inc 5 — orchestrator wires resolve_diagnosis into _run_sql_fastpath
+    and _compile_fastpath_preview, mirroring the biomarker pattern.
+
+    These tests verify the wiring without enabling MCP grounding (default
+    ``enable_mcp_grounding=False`` on ConceptResolver). Test paths:
+    1. Concept already carries icd_codes → resolver returns them directly
+       → compile_sql receives resolved_icd_codes.
+    2. Concept lacks icd_codes + grounding disabled → silent fallback,
+       compile_sql receives resolved_icd_codes=None.
+    3. Resolver returns loud-fallback → fallback_warning surfaces in
+       AnswerResult.text_summary as the existing yellow-warning block.
+    """
+
+    @_patch_fastpath
+    def test_passes_concept_icd_codes_to_compile_sql(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile,
+    ):
+        """When the CQ's diagnosis concept carries icd_codes, the resolver
+        returns them directly and compile_sql is called with
+        resolved_icd_codes set to the same list."""
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cq = _make_diagnosis_cq(icd_codes=["A41.9", "R65.21"])
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT COUNT(DISTINCT di.hadm_id) AS count_value FROM t",
+            params=[], columns=["count_value"],
+        )
+        mock_answer.return_value = _make_answer("Count was 312")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("how many patients had sepsis?")
+
+        mock_compile.assert_called_once()
+        # resolved_icd_codes is a kwarg.
+        kw = mock_compile.call_args.kwargs
+        assert kw.get("resolved_icd_codes") == ["A41.9", "R65.21"]
+
+    @_patch_fastpath
+    def test_resolved_icd_codes_none_when_concept_lacks_codes_and_mcp_disabled(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile,
+    ):
+        """No icd_codes on concept + MCP grounding disabled (default for
+        tests) → resolver silent-fallback → compile_sql receives None.
+        Backward-compat guard: existing diagnosis tests must keep working."""
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cq = _make_diagnosis_cq(icd_codes=None)
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT COUNT(*) AS count_value FROM t",
+            params=[], columns=["count_value"],
+        )
+        mock_answer.return_value = _make_answer("Count was 100")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("how many patients had sepsis?")
+
+        kw = mock_compile.call_args.kwargs
+        assert kw.get("resolved_icd_codes") is None
+
+    @_patch_fastpath
+    def test_diagnosis_fallback_warning_surfaces_in_text_summary(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile,
+    ):
+        """When resolve_diagnosis returns a loud-fallback (icd_codes=None
+        + fallback_reason set), the orchestrator appends a ⚠️ Note block
+        to text_summary, matching the existing biomarker fallback UX."""
+        from src.conversational.concept_resolver import DiagnosisResolution
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cq = _make_diagnosis_cq(icd_codes=None)
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT COUNT(*) AS count_value FROM t",
+            params=[], columns=["count_value"],
+        )
+        mock_answer.return_value = _make_answer("Count was 100")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+
+        # Stub the resolver's resolve_diagnosis to return loud-fallback.
+        # Mirror the biomarker test pattern: monkeypatch via direct
+        # attribute replacement on the pipeline's resolver instance.
+        loud_fallback = DiagnosisResolution(
+            icd_codes=None,
+            names=["sepsis"],
+            fallback_reason="ICD autocoding for 'sepsis' unavailable; falling back to title LIKE.",
+            confidence_floor=None,
+        )
+        pipeline._resolver.resolve_diagnosis = lambda concept: loud_fallback
+
+        result = pipeline.ask("how many patients had sepsis?")
+
+        assert "⚠️ Note:" in result.text_summary
+        assert "ICD autocoding" in result.text_summary
+        assert "sepsis" in result.text_summary
+
+    @_patch_fastpath
+    def test_resolve_diagnosis_called_only_for_diagnosis_concepts(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile,
+    ):
+        """A biomarker-concept CQ should NOT trigger resolve_diagnosis;
+        a diagnosis-concept CQ should. Counter-mock asserts call count."""
+        from src.conversational.concept_resolver import DiagnosisResolution
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        biomarker_cq = CompetencyQuestion(
+            original_question="avg creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[biomarker_cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT AVG(x) AS mean_value FROM t",
+            params=[], columns=["mean_value"],
+        )
+        mock_answer.return_value = _make_answer("Mean was 1.1")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+
+        call_count = [0]
+        original = pipeline._resolver.resolve_diagnosis
+        def counting(concept):
+            call_count[0] += 1
+            return original(concept)
+        pipeline._resolver.resolve_diagnosis = counting
+
+        pipeline.ask("avg creatinine")
+        assert call_count[0] == 0
+
+
 class TestPreValidatorIntegration:
     """End-to-end wiring of the pre-execution SQL validator.
 
