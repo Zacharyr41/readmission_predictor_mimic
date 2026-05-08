@@ -1,5 +1,21 @@
 # Phase H Smoke Test — Externally-grounded critic, by hand
 
+> **⚠️ For routine validation, prefer the programmatic suite:**
+> `tests/dashboard/` now mirrors every scenario in this document as
+> pytest tests that produce paste-able markdown reports.
+>
+> | Run | Command | What it covers | Time | Cost |
+> |---|---|---|---|---|
+> | Every commit | `make test-tier3` | SQL-emission regression (Inc 4 / 7 / 9 wiring) | ~5s | $0 |
+> | Daily / PR | `make test-tier2` | §4a/§4b/§4c/§5a critic verdicts (real LLM) | ~30s | ~$0.30 |
+> | Pre-release | `make test-tier1` | Full dashboard E2E via `streamlit.testing.v1.AppTest` | ~5min | ~$0.50 |
+>
+> Reports land at `tests/dashboard/reports/<test_name>.md` — one
+> self-contained markdown file per scenario, paste-able into chat /
+> Slack / PR comments. This `.md` walkthrough remains the canonical
+> reference for *what each scenario means*; the tests are the
+> canonical record for *whether it currently works*.
+
 Hand-run verification that the Phase H critic actually calls its tools,
 cites them correctly, and falls back gracefully when a backend is
 missing. ~10 minutes if everything is already configured.

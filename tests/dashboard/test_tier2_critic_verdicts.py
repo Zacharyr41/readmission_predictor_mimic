@@ -90,13 +90,16 @@ def test_dexmedetomidine_dose_implausibility_flags_warn(
 # ---------------------------------------------------------------------------
 
 
-def test_cardiogenic_shock_wrong_icd_flags_warn(
+def test_cardiogenic_shock_wrong_icd_flags_warn_or_block(
     anthropic_client, reporter,
 ):
     """Interpretation says R57.0 (correct ICD-10 for cardiogenic shock)
     but answer cites I50.9 (heart failure unspecified — different
-    condition). Critic should flag warn even without firing icd_lookup
-    (R57.0 vs I50.9 is in training recall)."""
+    condition). Critic should flag a non-info severity (warn OR block,
+    depending on how aggressive the LLM is on a given run). Both are
+    correct — the test asserts the *shape* of "this is broken" rather
+    than the exact severity, per the AppTest guide's stochasticity
+    advice (§8.2)."""
     from tests.dashboard.lib.scenarios import build_cardiogenic_shock_cq
 
     cq, answer = build_cardiogenic_shock_cq()
@@ -107,9 +110,9 @@ def test_cardiogenic_shock_wrong_icd_flags_warn(
     _record_run(reporter, cq, answer, verdict, duration=duration)
 
     assert verdict is not None
-    sev_ok = verdict.severity == "warn"
+    sev_ok = verdict.severity in {"warn", "block"}
     reporter.add_assertion(
-        "verdict.severity == 'warn' (caught I50.9 vs R57.0 mismatch)",
+        "verdict.severity in {warn, block} (caught I50.9 vs R57.0 mismatch)",
         sev_ok, detail=f"got: {verdict.severity}",
     )
     assert sev_ok
