@@ -872,6 +872,7 @@ class ConversationalPipeline:
                 resolved_names=resolved_names,
                 resolved_itemids=resolved_itemids,
                 resolved_icd_codes=resolved_icd_codes,
+                enable_mcp_grounding=True,
             )
             return query, resolved_itemids, fallback_warning
         except Exception as exc:  # noqa: BLE001
@@ -935,6 +936,7 @@ class ConversationalPipeline:
                 resolved_names=resolved_names,
                 resolved_itemids=resolved_itemids,
                 resolved_icd_codes=resolved_icd_codes,
+                enable_mcp_grounding=True,
             )
         else:
             query = precompiled_query

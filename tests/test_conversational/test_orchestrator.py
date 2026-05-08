@@ -1963,6 +1963,51 @@ class TestProductionMcpGrounding:
         assert call_count[0] == 0
 
 
+class TestProductionFilterGrounding:
+    """Inc 9.4 — orchestrator passes enable_mcp_grounding=True to
+    compile_sql in both call sites (_run_sql_fastpath and
+    _compile_fastpath_preview). This is what wires up the smoking-gun
+    fix: ``mean lactate in sepsis cohort`` decomposes to a biomarker-
+    aggregate CQ with diagnosis as a patient_filter, and the filter
+    compiler now consults icd_autocode for ICD-grounded cohort
+    selection."""
+
+    @_patch_fastpath
+    def test_orchestrator_passes_mcp_flag_to_compile_sql(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile,
+    ):
+        """compile_sql is called with enable_mcp_grounding=True from
+        _run_sql_fastpath in the production wiring."""
+        from src.conversational.models import DecompositionResult, PatientFilter
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cq = CompetencyQuestion(
+            original_question="mean lactate in sepsis",
+            clinical_concepts=[
+                ClinicalConcept(name="lactate", concept_type="biomarker"),
+            ],
+            patient_filters=[
+                PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT AVG(x) FROM t", params=[], columns=["mean_value"],
+        )
+        mock_answer.return_value = _make_answer("Mean was 2.4")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("mean lactate in sepsis cohort")
+
+        kw = mock_compile.call_args.kwargs
+        assert kw.get("enable_mcp_grounding") is True
+
+
 class TestPreValidatorIntegration:
     """End-to-end wiring of the pre-execution SQL validator.
 
