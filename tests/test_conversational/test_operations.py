@@ -33,6 +33,27 @@ from src.conversational.operations_filters import register_default_filters
 # ---------------------------------------------------------------------------
 
 
+class TestFilterCompileContext:
+    """Inc 9.1 — front-half OMOPHub grounding for the patient-filter
+    compiler. ``FilterCompileContext`` carries an ``enable_mcp_grounding``
+    flag so individual filter compile_fns (specifically ``_compile_diagnosis``)
+    can opt into MCP-backed grounding when invoked from the production
+    pipeline. Default False keeps tests offline-safe and preserves
+    byte-identical SQL for callers that don't pass the flag."""
+
+    def test_default_mcp_grounding_disabled(self):
+        from src.conversational.operations import FilterCompileContext
+        ctx = FilterCompileContext(backend=object())
+        assert ctx.enable_mcp_grounding is False
+
+    def test_accepts_mcp_grounding_flag(self):
+        from src.conversational.operations import FilterCompileContext
+        ctx = FilterCompileContext(
+            backend=object(), enable_mcp_grounding=True,
+        )
+        assert ctx.enable_mcp_grounding is True
+
+
 class TestRegistryCore:
     def test_register_and_get_roundtrip(self):
         r = OperationRegistry()

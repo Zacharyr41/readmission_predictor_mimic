@@ -43,11 +43,19 @@ class FilterCompileContext:
     ``backend`` is duck-typed — any object exposing ``table(name)``,
     ``ilike(col)``, and ``readmission_labels_expr()`` will do. That keeps the
     registry oblivious to DuckDB vs BigQuery vs whatever future backend we add.
+
+    ``enable_mcp_grounding`` (Inc 9 / Phase H follow-up) is opt-in
+    OMOPHub-backed grounding for filter compile_fns. The diagnosis
+    filter consults ``_cached_icd_autocode`` from concept_resolver when
+    True, emitting an IN-list of ICD codes alongside the existing
+    title-LIKE clause. Default False so unit tests stay offline-safe
+    and existing callers preserve byte-identical SQL.
     """
 
     backend: Any
     admission_alias: str = "a"
     patient_alias: str = "p"
+    enable_mcp_grounding: bool = False
 
 
 @dataclass
