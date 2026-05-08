@@ -54,6 +54,212 @@ class TestFilterCompileContext:
         assert ctx.enable_mcp_grounding is True
 
 
+class TestDiagnosisFilterGrounding:
+    """Inc 9.2 — ``_compile_diagnosis`` consults
+    ``_cached_icd_autocode`` (from concept_resolver) when
+    ``ctx.enable_mcp_grounding=True`` and emits a parallel-OR IN-list
+    alongside the existing title-LIKE clause. Targets the smoking-gun
+    query path: ``mean lactate in sepsis cohort`` → biomarker-aggregate
+    CQ with diagnosis-typed patient_filter."""
+
+    @pytest.fixture
+    def grounded_ctx(self, duckdb_backend):
+        """Context with grounding enabled + lru_cache cleared."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations import FilterCompileContext
+        cr._cached_icd_autocode.cache_clear()
+        return FilterCompileContext(
+            backend=duckdb_backend, enable_mcp_grounding=True,
+        )
+
+    @pytest.fixture
+    def offline_ctx(self, duckdb_backend):
+        """Context with grounding disabled (the unit-test default)."""
+        from src.conversational.operations import FilterCompileContext
+        return FilterCompileContext(
+            backend=duckdb_backend, enable_mcp_grounding=False,
+        )
+
+    def test_emits_icd_in_when_grounded(
+        self, grounded_ctx, monkeypatch,
+    ):
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        def fake_autocode(text, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                    {"code": "R65.21", "title": "Severe sepsis", "confidence": 0.81},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        frag = _compile_diagnosis(f, grounded_ctx)
+        sql = " ".join(frag.where)
+        assert "di.icd_code IN (" in sql
+        assert "A41.9" in frag.params
+        assert "R65.21" in frag.params
+
+    def test_combines_in_with_like_as_or(
+        self, grounded_ctx, monkeypatch,
+    ):
+        """Final shape: ``((di.icd_code IN (...)) OR (<existing LIKE>))``.
+        ICD-9 admissions stay matchable via the LIKE branch."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        def fake_autocode(text, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        frag = _compile_diagnosis(f, grounded_ctx)
+        sql = " ".join(frag.where)
+        assert "di.icd_code IN (" in sql
+        # Existing LIKE clauses preserved.
+        sql_upper = sql.upper()
+        assert "ILIKE" in sql_upper or "LOWER" in sql_upper
+        assert "%sepsis%" in frag.params
+
+    def test_falls_back_to_like_when_unavailable(
+        self, grounded_ctx, monkeypatch,
+    ):
+        """MCP unavailable → no IN-list, LIKE-only preserved."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        def fake_autocode(text, **kwargs):
+            return {"status": "unavailable", "error": "MCP timeout"}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        frag = _compile_diagnosis(f, grounded_ctx)
+        sql = " ".join(frag.where)
+        assert "di.icd_code IN (" not in sql
+        assert "%sepsis%" in frag.params
+
+    def test_falls_back_to_like_when_grounding_disabled(
+        self, offline_ctx, monkeypatch,
+    ):
+        """ctx.enable_mcp_grounding=False → no MCP call at all.
+        Byte-identical SQL to current behavior."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        frag = _compile_diagnosis(f, offline_ctx)
+        sql = " ".join(frag.where)
+        assert "di.icd_code IN (" not in sql
+        assert call_count[0] == 0  # MCP NEVER called
+
+    def test_falls_back_to_like_when_all_low_confidence(
+        self, grounded_ctx, monkeypatch,
+    ):
+        """All candidates < 0.5 confidence threshold → IN-list skipped,
+        LIKE-only preserved (silent fallback at filter level)."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        def fake_autocode(text, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "X1", "title": "low1", "confidence": 0.31},
+                    {"code": "X2", "title": "low2", "confidence": 0.42},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        frag = _compile_diagnosis(f, grounded_ctx)
+        sql = " ".join(frag.where)
+        assert "di.icd_code IN (" not in sql
+
+    def test_caches_repeat_lookups_via_module_lru_cache(
+        self, grounded_ctx, monkeypatch,
+    ):
+        """Filter compiler hits the same lru_cache as concept_resolver —
+        a "sepsis" filter and a "sepsis" diagnosis-type concept share
+        one MCP round-trip per process."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.9},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        _compile_diagnosis(f, grounded_ctx)
+        _compile_diagnosis(f, grounded_ctx)
+        _compile_diagnosis(f, grounded_ctx)
+        assert call_count[0] == 1
+
+    def test_does_not_call_mcp_for_non_contains_operator(
+        self, grounded_ctx, monkeypatch,
+    ):
+        """Grounding is scoped to the ``contains`` operator. If a future
+        operator (e.g. ``=``) is added to the diagnosis filter, it must
+        not silently inherit grounding semantics — different operators
+        need different shapes."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        # Synthesise an "=" operator. The compiler may not currently
+        # accept it via PatientFilter validation; if so the test instead
+        # covers the case where ``f.operator`` is something the
+        # grounding branch doesn't recognise.
+        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        # Mutate operator AFTER construction to bypass the validator
+        # (we're testing compile-side behavior, not model validation).
+        object.__setattr__(f, "operator", "=")
+        _compile_diagnosis(f, grounded_ctx)
+        assert call_count[0] == 0
+
+    def test_does_not_call_mcp_when_value_is_empty_string(
+        self, grounded_ctx, monkeypatch,
+    ):
+        """Value-shape guard: empty string skips grounding."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations_filters import _compile_diagnosis
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        f = PatientFilter(field="diagnosis", operator="contains", value="")
+        _compile_diagnosis(f, grounded_ctx)
+        assert call_count[0] == 0
+
+
 class TestRegistryCore:
     def test_register_and_get_roundtrip(self):
         r = OperationRegistry()
