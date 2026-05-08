@@ -859,3 +859,77 @@ class TestBiomarkerMimicItemidFallback:
         result = grounded_resolver.resolve_biomarker(concept)
         assert result.itemids is None
         assert result.fallback_reason is not None
+
+
+# ---------------------------------------------------------------------------
+# Inc 8 — Live integration tests (gated by env var; skipped in CI)
+#
+# These hit the real OMOPHub hosted MCP. Skipped unless RUN_LIVE_OMOPHUB=1.
+# Useful before shipping — proves the front-half plumbing actually grounds
+# real diagnoses against the live endpoint.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not __import__("os").environ.get("RUN_LIVE_OMOPHUB"),
+    reason="Set RUN_LIVE_OMOPHUB=1 + OMOPHUB_API_KEY to run live integration",
+)
+class TestLiveOmophubFrontHalfGrounding:
+    """End-to-end against real OMOPHub. Confirms that with the real MCP,
+    resolve_diagnosis actually grounds 'sepsis' to ICD codes that match
+    the SQL-fastpath compiler's expected shape."""
+
+    @pytest.fixture
+    def live_resolver(self):
+        from src.conversational import concept_resolver as cr
+        cr._cached_icd_autocode.cache_clear()
+        cr._cached_mimic_itemid_search.cache_clear()
+        return ConceptResolver(
+            mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=True,
+        )
+
+    def test_live_grounds_sepsis_to_icd_codes(self, live_resolver):
+        """Real OMOPHub call: 'sepsis' should ground to A41/R65/A40 family."""
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        result = live_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes is not None
+        # Sepsis-family codes start with A41, R65, A40 in ICD-10-CM.
+        assert any(
+            c.startswith(("A41", "R65", "A40", "A42"))
+            for c in result.icd_codes
+        ), f"expected sepsis codes; got {result.icd_codes!r}"
+        assert result.fallback_reason is None
+
+    def test_live_compile_sql_emits_in_list_for_sepsis(self, live_resolver):
+        """Threading through compile_sql: the grounded codes show up as an
+        IN-list in the generated WHERE clause. This is the smoking-gun
+        end-to-end check — what users see in 'Query Details' on the dash."""
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        from src.conversational.models import CompetencyQuestion
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        diag = live_resolver.resolve_diagnosis(concept)
+
+        cq = CompetencyQuestion(
+            original_question="how many sepsis patients?",
+            clinical_concepts=[concept],
+            aggregation="count", scope="cohort",
+        )
+        # Use a minimal stub backend just for SQL emission (we don't
+        # execute against a DB — just check the emitted SQL string).
+        from tests.test_conversational.test_sql_fastpath import _ConnBackend
+        import duckdb
+        backend = _ConnBackend(duckdb.connect(":memory:"))
+
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=diag.names,
+            resolved_icd_codes=diag.icd_codes,
+        )
+        assert "di.icd_code IN (" in query.sql
+        # At least one sepsis-family code in the params.
+        assert any(
+            isinstance(p, str) and p.startswith(("A41", "R65", "A40", "A42"))
+            for p in query.params
+        ), f"expected sepsis-family ICD code in params; got {query.params!r}"
