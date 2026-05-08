@@ -1744,34 +1744,6 @@ class TestDiagnosisGroundingWiring:
         assert kw.get("resolved_icd_codes") == ["A41.9", "R65.21"]
 
     @_patch_fastpath
-    def test_resolved_icd_codes_none_when_concept_lacks_codes_and_mcp_disabled(
-        self,
-        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
-        mock_answer, mock_compile,
-    ):
-        """No icd_codes on concept + MCP grounding disabled (default for
-        tests) → resolver silent-fallback → compile_sql receives None.
-        Backward-compat guard: existing diagnosis tests must keep working."""
-        from src.conversational.models import DecompositionResult
-        from src.conversational.sql_fastpath import SqlFastpathQuery
-
-        cq = _make_diagnosis_cq(icd_codes=None)
-        mock_decompose_q.return_value = DecompositionResult(
-            competency_questions=[cq],
-        )
-        mock_compile.return_value = SqlFastpathQuery(
-            sql="SELECT COUNT(*) AS count_value FROM t",
-            params=[], columns=["count_value"],
-        )
-        mock_answer.return_value = _make_answer("Count was 100")
-
-        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
-        pipeline.ask("how many patients had sepsis?")
-
-        kw = mock_compile.call_args.kwargs
-        assert kw.get("resolved_icd_codes") is None
-
-    @_patch_fastpath
     def test_diagnosis_fallback_warning_surfaces_in_text_summary(
         self,
         mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
@@ -1851,6 +1823,143 @@ class TestDiagnosisGroundingWiring:
         pipeline._resolver.resolve_diagnosis = counting
 
         pipeline.ask("avg creatinine")
+        assert call_count[0] == 0
+
+
+class TestProductionMcpGrounding:
+    """Inc 6 — production constructs ConceptResolver with
+    ``enable_mcp_grounding=True``. Diagnosis concepts without pre-populated
+    icd_codes are grounded live via OMOPHub's icd_autocode tool.
+
+    These tests monkeypatch the module-level ``icd_autocode`` symbol on
+    concept_resolver to control MCP behaviour without hitting the network.
+    """
+
+    @_patch_fastpath
+    def test_pipeline_grounds_diagnosis_via_icd_autocode(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, monkeypatch,
+    ):
+        """Production pipeline calls icd_autocode for diagnosis concepts
+        and threads the resulting codes through to compile_sql."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        # Clear lru_cache so prior tests don't leak grounded results.
+        cr._cached_icd_autocode.cache_clear()
+
+        # Stub icd_autocode to return a deterministic sepsis result set.
+        captured = []
+        def fake_autocode(text, **kwargs):
+            captured.append(text)
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                    {"code": "R65.21", "title": "Severe sepsis with shock", "confidence": 0.81},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        cq = _make_diagnosis_cq(icd_codes=None)  # forces MCP path
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT COUNT(*) AS count_value FROM t",
+            params=[], columns=["count_value"],
+        )
+        mock_answer.return_value = _make_answer("Count was 312")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("how many patients had sepsis?")
+
+        # icd_autocode was invoked.
+        assert "sepsis" in captured
+        # compile_sql received the grounded codes.
+        kw = mock_compile.call_args.kwargs
+        assert kw.get("resolved_icd_codes") == ["A41.9", "R65.21"]
+
+    @_patch_fastpath
+    def test_pipeline_falls_back_when_icd_autocode_unavailable(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, monkeypatch,
+    ):
+        """When the MCP returns unavailable, the pipeline produces a
+        loud-fallback: compile_sql receives resolved_icd_codes=None
+        (LIKE-only SQL) AND a fallback warning surfaces in text_summary."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cr._cached_icd_autocode.cache_clear()
+
+        def fake_autocode(text, **kwargs):
+            return {"status": "unavailable", "error": "MCP timeout"}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        cq = _make_diagnosis_cq(icd_codes=None)
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT COUNT(*) AS count_value FROM t",
+            params=[], columns=["count_value"],
+        )
+        mock_answer.return_value = _make_answer("Count was 100")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("how many patients had sepsis?")
+
+        # No grounded codes passed.
+        kw = mock_compile.call_args.kwargs
+        assert kw.get("resolved_icd_codes") is None
+        # Loud-fallback warning visible in chat.
+        assert "⚠️ Note:" in result.text_summary
+        assert "ICD autocoding" in result.text_summary
+
+    @_patch_fastpath
+    def test_pipeline_does_not_call_icd_autocode_for_biomarker_concepts(
+        self,
+        mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
+        mock_answer, mock_compile, monkeypatch,
+    ):
+        """Production grounding is diagnosis-only. Biomarker concepts must
+        not trigger icd_autocode even though enable_mcp_grounding=True."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        cr._cached_icd_autocode.cache_clear()
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        biomarker_cq = CompetencyQuestion(
+            original_question="avg creatinine",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            aggregation="mean", scope="cohort",
+        )
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[biomarker_cq],
+        )
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT AVG(x) AS mean_value FROM t",
+            params=[], columns=["mean_value"],
+        )
+        mock_answer.return_value = _make_answer("Mean was 1.1")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("avg creatinine")
+
         assert call_count[0] == 0
 
 

@@ -165,6 +165,12 @@ class ConversationalPipeline:
         self._resolver = ConceptResolver(
             mappings_dir=repo_root / "data" / "mappings",
             hierarchy=hierarchy,
+            # Phase H follow-up: enable OMOPHub-backed grounding in the
+            # front-half resolver so diagnosis CQs get ICD codes via
+            # icd_autocode before SQL emission, mirroring how the
+            # critic already uses these MCPs post-hoc. Falls back to
+            # LIKE cleanly if OMOPHUB_API_KEY is unset.
+            enable_mcp_grounding=True,
         )
         self._registry = get_default_registry()
         self._planner = QueryPlanner(registry=self._registry)
