@@ -437,6 +437,97 @@ class TestFilterCompilationReused:
         assert isinstance(rows[0]["count_value"], int)
 
 
+class TestCompileSqlMcpFlagPlumbing:
+    """Inc 9.3 — compile_sql accepts ``enable_mcp_grounding`` kwarg and
+    threads it through ``_filter_fragment`` to ``FilterCompileContext``.
+    The diagnosis-filter compiler then consults the flag to decide
+    whether to ground via icd_autocode."""
+
+    def test_default_mcp_flag_is_false(self, backend, monkeypatch):
+        """When compile_sql is called without enable_mcp_grounding,
+        FilterCompileContext is constructed with the default False —
+        no MCP call attempted even for diagnosis-typed filters."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.models import PatientFilter
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        cq = _cq(
+            concepts=[("creatinine", "biomarker")],
+            filters=[("diagnosis", "contains", "sepsis")],
+            aggregation="mean",
+        )
+        compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["creatinine"],
+        )
+        assert call_count[0] == 0
+
+    def test_mcp_flag_true_triggers_filter_grounding(
+        self, backend, monkeypatch,
+    ):
+        """compile_sql(enable_mcp_grounding=True) → diagnosis filter
+        compiles with grounded IN-list."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.models import PatientFilter
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cr._cached_icd_autocode.cache_clear()
+
+        def fake_autocode(text, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        cq = _cq(
+            concepts=[("creatinine", "biomarker")],
+            filters=[("diagnosis", "contains", "sepsis")],
+            aggregation="mean",
+        )
+        query = compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["creatinine"],
+            enable_mcp_grounding=True,
+        )
+        assert "di.icd_code IN (" in query.sql
+        assert "A41.9" in query.params
+
+    def test_mcp_flag_does_not_affect_biomarker_path_without_diagnosis_filter(
+        self, backend, monkeypatch,
+    ):
+        """A biomarker query with no diagnosis filter doesn't trigger
+        any MCP call even when the flag is True. Belt-and-suspenders
+        guard against accidental fan-out."""
+        from src.conversational import concept_resolver as cr
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        cq = _cq(concepts=[("creatinine", "biomarker")], aggregation="mean")
+        compile_sql(
+            cq, backend, get_default_registry(),
+            resolved_names=["creatinine"],
+            enable_mcp_grounding=True,
+        )
+        assert call_count[0] == 0
+
+
 class TestDiagnosisCountIcdGrounded:
     """Front-half OMOPHub grounding (Inc 4): when ``resolved_icd_codes``
     is supplied, the diagnosis-count compile branch emits an IN-list as a

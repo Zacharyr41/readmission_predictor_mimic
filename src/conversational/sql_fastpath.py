@@ -66,6 +66,7 @@ def compile_sql(
     resolved_names: list[str] | None = None,
     resolved_itemids: list[int] | None = None,
     resolved_icd_codes: list[str] | None = None,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     """Dispatch to the right compile branch based on CQ shape.
 
@@ -129,7 +130,10 @@ def compile_sql(
 
     # Plain diagnosis list: no aggregation, return (subjectId, hadmId, …).
     if cq.aggregation is None and concept.concept_type == "diagnosis":
-        return _compile_diagnosis_list(cq, concept, names, backend, registry)
+        return _compile_diagnosis_list(
+            cq, concept, names, backend, registry,
+            enable_mcp_grounding=enable_mcp_grounding,
+        )
 
     if cq.aggregation is None:
         raise ValueError(
@@ -150,18 +154,29 @@ def compile_sql(
         return _compile_event_aggregate(
             cq, concept, names, sql_fn, backend, registry,
             itemids=resolved_itemids if concept.concept_type == "biomarker" else None,
+            enable_mcp_grounding=enable_mcp_grounding,
         )
     if concept.concept_type == "drug":
-        return _compile_drug_aggregate(cq, concept, names, sql_fn, backend, registry)
+        return _compile_drug_aggregate(
+            cq, concept, names, sql_fn, backend, registry,
+            enable_mcp_grounding=enable_mcp_grounding,
+        )
     if concept.concept_type == "microbiology":
-        return _compile_microbiology_aggregate(cq, concept, names, sql_fn, backend, registry)
+        return _compile_microbiology_aggregate(
+            cq, concept, names, sql_fn, backend, registry,
+            enable_mcp_grounding=enable_mcp_grounding,
+        )
     if concept.concept_type == "diagnosis":
         return _compile_diagnosis_count(
             cq, concept, names, sql_fn, backend, registry,
             icd_codes=resolved_icd_codes,
+            enable_mcp_grounding=enable_mcp_grounding,
         )
     if concept.concept_type == "outcome":
-        return _compile_outcome_mortality(cq, concept, sql_fn, backend, registry)
+        return _compile_outcome_mortality(
+            cq, concept, sql_fn, backend, registry,
+            enable_mcp_grounding=enable_mcp_grounding,
+        )
 
     raise ValueError(
         f"sql_fastpath does not support concept_type={concept.concept_type!r}"
@@ -191,15 +206,26 @@ def _comparison_group_by_col(
 
 
 def _filter_fragment(
-    cq: CompetencyQuestion, backend: Any, registry: OperationRegistry,
+    cq: CompetencyQuestion,
+    backend: Any,
+    registry: OperationRegistry,
+    *,
+    enable_mcp_grounding: bool = False,
 ) -> tuple[list[str], list[str], list[Any], bool, bool]:
     """Compile patient_filters to SQL fragments.
 
     Returns ``(joins, where, params, needs_patients, needs_readmission)``
     where ``needs_readmission`` tracks whether any filter already joined
     the readmission_labels CTE — so the GROUP BY path doesn't double-join.
+
+    ``enable_mcp_grounding`` (Inc 9.3) is threaded into the
+    ``FilterCompileContext`` so the diagnosis filter can ground via
+    OMOPHub-backed icd_autocode in the production pipeline. Default
+    False keeps unit tests offline-safe.
     """
-    ctx = FilterCompileContext(backend=backend)
+    ctx = FilterCompileContext(
+        backend=backend, enable_mcp_grounding=enable_mcp_grounding,
+    )
     frag = registry.compile_filters(cq.patient_filters, ctx)
     needs_readmission = any(
         "rl." in w for w in frag.where
@@ -259,6 +285,7 @@ def _compile_event_aggregate(
     registry: OperationRegistry,
     *,
     itemids: list[int] | None = None,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     """AVG/MAX/MIN/COUNT over biomarker (labevents) or vital (chartevents).
 
@@ -283,7 +310,7 @@ def _compile_event_aggregate(
 
     group_by_col = _comparison_group_by_col(cq, registry)
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
-        _filter_fragment(cq, backend, registry)
+        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     # Decide what extra structural joins we need:
     #  - admissions: always, so cohort filters on `a.*` work.
@@ -355,6 +382,8 @@ def _compile_drug_aggregate(
     sql_fn: str,
     backend: Any,
     registry: OperationRegistry,
+    *,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     """Drug events have no numeric value to AVG/MAX/MIN over — only COUNT
     is meaningful. Reject other aggregates so the planner doesn't produce
@@ -367,7 +396,7 @@ def _compile_drug_aggregate(
     t = backend.table
     group_by_col = _comparison_group_by_col(cq, registry)
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
-        _filter_fragment(cq, backend, registry)
+        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     needs_patients = filter_needs_patients or _needs_patients_axis(group_by_col)
     needs_readmission = (
@@ -424,6 +453,8 @@ def _compile_microbiology_aggregate(
     sql_fn: str,
     backend: Any,
     registry: OperationRegistry,
+    *,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     if sql_fn != "COUNT":
         raise ValueError(
@@ -433,7 +464,7 @@ def _compile_microbiology_aggregate(
     t = backend.table
     group_by_col = _comparison_group_by_col(cq, registry)
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
-        _filter_fragment(cq, backend, registry)
+        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     needs_patients = filter_needs_patients or _needs_patients_axis(group_by_col)
     needs_readmission = (
@@ -500,6 +531,7 @@ def _compile_diagnosis_count(
     registry: OperationRegistry,
     *,
     icd_codes: list[str] | None = None,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     if sql_fn != "COUNT":
         raise ValueError(
@@ -509,7 +541,7 @@ def _compile_diagnosis_count(
     t = backend.table
     group_by_col = _comparison_group_by_col(cq, registry)
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
-        _filter_fragment(cq, backend, registry)
+        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     needs_patients = filter_needs_patients or _needs_patients_axis(group_by_col)
     needs_readmission = (
@@ -587,6 +619,8 @@ def _compile_diagnosis_list(
     names: list[str],
     backend: Any,
     registry: OperationRegistry,
+    *,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     """Patient-list-by-diagnosis matching the SPARQL template output shape."""
     if cq.scope == "comparison":
@@ -596,7 +630,7 @@ def _compile_diagnosis_list(
 
     t = backend.table
     filter_joins, filter_where, filter_params, filter_needs_patients, _ = \
-        _filter_fragment(cq, backend, registry)
+        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     joins: list[str] = [
         f"LEFT JOIN {t('d_icd_diagnoses')} dd "
@@ -648,6 +682,8 @@ def _compile_outcome_mortality(
     sql_fn: str,
     backend: Any,
     registry: OperationRegistry,
+    *,
+    enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
     """Mortality count — matches the SPARQL ``mortality_count`` template's
     (``expired``, ``count``) shape. We ignore the caller's aggregation keyword
@@ -655,7 +691,7 @@ def _compile_outcome_mortality(
     clinically meaningful answer."""
     t = backend.table
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
-        _filter_fragment(cq, backend, registry)
+        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     joins: list[str] = []
     if filter_needs_patients:
