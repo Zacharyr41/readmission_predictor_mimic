@@ -501,3 +501,168 @@ class TestDiagnosisResolution:
         concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
         resolver.resolve_diagnosis(concept)
         assert called == []
+
+
+class TestGroundViaIcdAutocode:
+    """Inc 3 — the cached MCP-grounded path inside resolve_diagnosis.
+
+    These tests construct a resolver with ``enable_mcp_grounding=True``
+    and monkeypatch the module-level ``icd_autocode`` symbol. The cache
+    must be cleared between tests so prior memoization doesn't leak.
+    """
+
+    @pytest.fixture
+    def grounded_resolver(self, monkeypatch):
+        """Resolver with MCP grounding enabled + cache cleared."""
+        from src.conversational import concept_resolver as cr
+        # Clear the lru_cache so cross-test pollution doesn't bite.
+        cr._cached_icd_autocode.cache_clear()
+        return ConceptResolver(
+            mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=True,
+        )
+
+    def test_filters_by_confidence_threshold(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Results with confidence < 0.5 are dropped; None confidence is
+        accepted (OMOPHub semantic_search often omits scores)."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_autocode(text, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                    {"code": "R65.21", "title": "Severe sepsis", "confidence": 0.71},
+                    {"code": "L08.9", "title": "Local skin infection", "confidence": 0.31},  # drop
+                    {"code": "B99",    "title": "Other infectious", "confidence": None},      # keep
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        result = grounded_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes is not None
+        # A41.9, R65.21 (above threshold) and B99 (None confidence) — kept.
+        # L08.9 (below threshold) — dropped.
+        assert "A41.9" in result.icd_codes
+        assert "R65.21" in result.icd_codes
+        assert "B99" in result.icd_codes
+        assert "L08.9" not in result.icd_codes
+        # Min confidence among accepted (None doesn't count).
+        assert result.confidence_floor == 0.71
+        assert result.fallback_reason is None
+
+    def test_returns_loud_fallback_when_unavailable(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """OMOPHub returns unavailable → loud fallback with reason."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_autocode(text, **kwargs):
+            return {"status": "unavailable", "error": "MCP timeout"}
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        result = grounded_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes is None
+        assert result.fallback_reason is not None
+        assert "icd autocoding" in result.fallback_reason.lower()
+        # User-visible warning should mention the analyte name.
+        assert "sepsis" in result.fallback_reason.lower()
+
+    def test_returns_loud_fallback_when_all_low_confidence(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """All candidates below 0.5 → loud fallback citing max confidence."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_autocode(text, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"code": "X1", "title": "Low1", "confidence": 0.31},
+                    {"code": "X2", "title": "Low2", "confidence": 0.42},
+                ],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        result = grounded_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes is None
+        assert result.fallback_reason is not None
+        # Max-confidence value should appear in the message for telemetry.
+        assert "0.42" in result.fallback_reason
+
+    def test_caches_repeat_lookups(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Process-wide lru_cache: identical (text, version) hits OMOPHub
+        only once across multiple resolver calls."""
+        from src.conversational import concept_resolver as cr
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {
+                "status": "ok",
+                "results": [{"code": "A41.9", "title": "Sepsis", "confidence": 0.9}],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        grounded_resolver.resolve_diagnosis(concept)
+        grounded_resolver.resolve_diagnosis(concept)
+        grounded_resolver.resolve_diagnosis(concept)
+        assert call_count[0] == 1
+
+    def test_does_not_cache_unavailable(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Negative results (unavailable) must not be cached — transient
+        OMOPHub failures shouldn't poison the cache for the rest of the
+        process. Implemented via sentinel-raise pattern: cached function
+        raises LookupError on unavailable, outer wrapper catches and
+        returns None."""
+        from src.conversational import concept_resolver as cr
+
+        call_count = [0]
+        responses = [
+            {"status": "unavailable", "error": "transient"},
+            {"status": "ok", "results": [
+                {"code": "A41.9", "title": "Sepsis", "confidence": 0.9},
+            ]},
+        ]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return responses[min(call_count[0] - 1, len(responses) - 1)]
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        first = grounded_resolver.resolve_diagnosis(concept)
+        second = grounded_resolver.resolve_diagnosis(concept)
+        assert first.icd_codes is None  # unavailable → fallback
+        assert second.icd_codes == ["A41.9"]  # second call hits MCP again
+        assert call_count[0] == 2
+
+    def test_caches_keyed_by_lowercased_name(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Cache key uses lowered name so 'Sepsis' and 'sepsis' share the
+        same MCP call. Avoids redundant lookups when the LLM varies casing."""
+        from src.conversational import concept_resolver as cr
+
+        call_count = [0]
+        def fake_autocode(text, **kwargs):
+            call_count[0] += 1
+            return {
+                "status": "ok",
+                "results": [{"code": "A41.9", "title": "Sepsis", "confidence": 0.9}],
+            }
+        monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+        a = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        b = ClinicalConcept(name="Sepsis", concept_type="diagnosis")
+        grounded_resolver.resolve_diagnosis(a)
+        grounded_resolver.resolve_diagnosis(b)
+        assert call_count[0] == 1

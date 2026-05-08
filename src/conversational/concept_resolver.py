@@ -13,12 +13,52 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from src.conversational.health_evidence.tools import icd_autocode
 from src.conversational.models import ClinicalConcept
 
 logger = logging.getLogger(__name__)
+
+
+# Confidence threshold: keep results where ``confidence >= 0.5`` OR
+# ``confidence is None``. OMOPHub's semantic_search often omits scores;
+# rejecting None would silently disable grounding for most queries.
+_ICD_CONFIDENCE_THRESHOLD = 0.5
+
+# Cap on results accepted from a single icd_autocode call. The MCP tool's
+# default top-K is 10; this is a defensive secondary cap so we don't fan
+# out to dozens of long-tail codes if a future tweak raises that default.
+_ICD_MAX_RESULTS = 10
+
+
+@lru_cache(maxsize=256)
+def _cached_icd_autocode(
+    text_lower: str, version: str,
+) -> tuple[tuple[str, float | None], ...]:
+    """Process-wide cache of icd_autocode results.
+
+    Cache key is ``(text_lower, version)`` so 'Sepsis' and 'sepsis' share
+    the same MCP call. Returns a tuple of ``(code, confidence)`` pairs
+    so the cache stores hashable values.
+
+    **Negative-result bypass:** when the underlying tool returns
+    ``unavailable``, this function raises ``LookupError`` so the cache
+    never stores the failure. Transient OMOPHub failures shouldn't
+    poison the cache for the rest of the process. The outer
+    ``_ground_via_icd_autocode`` catches LookupError and falls back.
+    """
+    envelope = icd_autocode(text_lower, version=version, max_results=_ICD_MAX_RESULTS)
+    if envelope.get("status") != "ok":
+        # Sentinel-raise: never cache negative results.
+        raise LookupError(envelope.get("error") or "icd_autocode unavailable")
+    results = envelope.get("results") or []
+    return tuple(
+        (str(r.get("code", "")), r.get("confidence"))
+        for r in results
+        if r.get("code")
+    )
 
 
 @dataclass(frozen=True)
@@ -462,12 +502,74 @@ class ConceptResolver:
                 confidence_floor=None,
             )
 
-        # Inc 3 wires ``_ground_via_icd_autocode`` here. Until then, the
-        # MCP-enabled path returns the same silent fallback as offline
-        # mode (the test for Inc 3 will RED on this and force the wiring).
+        return self._ground_via_icd_autocode(concept.name, names)
+
+    def _ground_via_icd_autocode(
+        self, name: str, names: list[str],
+    ) -> DiagnosisResolution:
+        """Ground a diagnosis name via OMOPHub's icd_autocode MCP tool.
+
+        Returns a grounded ``DiagnosisResolution`` when the MCP returns at
+        least one above-threshold candidate. Returns a loud-fallback
+        resolution (with user-visible ``fallback_reason``) when the MCP is
+        unavailable or all candidates are below the confidence threshold.
+        """
+        try:
+            cached = _cached_icd_autocode(name.lower(), "10")
+        except LookupError as exc:
+            logger.info(
+                "icd_autocode unavailable for %r: %s — falling back to LIKE",
+                name, exc,
+            )
+            return DiagnosisResolution(
+                icd_codes=None,
+                names=names,
+                fallback_reason=(
+                    f"ICD autocoding for {name!r} unavailable "
+                    f"({exc}); falling back to title LIKE — result may "
+                    "pool unrelated diagnoses."
+                ),
+                confidence_floor=None,
+            )
+
+        # Filter by confidence threshold; keep None-confidence entries.
+        accepted: list[tuple[str, float | None]] = []
+        max_seen: float | None = None
+        for code, conf in cached:
+            if conf is None:
+                accepted.append((code, conf))
+                continue
+            if max_seen is None or conf > max_seen:
+                max_seen = conf
+            if conf >= _ICD_CONFIDENCE_THRESHOLD:
+                accepted.append((code, conf))
+
+        if not accepted:
+            return DiagnosisResolution(
+                icd_codes=None,
+                names=names,
+                fallback_reason=(
+                    f"ICD autocoding for {name!r} returned only "
+                    f"low-confidence candidates "
+                    f"(max={max_seen if max_seen is not None else 'N/A'}); "
+                    "falling back to title LIKE — result may pool "
+                    "unrelated diagnoses."
+                ),
+                confidence_floor=max_seen,
+            )
+
+        codes = [c for c, _ in accepted]
+        # Confidence floor: minimum NON-None confidence among accepted.
+        # All-None case → None.
+        confs = [c for _, c in accepted if c is not None]
+        floor = min(confs) if confs else None
+        logger.info(
+            "Grounded diagnosis %r via icd_autocode → %d codes (floor=%s): %s",
+            name, len(codes), floor, codes,
+        )
         return DiagnosisResolution(
-            icd_codes=None,
+            icd_codes=codes,
             names=names,
             fallback_reason=None,
-            confidence_floor=None,
+            confidence_floor=floor,
         )
