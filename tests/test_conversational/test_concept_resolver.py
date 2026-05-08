@@ -666,3 +666,196 @@ class TestGroundViaIcdAutocode:
         grounded_resolver.resolve_diagnosis(a)
         grounded_resolver.resolve_diagnosis(b)
         assert call_count[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Inc 7 — biomarker mimic_itemid_search fallback when LOINC mapping misses
+# ---------------------------------------------------------------------------
+
+
+class TestBiomarkerMimicItemidFallback:
+    """When the local LOINC→itemid index misses (LOINC unknown OR no MIMIC
+    coverage), call OMOPHub-backed ``mimic_itemid_search`` to find a live
+    match against MIMIC's d_labitems / d_items. Restricts results to
+    ``table='labevents'`` for biomarker concepts; chartevents-only results
+    fall through to the existing loud-fallback (don't risk pulling
+    vital-sign itemids into a lab query)."""
+
+    @pytest.fixture
+    def grounded_resolver(self):
+        """Resolver with MCP grounding enabled + cache cleared."""
+        from src.conversational import concept_resolver as cr
+        cr._cached_mimic_itemid_search.cache_clear()
+        return ConceptResolver(
+            mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=True,
+        )
+
+    def test_falls_back_to_mimic_itemid_search_when_loinc_unknown(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """LOINC absent from local index → call mimic_itemid_search;
+        recover labevents itemids for the analyte."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_search(query, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"itemid": 50813, "label": "Lactate", "table": "labevents", "loinc": "32693-4"},
+                    {"itemid": 52442, "label": "Lactate, ABG", "table": "labevents", "loinc": "2518-9"},
+                ],
+            }
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        concept = ClinicalConcept(
+            name="lactate", concept_type="biomarker",
+            loinc_code="99999-9",  # not in local index
+        )
+        result = grounded_resolver.resolve_biomarker(concept)
+        assert result.itemids == [50813, 52442]
+        assert result.fallback_reason is None
+
+    def test_unchanged_when_local_loinc_index_hits(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Local LOINC mapping wins; mimic_itemid_search is NOT called.
+        Existing fast-path stays fast and avoids needless MCP traffic."""
+        from src.conversational import concept_resolver as cr
+
+        call_count = [0]
+        def fake_search(query, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        # 2160-0 (serum creatinine) is in the local index.
+        concept = ClinicalConcept(
+            name="creatinine", concept_type="biomarker", loinc_code="2160-0",
+        )
+        result = grounded_resolver.resolve_biomarker(concept)
+        assert result.itemids and 50912 in result.itemids
+        assert call_count[0] == 0  # MCP never called
+
+    def test_filters_to_labevents_table(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Mixed-table results: only labevents itemids end up in resolution.
+        Chartevents itemids represent vitals/charts — pulling them into a
+        biomarker query would over-include unit-incompatible signals."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_search(query, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"itemid": 50813, "label": "Lactate", "table": "labevents"},
+                    {"itemid": 220045, "label": "Heart rate", "table": "chartevents"},  # drop
+                    {"itemid": 52442, "label": "Lactate ABG", "table": "labevents"},
+                ],
+            }
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        concept = ClinicalConcept(
+            name="lactate", concept_type="biomarker", loinc_code="99999-9",
+        )
+        result = grounded_resolver.resolve_biomarker(concept)
+        assert result.itemids == [50813, 52442]
+        assert 220045 not in (result.itemids or [])
+
+    def test_chartevents_only_returns_loud_fallback(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """If mimic_itemid_search returns ONLY chartevents (no labevents),
+        we don't ground at all — better to surface a visible warning than
+        risk pulling vitals into a lab query. itemids stays None and
+        fallback_reason is set."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_search(query, **kwargs):
+            return {
+                "status": "ok",
+                "results": [
+                    {"itemid": 220045, "label": "Heart rate", "table": "chartevents"},
+                    {"itemid": 220180, "label": "BP", "table": "chartevents"},
+                ],
+            }
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        concept = ClinicalConcept(
+            name="something_oddly_named", concept_type="biomarker",
+            loinc_code="99999-9",
+        )
+        result = grounded_resolver.resolve_biomarker(concept)
+        assert result.itemids is None
+        assert result.fallback_reason is not None
+        assert "label match" in result.fallback_reason.lower()
+
+    def test_caches_repeat_lookups(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """Same (loinc, name) pair cached across repeated resolve_biomarker
+        calls."""
+        from src.conversational import concept_resolver as cr
+
+        call_count = [0]
+        def fake_search(query, **kwargs):
+            call_count[0] += 1
+            return {
+                "status": "ok",
+                "results": [
+                    {"itemid": 50813, "label": "Lactate", "table": "labevents"},
+                ],
+            }
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        concept = ClinicalConcept(
+            name="lactate", concept_type="biomarker", loinc_code="99999-9",
+        )
+        grounded_resolver.resolve_biomarker(concept)
+        grounded_resolver.resolve_biomarker(concept)
+        grounded_resolver.resolve_biomarker(concept)
+        assert call_count[0] == 1
+
+    def test_does_not_run_when_grounding_disabled(
+        self, monkeypatch,
+    ):
+        """enable_mcp_grounding=False (the test default) → no MCP call,
+        even if the LOINC isn't in the local index. Existing loud-fallback
+        path is unchanged."""
+        from src.conversational import concept_resolver as cr
+
+        call_count = [0]
+        def fake_search(query, **kwargs):
+            call_count[0] += 1
+            return {"status": "ok", "results": []}
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        offline_resolver = ConceptResolver(
+            mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=False,
+        )
+        concept = ClinicalConcept(
+            name="lactate", concept_type="biomarker", loinc_code="99999-9",
+        )
+        result = offline_resolver.resolve_biomarker(concept)
+        assert call_count[0] == 0
+        # Existing loud-fallback path still fires.
+        assert result.itemids is None
+        assert result.fallback_reason is not None
+
+    def test_falls_back_to_loud_fallback_when_search_unavailable(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """MCP unavailable → loud-fallback. Existing fallback_reason
+        message preserved (so test snapshots don't churn)."""
+        from src.conversational import concept_resolver as cr
+
+        def fake_search(query, **kwargs):
+            return {"status": "unavailable", "error": "MCP timeout"}
+        monkeypatch.setattr(cr, "mimic_itemid_search", fake_search, raising=False)
+
+        concept = ClinicalConcept(
+            name="lactate", concept_type="biomarker", loinc_code="99999-9",
+        )
+        result = grounded_resolver.resolve_biomarker(concept)
+        assert result.itemids is None
+        assert result.fallback_reason is not None

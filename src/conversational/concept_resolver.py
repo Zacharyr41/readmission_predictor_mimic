@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from src.conversational.health_evidence.tools import icd_autocode
+from src.conversational.health_evidence.tools import (
+    icd_autocode,
+    mimic_itemid_search,
+)
 from src.conversational.models import ClinicalConcept
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,36 @@ _ICD_CONFIDENCE_THRESHOLD = 0.5
 # default top-K is 10; this is a defensive secondary cap so we don't fan
 # out to dozens of long-tail codes if a future tweak raises that default.
 _ICD_MAX_RESULTS = 10
+
+
+@lru_cache(maxsize=256)
+def _cached_mimic_itemid_search(
+    text_lower: str,
+) -> tuple[tuple[int, str, str], ...]:
+    """Process-wide cache of mimic_itemid_search results.
+
+    Cache key is ``text_lower``. Returns a tuple of
+    ``(itemid, label, table)`` triples — table is one of
+    ``"labevents"`` or ``"chartevents"`` (or empty string if missing).
+
+    Same negative-result-bypass as ``_cached_icd_autocode``: raises
+    ``LookupError`` on ``unavailable`` so the cache never stores
+    transient failures.
+    """
+    envelope = mimic_itemid_search(text_lower, max_results=20)
+    if envelope.get("status") != "ok":
+        raise LookupError(envelope.get("error") or "mimic_itemid_search unavailable")
+    results = envelope.get("results") or []
+    out: list[tuple[int, str, str]] = []
+    for r in results:
+        try:
+            itemid = int(r.get("itemid"))
+        except (TypeError, ValueError):
+            continue
+        label = str(r.get("label", ""))
+        table = str(r.get("table", ""))
+        out.append((itemid, label, table))
+    return tuple(out)
 
 
 @lru_cache(maxsize=256)
@@ -434,6 +467,29 @@ class ConceptResolver:
                 fallback_reason=None,
             )
 
+        # Local LOINC index missed. Before falling back to LIKE, try
+        # OMOPHub-backed mimic_itemid_search against MIMIC's d_labitems
+        # to find labevents itemids matching the analyte name. Restricts
+        # to ``table='labevents'`` so we never pull chartevents (vital
+        # signs) into a lab query.
+        if self._enable_mcp_grounding:
+            mcp_itemids = self._ground_via_mimic_itemid_search(concept.name)
+            if mcp_itemids is not None:
+                mapper = self._get_snomed_mapper()
+                sn = mapper.get_snomed_for_loinc(concept.loinc_code)
+                logger.info(
+                    "Resolved biomarker %r via mimic_itemid_search → %d "
+                    "labevents itemids: %s",
+                    concept.name, len(mcp_itemids), mcp_itemids,
+                )
+                return BiomarkerResolution(
+                    itemids=mcp_itemids,
+                    names=names,
+                    loinc_code=concept.loinc_code,
+                    snomed_code=sn.code if sn is not None else None,
+                    fallback_reason=None,
+                )
+
         # No itemids — distinguish "LOINC unknown" (case 2) from "LOINC
         # known but no MIMIC coverage" (case 3) so the warning text is
         # diagnosable.
@@ -462,6 +518,37 @@ class ConceptResolver:
                 "result may pool unit-incompatible variants."
             ),
         )
+
+    def _ground_via_mimic_itemid_search(
+        self, name: str,
+    ) -> list[int] | None:
+        """Query OMOPHub-backed mimic_itemid_search for labevents itemids.
+
+        Returns a sorted list of itemids whose ``table`` is
+        ``'labevents'`` (chartevents results are intentionally dropped —
+        they represent vital-sign / chart entries that don't belong in
+        a biomarker query). Returns ``None`` when:
+          - The MCP returns ``unavailable`` (caught from sentinel raise).
+          - No labevents results in the response (chartevents-only or
+            empty).
+
+        ``None`` signals the caller to fall through to the existing
+        loud-fallback path.
+        """
+        try:
+            cached = _cached_mimic_itemid_search(name.lower())
+        except LookupError as exc:
+            logger.info(
+                "mimic_itemid_search unavailable for %r: %s — falling back",
+                name, exc,
+            )
+            return None
+        labevents_ids = sorted(
+            {itemid for itemid, _label, table in cached if table == "labevents"}
+        )
+        if not labevents_ids:
+            return None
+        return labevents_ids
 
     # -- ICD-grounded diagnosis resolution ---------------------------------
 
