@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.conversational.answerer import generate_answer
+from src.conversational.answerer import _rename_columns, generate_answer
 from src.conversational.clinical_consult import (
     clarify,
     contextualize,
@@ -35,7 +35,9 @@ from src.conversational.models import (
     CompetencyQuestion,
     DecompositionResult,
     ExtractionConfig,
+    OutlierReport,
 )
+from src.conversational.outliers import BiologicalLimits, BiologicalLimitsResolver
 from src.conversational.operations import get_default_registry
 from src.conversational.planner import QueryPlan, QueryPlanner
 from src.conversational.health_evidence.mcp_client import (
@@ -46,7 +48,7 @@ from src.conversational.health_evidence.sub_agent import (
     HealthSourceOfTruthAgent,
 )
 from src.conversational.reasoner import reason
-from src.conversational.sql_fastpath import compile_sql
+from src.conversational.sql_fastpath import OutlierScreen, compile_sql
 from src.conversational.sql_validator_dry_run import (
     validate_sql_deterministic,
 )
@@ -81,6 +83,10 @@ class ConversationalPipeline:
         enable_clarify_enrichment: bool = True,
         enable_contextualization: bool = False,
         enable_sub_agent_in_contextualize: bool = False,
+        enable_outlier_screening: bool = True,
+        outlier_bounds_cache_path: Path | None = None,
+        outlier_max_rows_logged: int = 100,
+        outlier_derivation_enabled: bool = True,
     ) -> None:
         import anthropic as _anthropic
 
@@ -175,6 +181,20 @@ class ConversationalPipeline:
         self._registry = get_default_registry()
         self._planner = QueryPlanner(registry=self._registry)
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
+        # Pre-aggregation biological-impossibility screening. The resolver is
+        # cache-first (offline seed) with an optional EvidenceAgent derivation
+        # fallback that uses ``self._client``; constructed here so it shares
+        # the one Anthropic client.
+        self._enable_outlier_screening = enable_outlier_screening
+        self._outlier_max_rows_logged = outlier_max_rows_logged
+        self._outlier_resolver = BiologicalLimitsResolver(
+            cache_path=(
+                outlier_bounds_cache_path
+                or repo_root / "data" / "ontology_cache" / "biological_limits.json"
+            ),
+            client=self._client,
+            enable_derivation=outlier_derivation_enabled,
+        )
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
         self.max_history: int = 10
 
@@ -734,6 +754,12 @@ class ConversationalPipeline:
                 if cq.clinical_concepts else None
             )
 
+            # Resolve the biological-impossibility screen once per attempt so
+            # the same bound is applied to the previewed/validated SQL and the
+            # executed SQL (a single compile, no recompile for the screen).
+            concept = cq.clinical_concepts[0] if cq.clinical_concepts else None
+            screen, limits = self._resolve_outlier_screen(cq, concept)
+
             # Pre-execution validation (Phase B). Compile the SQL once,
             # ask the validator whether to proceed, then reuse the
             # compiled query for execution to avoid double-compile.
@@ -745,6 +771,7 @@ class ConversationalPipeline:
                 preview_query, preview_itemids, preview_fb = (
                     self._compile_fastpath_preview(
                         cq, backend, resolved_names=resolved_names,
+                        outlier_screen=screen,
                     )
                 )
                 if preview_query is not None:
@@ -791,6 +818,8 @@ class ConversationalPipeline:
                 cq, backend, resolved_names=resolved_names,
                 precompiled_query=preview_query,
                 precompiled_fallback_warning=preview_fb,
+                outlier_screen=screen,
+                outlier_limits=limits,
             )
             sub.interpretation_summary = cq.interpretation_summary
 
@@ -842,6 +871,7 @@ class ConversationalPipeline:
         backend,
         *,
         resolved_names: list[str],
+        outlier_screen: "OutlierScreen | None" = None,
     ):
         """Compile the SQL fast-path query for pre-execution validation.
 
@@ -851,6 +881,10 @@ class ConversationalPipeline:
         raises — in that case the validator is skipped and the orchestrator
         proceeds; the underlying error will surface from ``_run_sql_fastpath``
         when called.
+
+        ``outlier_screen`` is threaded through so the previewed (and then
+        reused) query is the *screened* SQL — keeping a single compile per
+        attempt rather than recompiling for the screen downstream.
         """
         try:
             resolved_itemids: list[int] | None = None
@@ -873,6 +907,7 @@ class ConversationalPipeline:
                 resolved_itemids=resolved_itemids,
                 resolved_icd_codes=resolved_icd_codes,
                 enable_mcp_grounding=True,
+                outlier_screen=outlier_screen,
             )
             return query, resolved_itemids, fallback_warning
         except Exception as exc:  # noqa: BLE001
@@ -890,6 +925,8 @@ class ConversationalPipeline:
         resolved_names: list[str],
         precompiled_query=None,
         precompiled_fallback_warning: str | None = None,
+        outlier_screen: "OutlierScreen | None" = None,
+        outlier_limits: "BiologicalLimits | None" = None,
     ) -> tuple[AnswerResult, list[str], str | None]:
         """Compile and execute a SQL fast-path CQ; wrap in AnswerResult.
 
@@ -916,12 +953,22 @@ class ConversationalPipeline:
         the result through to avoid recompiling. When None (the legacy
         external-caller path), this method does its own compile.
         """
-        if precompiled_query is None:
+        concept = cq.clinical_concepts[0] if cq.clinical_concepts else None
+
+        if precompiled_query is not None:
+            # Reuse the pre-validator's compile verbatim. It already carries
+            # the outlier screen (threaded through _compile_fastpath_preview),
+            # so there is exactly one compile per attempt.
+            query = precompiled_query
+            fallback_warning = precompiled_fallback_warning
+        else:
+            # Fresh compile (no pre-validator preview). Resolve grounding
+            # (itemids / icd codes) + fallback warning, then compile with the
+            # screen applied.
             resolved_itemids: list[int] | None = None
             resolved_icd_codes: list[str] | None = None
-            fallback_warning: str | None = None
-            if cq.clinical_concepts:
-                concept = cq.clinical_concepts[0]
+            fallback_warning = None
+            if concept is not None:
                 if concept.concept_type == "biomarker" and concept.loinc_code:
                     biom = self._resolver.resolve_biomarker(concept)
                     resolved_itemids = biom.itemids
@@ -930,24 +977,39 @@ class ConversationalPipeline:
                     diag = self._resolver.resolve_diagnosis(concept)
                     resolved_icd_codes = diag.icd_codes
                     fallback_warning = diag.fallback_reason
-
             query = compile_sql(
                 cq, backend, self._registry,
                 resolved_names=resolved_names,
                 resolved_itemids=resolved_itemids,
                 resolved_icd_codes=resolved_icd_codes,
                 enable_mcp_grounding=True,
+                outlier_screen=outlier_screen,
             )
-        else:
-            query = precompiled_query
-            fallback_warning = precompiled_fallback_warning
+
         raw_rows = backend.execute(query.sql, query.params)
-        rows = [dict(zip(query.columns, r)) for r in raw_rows]
+        # The screened aggregate emits extra columns (with-outliers + counts);
+        # zip against the full list, then subset to the answerer-facing columns
+        # so ``generate_answer`` sees the same shape as the unscreened path.
+        agg_columns = query.outlier_agg_columns or query.columns
+        rows = [dict(zip(agg_columns, r)) for r in raw_rows]
+        clean_rows = [
+            {c: r[c] for c in query.columns if c in r} for r in rows
+        ]
         answer = generate_answer(
-            self._client, cq, rows,
+            self._client, cq, clean_rows,
             {},  # no graph_stats on the fast-path
             [query.sql],  # surface the SQL alongside any SPARQL
         )
+
+        # Attach the outlier report only when the screen actually removed rows
+        # (n_outliers > 0); otherwise the screened answer equals today's.
+        if outlier_screen is not None and query.outlier_agg_columns is not None:
+            report = self._build_outlier_report(
+                concept, outlier_limits, query, rows, backend,
+            )
+            if report is not None:
+                answer.outlier_report = report
+
         if fallback_warning:
             # Append a user-visible note explaining the answer may pool
             # variants. Phase 9b proper warning surface lives behind
@@ -958,6 +1020,102 @@ class ConversationalPipeline:
                 + f"\n\n⚠️ Note: {fallback_warning}"
             ).strip()
         return answer, [query.sql], fallback_warning
+
+    def _resolve_outlier_screen(
+        self, cq: CompetencyQuestion, concept,
+    ) -> tuple["OutlierScreen | None", "BiologicalLimits | None"]:
+        """Resolve a biological-impossibility screen for a numeric aggregate.
+
+        Returns ``(screen, limits)`` or ``(None, None)`` when screening is
+        disabled, the concept is not a numeric biomarker/vital aggregate, or
+        no bound could be resolved (in which case the query runs unscreened,
+        exactly as before).
+        """
+        if not self._enable_outlier_screening:
+            return None, None
+        if concept is None or concept.concept_type not in {"biomarker", "vital"}:
+            return None, None
+        if cq.aggregation is None:
+            return None, None
+        limits = self._outlier_resolver.resolve(concept)
+        if limits is None:
+            return None, None
+        screen = OutlierScreen(
+            low=limits.low,
+            high=limits.high,
+            max_rows_logged=self._outlier_max_rows_logged,
+            units=limits.units,
+        )
+        return screen, limits
+
+    def _build_outlier_report(
+        self, concept, limits, query, rows, backend,
+    ) -> "OutlierReport | None":
+        """Assemble the OutlierReport from the screened aggregate rows.
+
+        Returns ``None`` when nothing was removed (``n_outliers == 0`` across
+        all rows) so the common case carries no report. Precomputes the
+        with-outliers value/table so the UI toggle needs no backend round-trip.
+        """
+        n_removed = sum(int(r.get("n_outliers") or 0) for r in rows)
+        if n_removed <= 0:
+            return None
+
+        def _row_total(r: dict) -> int:
+            if r.get("n_total") is not None:
+                return int(r["n_total"])
+            # Grouped shape: screened count + removed = rows considered.
+            return int(r.get("count") or 0) + int(r.get("n_outliers") or 0)
+
+        n_total = sum(_row_total(r) for r in rows)
+
+        removed_rows: list[dict] = []
+        if query.outlier_rows_sql:
+            raw = backend.execute(query.outlier_rows_sql, query.outlier_rows_params)
+            removed_rows = [
+                dict(zip(query.outlier_rows_columns, r)) for r in raw
+            ]
+
+        # Precompute the unscreened (with-outliers) view by swapping each
+        # answerer-facing column for its ``*_with_outliers`` companion (and,
+        # for grouped counts, adding back the removed rows).
+        data_table_with_outliers: list[dict] = []
+        for r in rows:
+            swapped: dict = {}
+            for col in query.columns:
+                with_col = f"{col}_with_outliers"
+                if with_col in r:
+                    swapped[col] = r[with_col]
+                elif col == "count" and r.get("n_outliers") is not None:
+                    swapped[col] = int(r.get("count") or 0) + int(r["n_outliers"])
+                else:
+                    swapped[col] = r.get(col)
+            data_table_with_outliers.append(swapped)
+
+        value_with_outliers: float | None = None
+        if len(query.columns) == 1 and len(data_table_with_outliers) == 1:
+            raw_val = data_table_with_outliers[0].get(query.columns[0])
+            if isinstance(raw_val, (int, float)):
+                value_with_outliers = float(raw_val)
+
+        # Apply the same display renaming the answerer uses for the clean
+        # table, so the UI toggle swaps between two tables with identical
+        # headers (e.g. "Mean Value"), not raw column keys.
+        data_table_with_outliers, _cols = _rename_columns(data_table_with_outliers)
+
+        return OutlierReport(
+            analyte=concept.name if concept is not None else "",
+            bound_low=query.outlier_low if query.outlier_low is not None else limits.low,
+            bound_high=query.outlier_high if query.outlier_high is not None else limits.high,
+            units=limits.units if limits is not None else None,
+            source=limits.source if limits is not None else None,
+            method="biological_limits",
+            n_removed=n_removed,
+            n_total=n_total,
+            removed_rows=removed_rows,
+            value_with_outliers=value_with_outliers,
+            data_table_with_outliers=data_table_with_outliers,
+        )
 
     def _run_causal(self, cq: CompetencyQuestion) -> AnswerResult:
         """Phase 8a: wrap a ``CausalEffectResult`` into an ``AnswerResult``.

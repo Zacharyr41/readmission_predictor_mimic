@@ -192,7 +192,49 @@ def _render_plotly(spec: dict, data: list[dict]) -> None:
         st.warning("Could not render chart.")
 
 
-def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
+def _render_outlier_panel(report, *, key: str, include: bool) -> None:
+    """Render the removed-outliers expander + the live include/exclude toggle.
+
+    ``report`` is an ``OutlierReport``. The clean answer is the default; the
+    checkbox flips to the precomputed *with-outliers* value/table — an instant
+    re-render (no backend round-trip, no second LLM call). ``key`` is a stable
+    per-message widget key so multiple answers in the chat history don't clash.
+    """
+    plural = "s" if report.n_removed != 1 else ""
+    with st.expander(
+        f"🔍 Removed {report.n_removed} impossible outlier{plural}",
+        expanded=False,
+    ):
+        units = f" {report.units}" if report.units else ""
+        st.caption(
+            f"Screened out values outside the biological-possibility envelope "
+            f"[{report.bound_low:g}, {report.bound_high:g}]{units} for "
+            f"**{report.analyte}** "
+            f"(source: {report.source or 'unknown'}). These are physiologically "
+            f"impossible / data-entry errors, not high-but-real values."
+        )
+        if report.removed_rows:
+            st.dataframe(pd.DataFrame(report.removed_rows))
+
+    st.checkbox("Include outliers in the result", key=key)
+    if include:
+        if report.value_with_outliers is not None:
+            units = f" {report.units}" if report.units else ""
+            st.info(
+                f"Including {report.n_removed} outlier{plural}, the value is "
+                f"**{report.value_with_outliers:g}{units}** "
+                f"(vs. the screened answer above)."
+            )
+        else:
+            st.info(
+                f"Including {report.n_removed} outlier{plural} "
+                "(table reflects the unscreened values)."
+            )
+
+
+def _render_answer(
+    answer: AnswerResult, *, is_sub: bool = False, key_prefix: str = "msg",
+) -> None:
     """Display an AnswerResult inside the current chat message context.
 
     Phase 4 rendering:
@@ -284,11 +326,32 @@ def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
                     url = src.get("url") or "#"
                     st.markdown(f"- [{title}]({url})")
 
-    if answer.data_table:
-        st.dataframe(pd.DataFrame(answer.data_table))
+    # Biological-impossibility screening: when outliers were removed, the
+    # default view is the *clean* table; a live checkbox flips to the
+    # precomputed with-outliers table. Read the checkbox state before the
+    # table renders so the swap happens in the same re-run.
+    report = answer.outlier_report
+    has_outliers = bool(report and report.n_removed > 0)
+    outlier_key = f"{key_prefix}_include_outliers"
+    include_outliers = bool(
+        has_outliers and st.session_state.get(outlier_key, False)
+    )
 
+    display_table = answer.data_table
+    if include_outliers and report.data_table_with_outliers:
+        display_table = report.data_table_with_outliers
+    if display_table:
+        st.dataframe(pd.DataFrame(display_table))
+
+    # Visualize the clean data only — a plot dominated by a 1e6 data-entry
+    # error is uninformative regardless of the toggle.
     if answer.visualization_spec and answer.data_table:
         _render_plotly(answer.visualization_spec, answer.data_table)
+
+    if has_outliers:
+        _render_outlier_panel(
+            report, key=outlier_key, include=include_outliers,
+        )
 
     # Multi-CQ: render each sub-answer below the narrative in its own expander.
     # The top-level wraps sub-answers, not sub-answers wrap more sub-answers,
@@ -301,7 +364,9 @@ def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
             # (it's echoed on AnswerResult.interpretation_summary for context).
             header = f"Part {i}"
             with st.expander(header, expanded=(i == 1)):
-                _render_answer(sub, is_sub=True)
+                _render_answer(
+                    sub, is_sub=True, key_prefix=f"{key_prefix}_sub{i}",
+                )
 
     # Query-details expander only at the top level; aggregated across sub-CQs.
     if not is_sub and (answer.graph_stats or answer.sparql_queries_used):
@@ -316,13 +381,13 @@ def _render_answer(answer: AnswerResult, *, is_sub: bool = False) -> None:
 # Chat history
 # ---------------------------------------------------------------------------
 
-for msg in st.session_state.messages:
+for _msg_idx, msg in enumerate(st.session_state.messages):
     if msg["role"] == "user":
         with st.chat_message("user"):
             st.markdown(msg["content"])
     else:
         with st.chat_message("assistant"):
-            _render_answer(msg["content"])
+            _render_answer(msg["content"], key_prefix=f"msg{_msg_idx}")
 
 # ---------------------------------------------------------------------------
 # Chat input
@@ -339,6 +404,11 @@ if question := st.chat_input("Ask a clinical question..."):
         with st.chat_message("assistant"):
             with st.spinner("Analyzing..."):
                 answer = st.session_state.pipeline.ask(question)
-            _render_answer(answer)
+            # Key by the index this message will occupy once appended, so the
+            # history loop reuses the same widget keys on the next re-run and
+            # the outlier toggle's state survives.
+            _render_answer(
+                answer, key_prefix=f"msg{len(st.session_state.messages)}",
+            )
 
         st.session_state.messages.append({"role": "assistant", "content": answer})

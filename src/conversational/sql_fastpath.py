@@ -34,6 +34,34 @@ from src.conversational.operations import (
 
 
 @dataclass
+class OutlierScreen:
+    """Absolute biological-possibility envelope for a numeric analyte.
+
+    Values outside ``[low, high]`` are treated as data-entry errors /
+    physically-impossible measurements and removed *before* aggregation, in
+    SQL, so the screen scales to millions of rows. The bounds come from
+    ``outliers.BiologicalLimitsResolver`` (LOINC + literature grounded), never
+    from the cohort distribution — high-but-possible values (e.g. a sepsis
+    lactate of 12 mmol/L) are kept; only impossible values are removed.
+
+    ``max_rows_logged`` caps the companion outlier-rows query so a pathological
+    column cannot drag millions of rows back for the UI report.
+
+    ``units`` is the unit the bound is expressed in (e.g. ``"mmol/L"``). When
+    set, a per-row units guard is emitted (biomarker/labevents only): the bound
+    screens a row *unless* that row records a different unit, so a value that is
+    legitimate in its own unit is never removed against a wrong-unit envelope.
+    itemid-grounding keeps units homogeneous in practice, so this is a
+    safety net; ``None`` disables the guard (the bound applies to every row).
+    """
+
+    low: float
+    high: float
+    max_rows_logged: int = 100
+    units: str | None = None
+
+
+@dataclass
 class SqlFastpathQuery:
     """A compiled SQL statement ready for ``backend.execute``.
 
@@ -45,6 +73,18 @@ class SqlFastpathQuery:
     sql: str
     params: list[Any]
     columns: list[str]
+    # Outlier-screening companion fields. All None unless an OutlierScreen was
+    # applied (biomarker/vital aggregates only). ``columns`` stays the
+    # answerer-facing prefix (e.g. ["mean_value"]); ``outlier_agg_columns`` is
+    # the full ordered SELECT list the orchestrator zips rows against — it adds
+    # the with-outliers value plus n_outliers/n_total so the report and the
+    # "include outliers" toggle are precomputed in the same single pass.
+    outlier_agg_columns: list[str] | None = None
+    outlier_rows_sql: str | None = None
+    outlier_rows_params: list[Any] | None = None
+    outlier_rows_columns: list[str] | None = None
+    outlier_low: float | None = None
+    outlier_high: float | None = None
 
 
 # Aggregate → SELECT column name. Matches the SPARQL template's
@@ -67,6 +107,7 @@ def compile_sql(
     resolved_itemids: list[int] | None = None,
     resolved_icd_codes: list[str] | None = None,
     enable_mcp_grounding: bool = False,
+    outlier_screen: "OutlierScreen | None" = None,
 ) -> SqlFastpathQuery:
     """Dispatch to the right compile branch based on CQ shape.
 
@@ -155,6 +196,7 @@ def compile_sql(
             cq, concept, names, sql_fn, backend, registry,
             itemids=resolved_itemids if concept.concept_type == "biomarker" else None,
             enable_mcp_grounding=enable_mcp_grounding,
+            outlier_screen=outlier_screen,
         )
     if concept.concept_type == "drug":
         return _compile_drug_aggregate(
@@ -286,6 +328,7 @@ def _compile_event_aggregate(
     *,
     itemids: list[int] | None = None,
     enable_mcp_grounding: bool = False,
+    outlier_screen: "OutlierScreen | None" = None,
 ) -> SqlFastpathQuery:
     """AVG/MAX/MIN/COUNT over biomarker (labevents) or vital (chartevents).
 
@@ -293,6 +336,13 @@ def _compile_event_aggregate(
     orchestrator from ``ConceptResolver.resolve_biomarker``), the WHERE
     clause filters on ``itemid IN (...)`` instead of the label-substring
     LIKE — avoids pooling unit-incompatible variants of the same lab.
+
+    When ``outlier_screen`` is supplied, the aggregate is emitted twice in one
+    pass — a clean value that excludes rows outside the biological-possibility
+    envelope and a with-outliers value that keeps them — plus per-query
+    n_outliers/n_total counts and a companion query returning the removed rows.
+    The same ``CASE WHEN`` template screens COUNT too, so the reported ``n``
+    stays consistent with the screened mean.
     """
     t = backend.table
     if concept.concept_type == "biomarker":
@@ -330,21 +380,6 @@ def _compile_event_aggregate(
         )
     joins.extend(filter_joins)
 
-    # SELECT and GROUP BY shape.
-    if group_by_col is None:
-        select_cols = f"{sql_fn}({event_alias}.valuenum) AS {_AGG_COLUMN_NAME[sql_fn]}"
-        columns = [_AGG_COLUMN_NAME[sql_fn]]
-        group_by_clause = ""
-    else:
-        # Comparison: always AVG + COUNT, matching comparison_by_field SPARQL.
-        select_cols = (
-            f"{group_by_col} AS group_value, "
-            f"AVG({event_alias}.valuenum) AS avg_value, "
-            f"COUNT({event_alias}.valuenum) AS count"
-        )
-        columns = ["group_value", "avg_value", "count"]
-        group_by_clause = f"GROUP BY {group_by_col}"
-
     # WHERE: concept match + non-null value + cohort filters.
     # When the resolver supplied itemids (LOINC-grounded biomarker), filter
     # on those directly; otherwise fall back to the label-substring LIKE.
@@ -356,18 +391,156 @@ def _compile_event_aggregate(
         name_clause,
         f"{event_alias}.valuenum IS NOT NULL",
     ]
-    params: list[Any] = list(name_params)
+    where_params: list[Any] = list(name_params)
     where_clauses.extend(filter_where)
-    params.extend(filter_params)
+    where_params.extend(filter_params)
+    where_sql = " AND ".join(where_clauses)
+    from_sql = f"FROM {event_table} {join_dict} {' '.join(joins)}"
+
+    val = f"{event_alias}.valuenum"
+
+    # Screen predicates, built once so the clean aggregate, the n_outliers
+    # count, and the companion rows query stay in lockstep. ``clean_cond`` is
+    # the keep-this-value condition; ``outlier_cond`` is its negation (the
+    # row is a removable outlier). Both carry the same params in the same
+    # order (``[lo, hi]`` plus, when the units guard is active, the bound
+    # unit), so callers can reuse ``screen_cond_params`` per occurrence.
+    #
+    # Units guard (biomarker/labevents only — chartevents has no per-row unit
+    # here): the impossibility bound is expressed in one unit, so apply it to a
+    # row UNLESS that row records a *different* unit. A genuinely mixed-unit
+    # value (e.g. a mg/dL reading among mmol/L rows) is then never screened
+    # against the wrong-unit envelope. NULL or matching units → bound applies,
+    # so data-entry errors (which often drop the unit) are still caught.
+    clean_cond = ""
+    outlier_cond = ""
+    screen_cond_params: list[Any] = []
+    if outlier_screen is not None:
+        lo, hi = outlier_screen.low, outlier_screen.high
+        if outlier_screen.units and concept.concept_type == "biomarker":
+            applies = (
+                f"({event_alias}.valueuom IS NULL "
+                f"OR LOWER(TRIM({event_alias}.valueuom)) = LOWER(TRIM(?)))"
+            )
+            clean_cond = f"(({val} BETWEEN ? AND ?) OR NOT {applies})"
+            outlier_cond = f"(NOT ({val} BETWEEN ? AND ?) AND {applies})"
+            screen_cond_params = [lo, hi, outlier_screen.units]
+        else:
+            clean_cond = f"{val} BETWEEN ? AND ?"
+            outlier_cond = f"NOT ({val} BETWEEN ? AND ?)"
+            screen_cond_params = [lo, hi]
+
+    # SELECT and GROUP BY shape. With an OutlierScreen, every value-bearing
+    # aggregate is emitted twice in one pass — clean (CASE WHEN kept) and
+    # with-outliers — plus n_outliers/n_total, using portable CASE WHEN
+    # (FILTER(WHERE ...) is not BigQuery-safe). The SELECT-clause screen params
+    # precede the WHERE params positionally.
+    select_params: list[Any] = []
+    outlier_agg_columns: list[str] | None = None
+    if group_by_col is None:
+        if outlier_screen is None:
+            select_cols = f"{sql_fn}({val}) AS {_AGG_COLUMN_NAME[sql_fn]}"
+            columns = [_AGG_COLUMN_NAME[sql_fn]]
+        else:
+            clean_col = _AGG_COLUMN_NAME[sql_fn]
+            with_col = f"{clean_col}_with_outliers"
+            select_cols = (
+                f"{sql_fn}(CASE WHEN {clean_cond} THEN {val} END) AS {clean_col}, "
+                f"{sql_fn}({val}) AS {with_col}, "
+                f"SUM(CASE WHEN {outlier_cond} THEN 1 ELSE 0 END) AS n_outliers, "
+                f"COUNT({val}) AS n_total"
+            )
+            columns = [clean_col]
+            outlier_agg_columns = [clean_col, with_col, "n_outliers", "n_total"]
+            select_params = list(screen_cond_params) + list(screen_cond_params)
+        group_by_clause = ""
+    else:
+        # Comparison: always AVG + COUNT, matching comparison_by_field SPARQL.
+        if outlier_screen is None:
+            select_cols = (
+                f"{group_by_col} AS group_value, "
+                f"AVG({val}) AS avg_value, "
+                f"COUNT({val}) AS count"
+            )
+            columns = ["group_value", "avg_value", "count"]
+        else:
+            select_cols = (
+                f"{group_by_col} AS group_value, "
+                f"AVG(CASE WHEN {clean_cond} THEN {val} END) AS avg_value, "
+                f"AVG({val}) AS avg_value_with_outliers, "
+                f"COUNT(CASE WHEN {clean_cond} THEN {val} END) AS count, "
+                f"SUM(CASE WHEN {outlier_cond} THEN 1 ELSE 0 END) AS n_outliers"
+            )
+            columns = ["group_value", "avg_value", "count"]
+            outlier_agg_columns = [
+                "group_value", "avg_value", "avg_value_with_outliers",
+                "count", "n_outliers",
+            ]
+            select_params = list(screen_cond_params) * 3
+        group_by_clause = f"GROUP BY {group_by_col}"
+
+    params: list[Any] = select_params + where_params
 
     sql = (
         f"SELECT {select_cols} "
-        f"FROM {event_table} {join_dict} {' '.join(joins)} "
-        f"WHERE {' AND '.join(where_clauses)} "
+        f"{from_sql} "
+        f"WHERE {where_sql} "
         f"{group_by_clause}"
     ).strip()
 
-    return SqlFastpathQuery(sql=sql, params=params, columns=columns)
+    # Companion outlier-rows query: same FROM/JOIN/WHERE plus the same
+    # ``outlier_cond`` the aggregate uses (envelope + optional units guard),
+    # capped by LIMIT, so the orchestrator logs/shows exactly the rows the
+    # screen removed — and only those (a mismatched-unit row the guard keeps
+    # never appears here either). labevents carries valueuom; chartevents does
+    # not, so emit NULL there for the displayed provenance column.
+    outlier_rows_sql: str | None = None
+    outlier_rows_params: list[Any] | None = None
+    outlier_rows_columns: list[str] | None = None
+    outlier_low: float | None = None
+    outlier_high: float | None = None
+    if outlier_screen is not None:
+        outlier_low, outlier_high = outlier_screen.low, outlier_screen.high
+        uom_expr = (
+            f"{event_alias}.valueuom"
+            if concept.concept_type == "biomarker"
+            else "NULL"
+        )
+        rows_select = (
+            f"{val} AS valuenum, "
+            f"{event_alias}.subject_id AS subject_id, "
+            f"{event_alias}.hadm_id AS hadm_id, "
+            f"{event_alias}.charttime AS charttime, "
+            f"d.label AS label, "
+            f"{uom_expr} AS valueuom"
+        )
+        outlier_rows_columns = [
+            "valuenum", "subject_id", "hadm_id", "charttime", "label", "valueuom",
+        ]
+        outlier_rows_sql = (
+            f"SELECT {rows_select} "
+            f"{from_sql} "
+            f"WHERE {where_sql} AND {outlier_cond} "
+            f"ORDER BY {val} DESC "
+            f"LIMIT ?"
+        ).strip()
+        outlier_rows_params = (
+            list(where_params)
+            + list(screen_cond_params)
+            + [outlier_screen.max_rows_logged]
+        )
+
+    return SqlFastpathQuery(
+        sql=sql,
+        params=params,
+        columns=columns,
+        outlier_agg_columns=outlier_agg_columns,
+        outlier_rows_sql=outlier_rows_sql,
+        outlier_rows_params=outlier_rows_params,
+        outlier_rows_columns=outlier_rows_columns,
+        outlier_low=outlier_low,
+        outlier_high=outlier_high,
+    )
 
 
 # ---------------------------------------------------------------------------

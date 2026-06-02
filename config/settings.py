@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     diagnoses_limit: int = Field(default=0)  # 0 = no limit
     skip_allen_relations: bool = Field(default=False)  # Skip Allen relation computation
 
+    # Pre-aggregation outlier screening (biological-impossibility removal in
+    # the SQL fast-path). When enabled, numeric aggregates resolve a
+    # biological-possibility envelope per analyte and screen out impossible
+    # values (data-entry errors) before AVG/MAX/MIN/COUNT.
+    outlier_screening_enabled: bool = Field(default=True)
+    outlier_bounds_cache_path: Path = Field(
+        default=Path("data/ontology_cache/biological_limits.json")
+    )
+    outlier_max_rows_logged: int = Field(default=100)
+    # Allow disabling the LLM-grounded derivation fallback for fully-offline
+    # runs; seed-cache hits still screen, cache misses simply skip.
+    outlier_derivation_enabled: bool = Field(default=True)
+
     # WLST pipeline configuration
     wlst_mode: bool = Field(default=False)
     wlst_icd_prefixes: list[str] = Field(default=["S06"])

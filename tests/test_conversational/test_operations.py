@@ -83,6 +83,13 @@ class TestDiagnosisFilterGrounding:
     def test_emits_icd_in_when_grounded(
         self, grounded_ctx, monkeypatch,
     ):
+        """OMOPHub autocode-fallback path. ``carcinoid syndrome`` is
+        deliberately NOT in ``data/mappings/clinical_cohorts.json`` so
+        Inc 10's registry-first lookup misses and the filter compiler
+        falls through to ``icd_autocode``. (For phrases that DO match a
+        registered cohort, see
+        ``test_filter_uses_cohort_registry_when_value_matches_a_named_cohort``
+        in tests/dashboard/.)"""
         from src.conversational import concept_resolver as cr
         from src.conversational.operations_filters import _compile_diagnosis
 
@@ -90,24 +97,30 @@ class TestDiagnosisFilterGrounding:
             return {
                 "status": "ok",
                 "results": [
-                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
-                    {"code": "R65.21", "title": "Severe sepsis", "confidence": 0.81},
+                    {"code": "E34.0", "title": "Carcinoid syndrome", "confidence": 0.92},
+                    {"code": "C7A.0", "title": "Carcinoid tumour", "confidence": 0.81},
                 ],
             }
         monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
 
-        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        f = PatientFilter(
+            field="diagnosis", operator="contains", value="carcinoid syndrome",
+        )
         frag = _compile_diagnosis(f, grounded_ctx)
         sql = " ".join(frag.where)
         assert "di.icd_code IN (" in sql
-        assert "A41.9" in frag.params
-        assert "R65.21" in frag.params
+        assert "E34.0" in frag.params
+        assert "C7A.0" in frag.params
 
     def test_combines_in_with_like_as_or(
         self, grounded_ctx, monkeypatch,
     ):
         """Final shape: ``((di.icd_code IN (...)) OR (<existing LIKE>))``.
-        ICD-9 admissions stay matchable via the LIKE branch."""
+        ICD-9 admissions stay matchable via the LIKE branch.
+
+        Uses 'carcinoid syndrome' so the autocode-fallback path fires
+        (Inc 10 registry-first means 'sepsis' would have routed to
+        LIKE-prefix clauses instead, defeating the test's purpose)."""
         from src.conversational import concept_resolver as cr
         from src.conversational.operations_filters import _compile_diagnosis
 
@@ -115,19 +128,21 @@ class TestDiagnosisFilterGrounding:
             return {
                 "status": "ok",
                 "results": [
-                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                    {"code": "E34.0", "title": "Carcinoid syndrome", "confidence": 0.92},
                 ],
             }
         monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
 
-        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        f = PatientFilter(
+            field="diagnosis", operator="contains", value="carcinoid syndrome",
+        )
         frag = _compile_diagnosis(f, grounded_ctx)
         sql = " ".join(frag.where)
         assert "di.icd_code IN (" in sql
         # Existing LIKE clauses preserved.
         sql_upper = sql.upper()
         assert "ILIKE" in sql_upper or "LOWER" in sql_upper
-        assert "%sepsis%" in frag.params
+        assert "%carcinoid syndrome%" in frag.params
 
     def test_falls_back_to_like_when_unavailable(
         self, grounded_ctx, monkeypatch,
@@ -193,8 +208,12 @@ class TestDiagnosisFilterGrounding:
         self, grounded_ctx, monkeypatch,
     ):
         """Filter compiler hits the same lru_cache as concept_resolver —
-        a "sepsis" filter and a "sepsis" diagnosis-type concept share
-        one MCP round-trip per process."""
+        a 'carcinoid syndrome' filter on the autocode-fallback path
+        shares one MCP round-trip per process across repeated calls.
+
+        Uses 'carcinoid syndrome' (not in the cohort registry) so the
+        autocode lookup actually fires; for registered cohorts the
+        registry path short-circuits the cache."""
         from src.conversational import concept_resolver as cr
         from src.conversational.operations_filters import _compile_diagnosis
 
@@ -204,12 +223,14 @@ class TestDiagnosisFilterGrounding:
             return {
                 "status": "ok",
                 "results": [
-                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.9},
+                    {"code": "E34.0", "title": "Carcinoid syndrome", "confidence": 0.9},
                 ],
             }
         monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
 
-        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        f = PatientFilter(
+            field="diagnosis", operator="contains", value="carcinoid syndrome",
+        )
         _compile_diagnosis(f, grounded_ctx)
         _compile_diagnosis(f, grounded_ctx)
         _compile_diagnosis(f, grounded_ctx)

@@ -473,7 +473,12 @@ class TestCompileSqlMcpFlagPlumbing:
         self, backend, monkeypatch,
     ):
         """compile_sql(enable_mcp_grounding=True) → diagnosis filter
-        compiles with grounded IN-list."""
+        compiles with a grounded IN-list (autocode fallback path).
+
+        Uses 'carcinoid syndrome' so Inc 10's registry-first lookup
+        misses and the icd_autocode mock actually fires; for registered
+        cohort names the registry path emits prefix LIKE clauses
+        instead of an IN-list."""
         from src.conversational import concept_resolver as cr
         from src.conversational.models import PatientFilter
         from src.conversational.operations import get_default_registry
@@ -485,14 +490,14 @@ class TestCompileSqlMcpFlagPlumbing:
             return {
                 "status": "ok",
                 "results": [
-                    {"code": "A41.9", "title": "Sepsis", "confidence": 0.92},
+                    {"code": "E34.0", "title": "Carcinoid syndrome", "confidence": 0.92},
                 ],
             }
         monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
 
         cq = _cq(
             concepts=[("creatinine", "biomarker")],
-            filters=[("diagnosis", "contains", "sepsis")],
+            filters=[("diagnosis", "contains", "carcinoid syndrome")],
             aggregation="mean",
         )
         query = compile_sql(
@@ -501,7 +506,7 @@ class TestCompileSqlMcpFlagPlumbing:
             enable_mcp_grounding=True,
         )
         assert "di.icd_code IN (" in query.sql
-        assert "A41.9" in query.params
+        assert "E34.0" in query.params
 
     def test_mcp_flag_does_not_affect_biomarker_path_without_diagnosis_filter(
         self, backend, monkeypatch,

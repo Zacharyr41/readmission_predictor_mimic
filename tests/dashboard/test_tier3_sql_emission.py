@@ -80,54 +80,62 @@ def test_diagnosis_count_path_emits_in_list_parallel_or(backend, reporter):
     assert a41_in_params
 
 
-def test_filter_side_emits_in_list_for_lactate_in_sepsis(
+def test_filter_side_emits_in_list_for_unregistered_phrase(
     backend, monkeypatch, reporter,
 ):
-    """Inc 9 smoking-gun regression. The original failing query
-    decomposes to a biomarker-aggregate CQ with diagnosis as a
-    patient_filter. With ``enable_mcp_grounding=True``, the diagnosis
-    filter compiler must call icd_autocode and emit a parallel-OR
-    IN-list — the same pattern as Inc 4 but on the filter side."""
+    """Inc 9 OMOPHub autocode-fallback path. Inc 10 made the registry
+    win for known cohort names, but for arbitrary phrases that don't
+    resolve via ``resolve_cohort_name`` the filter should still fall
+    back to OMOPHub's ``icd_autocode`` and emit a parallel-OR IN-list.
+
+    This test uses 'carcinoid syndrome' (deliberately not in
+    ``data/mappings/clinical_cohorts.json``) so the autocode path
+    fires."""
     monkeypatch.setattr(
         cr, "icd_autocode",
-        lambda *a, **kw: MOCK_OMOPHUB_SEPSIS_RESPONSE,
+        lambda *a, **kw: {
+            "status": "ok",
+            "results": [
+                {"code": "E34.0", "title": "Carcinoid syndrome", "confidence": 0.93},
+            ],
+        },
         raising=False,
     )
 
     cq = CompetencyQuestion(
-        original_question="What is the mean lactate in our sepsis cohort?",
+        original_question="What is the mean serotonin in our carcinoid cohort?",
         clinical_concepts=[
-            ClinicalConcept(name="lactate", concept_type="biomarker"),
+            ClinicalConcept(name="serotonin", concept_type="biomarker"),
         ],
         patient_filters=[
-            PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+            PatientFilter(
+                field="diagnosis", operator="contains",
+                value="carcinoid syndrome",
+            ),
         ],
         aggregation="mean", scope="cohort",
     )
     query = compile_sql(
         cq, backend, get_default_registry(),
-        resolved_names=["lactate"],
+        resolved_names=["serotonin"],
         enable_mcp_grounding=True,
     )
-    _record_sql(reporter, query, "Mean lactate in sepsis cohort (Inc 9 smoking-gun)")
+    _record_sql(reporter, query, "Mean serotonin in carcinoid cohort (Inc 9 autocode fallback)")
 
     in_present = "di.icd_code IN (" in query.sql
     reporter.add_assertion(
-        "Filter side emits 'di.icd_code IN (' (Inc 9 wiring)",
+        "Filter emits 'di.icd_code IN (' for non-registry phrase (autocode fallback)",
         in_present,
     )
     assert in_present
 
-    has_sepsis_code = any(
-        isinstance(p, str) and p.startswith(SEPSIS_FAMILY_PREFIXES)
-        for p in query.params
-    )
+    has_grounded_code = "E34.0" in query.params
     reporter.add_assertion(
-        "Params contain sepsis-family ICD code (A41/R65/A40/A42)",
-        has_sepsis_code,
+        "Params contain the autocode-returned ICD code (E34.0)",
+        has_grounded_code,
         detail=f"params: {query.params!r}",
     )
-    assert has_sepsis_code
+    assert has_grounded_code
 
 
 def test_filter_falls_back_to_like_only_when_omophub_unavailable(
@@ -227,6 +235,101 @@ def test_biomarker_local_loinc_grounding_unchanged(
         detail=f"call_count={call_count[0]}",
     )
     assert no_mcp_call
+
+
+def test_filter_uses_cohort_registry_when_value_matches_a_named_cohort(
+    backend, monkeypatch, reporter,
+):
+    """Inc 10 — registry-first cohort grounding.
+
+    Previously (Inc 9), a "sepsis" patient_filter routed through
+    ``icd_autocode``, which returns confidence-ranked specific codes
+    (e.g. A41.9, R65.21, A40.9). That set skews toward severe sepsis
+    with shock — exactly the patients with the highest lactate values
+    (clinical criterion, not a bug) — so the resulting SQL gives a
+    cohort mean ~3× higher than the broader sepsis cohort the catalog
+    uses for its reference distribution.
+
+    The fix: when the filter value resolves to a registered cohort name
+    via ``resolve_cohort_name``, use the registry's ICD prefixes
+    (``A41.``, ``R65.20``, ``R65.21``, ICD-9 ``995.91``/``995.92``) as
+    LIKE patterns instead of autocode's narrow IN-list. The registry's
+    definition is what ``mimic_distribution_lookup`` already uses, so
+    after Inc 10 the live SQL and the catalog reference query the SAME
+    cohort.
+
+    OMOPHub remains the fallback for arbitrary phrases that don't
+    match any registered cohort (rare conditions, etc.).
+    """
+    # Stub icd_autocode so we can prove it ISN'T called when the
+    # registry resolves the cohort name.
+    autocode_calls = [0]
+    def fake_autocode(*a, **kw):
+        autocode_calls[0] += 1
+        return MOCK_OMOPHUB_SEPSIS_RESPONSE
+    monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
+
+    cq = CompetencyQuestion(
+        original_question="Mean lactate in sepsis cohort",
+        clinical_concepts=[
+            ClinicalConcept(name="lactate", concept_type="biomarker"),
+        ],
+        patient_filters=[
+            # "sepsis" matches the registered cohort name in
+            # data/mappings/clinical_cohorts.json.
+            PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+        ],
+        aggregation="mean", scope="cohort",
+    )
+    query = compile_sql(
+        cq, backend, get_default_registry(),
+        resolved_names=["lactate"],
+        enable_mcp_grounding=True,
+    )
+    _record_sql(reporter, query, "Mean lactate in sepsis cohort (Inc 10 registry-first)")
+
+    # The registry's sepsis prefixes (dot-stripped, % suffixed for LIKE):
+    #   ICD-10: A41%, R6520%, R6521%
+    #   ICD-9:  99591%, 99592%
+    expected_like_prefixes = {"A41%", "R6520%", "R6521%", "99591%", "99592%"}
+    actual_prefixes = {p for p in query.params if isinstance(p, str) and "%" in p}
+    matches = expected_like_prefixes & actual_prefixes
+    has_registry_prefixes = len(matches) >= 3  # at least the ICD-10 set
+    reporter.add_assertion(
+        f"Params contain registry sepsis LIKE prefixes (got {sorted(matches)!r}; "
+        f"need ≥3 of {sorted(expected_like_prefixes)!r})",
+        has_registry_prefixes,
+        detail=f"all params: {query.params!r}",
+    )
+    assert has_registry_prefixes, (
+        f"expected registry-defined sepsis prefixes; got params={query.params!r}"
+    )
+
+    # ICD prefix LIKE clauses should appear in the SQL (any of the
+    # canonical patterns).
+    has_prefix_like = (
+        "icd_code LIKE ?" in query.sql
+        or "di.icd_code LIKE ?" in query.sql
+    )
+    reporter.add_assertion(
+        "SQL contains 'icd_code LIKE ?' for prefix matching",
+        has_prefix_like,
+        detail=f"sql: {query.sql[:300]!r}",
+    )
+    assert has_prefix_like
+
+    # icd_autocode should NOT have been called — registry hit short-
+    # circuited the MCP path.
+    autocode_skipped = autocode_calls[0] == 0
+    reporter.add_assertion(
+        "icd_autocode skipped (registry hit takes precedence)",
+        autocode_skipped,
+        detail=f"autocode call count: {autocode_calls[0]}",
+    )
+    assert autocode_skipped, (
+        f"expected registry to win, but icd_autocode was called "
+        f"{autocode_calls[0]} times"
+    )
 
 
 def test_biomarker_mimic_itemid_search_fallback_when_loinc_misses(

@@ -33,6 +33,26 @@ _REPORTS_DIR = Path(__file__).parent / "reports"
 
 
 @pytest.fixture(autouse=True)
+def _restore_os_environ():
+    """Snapshot/restore ``os.environ`` around every dashboard test.
+
+    The dashboard ``AppTest`` loads ``src/conversational/app.py``, whose
+    import runs ``load_dotenv()``. That writes ``.env`` values
+    (``DATA_SOURCE=bigquery``, ``BIGQUERY_PROJECT=...``) into the *global*
+    ``os.environ`` — not through ``monkeypatch``, so absent this guard the
+    keys persist past the test and silently reroute later, unrelated tests
+    (e.g. the health_evidence on-the-fly compute fallback, which relies on
+    the documented ``DATA_SOURCE`` default of ``local``).
+    """
+    saved = dict(os.environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+@pytest.fixture(autouse=True)
 def _clear_mcp_cache():
     """Clear lru_cache on the resolver's cached helpers between tests.
 

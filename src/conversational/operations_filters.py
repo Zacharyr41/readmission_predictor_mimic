@@ -52,19 +52,30 @@ def _compile_diagnosis(f: PatientFilter, ctx: FilterCompileContext) -> FilterFra
     either the long_title (case-insensitive) OR the ICD code prefix.
 
     Inc 9.2 — when ``ctx.enable_mcp_grounding`` is True AND the filter
-    is a non-empty ``contains`` clause, consult OMOPHub-backed
-    ``icd_autocode`` (via the same module-level ``_cached_icd_autocode``
-    used by ``ConceptResolver.resolve_diagnosis``) to ground the
-    natural-language phrase to a list of ICD-10-CM codes. When grounded,
-    emit an additional ``di.icd_code IN (?, ?, ...)`` clause as a
-    parallel OR with the existing LIKE branch — IN-list catches
-    grounded ICD-10 admissions precisely; LIKE catches the long tail of
-    ICD-9 admissions whose codes aren't in OMOPHub's ICD10CM-only
-    coverage.
+    is a non-empty ``contains`` clause, ground the natural-language
+    phrase to ICD-10 admissions and emit a parallel-OR clause alongside
+    the existing title-LIKE branch.
 
-    Falls back to LIKE-only when grounding is disabled, MCP returns
-    unavailable, no candidates pass the confidence threshold, the
-    operator isn't ``contains``, or the value isn't a non-empty string.
+    Inc 10 — grounding consults two sources in priority order:
+
+    1. **Cohort registry** (``data/mappings/clinical_cohorts.json`` via
+       :func:`resolve_cohort_name`). When the value matches a
+       registered cohort, use the registry's ICD prefixes as ``LIKE``
+       patterns. The registry is what
+       :func:`mimic_distribution_lookup` already uses, so live SQL and
+       the catalog reference query the SAME cohort definition.
+    2. **OMOPHub ``icd_autocode``** (semantic search). Used only when
+       the value doesn't resolve to any registered cohort name.
+       Returns confidence-ranked specific codes. Useful for arbitrary
+       phrases (rare conditions, narrow diagnoses) the registry
+       doesn't cover.
+
+    The LIKE-on-title branch is always retained as a parallel-OR
+    sibling so ICD-9 admissions whose codes aren't in OMOPHub's
+    ICD10CM-only coverage still match.
+
+    Falls back to LIKE-only when grounding is disabled, the value is
+    empty/non-string, or both the registry and OMOPHub return nothing.
     """
     t = ctx.backend.table
     joins = [
@@ -78,11 +89,11 @@ def _compile_diagnosis(f: PatientFilter, ctx: FilterCompileContext) -> FilterFra
     like_clause = f"({ctx.backend.ilike('dd.long_title')} OR di.icd_code LIKE ?)"
     like_params = [f"%{f.value}%", f"{f.value}%"]
 
-    grounded_codes = _maybe_ground_diagnosis_filter(f, ctx)
-    if grounded_codes:
-        in_placeholders = ", ".join(["?"] * len(grounded_codes))
-        clause = f"((di.icd_code IN ({in_placeholders})) OR {like_clause})"
-        params = list(grounded_codes) + like_params
+    grounded = _maybe_ground_diagnosis_filter_clause(f, ctx)
+    if grounded is not None:
+        clause_sql, clause_params = grounded
+        clause = f"({clause_sql} OR {like_clause})"
+        params = list(clause_params) + like_params
     else:
         clause = like_clause
         params = like_params
@@ -90,13 +101,24 @@ def _compile_diagnosis(f: PatientFilter, ctx: FilterCompileContext) -> FilterFra
     return FilterFragment(joins=joins, where=[clause], params=params)
 
 
-def _maybe_ground_diagnosis_filter(
+def _maybe_ground_diagnosis_filter_clause(
     f: PatientFilter, ctx: FilterCompileContext,
-) -> list[str] | None:
-    """Attempt OMOPHub-backed grounding of the diagnosis filter's value.
+) -> tuple[str, list] | None:
+    """Build a SQL clause + params for an ICD-grounded diagnosis filter.
 
-    Returns a non-empty list of ICD codes on success, or ``None`` to
-    signal the caller to fall back to LIKE-only. Never raises.
+    Two-tier resolution (Inc 10):
+
+    1. Cohort registry: ``resolve_cohort_name`` matches the filter's
+       value against ``data/mappings/clinical_cohorts.json``. On hit,
+       emit ``(di.icd_version = 10 AND di.icd_code LIKE 'A41%') OR …``
+       across all ICD-10 + ICD-9 prefixes — this is the same definition
+       the catalog's ``mimic_distribution_lookup`` uses.
+    2. OMOPHub ``icd_autocode``: when the registry doesn't match, fall
+       back to confidence-filtered specific codes from semantic search.
+       Emits ``di.icd_code IN (?, ?, ?)``.
+
+    Returns ``None`` to signal the caller to fall back to LIKE-only.
+    Never raises.
     """
     if not ctx.enable_mcp_grounding:
         return None
@@ -105,9 +127,32 @@ def _maybe_ground_diagnosis_filter(
     value = f.value
     if not isinstance(value, str) or not value:
         return None
-    # Lazy import to avoid a circular dependency between operations_filters
-    # and concept_resolver at module load. The cache lives on the
-    # concept_resolver module so it's shared with the resolver path.
+
+    # Tier 1 — cohort registry. The lazy import keeps a hard dependency
+    # off operations_filters' module-load path.
+    from src.conversational.health_evidence.cohorts import (
+        load_cohorts, normalize_icd_prefix, resolve_cohort_name,
+    )
+    cohort_name = resolve_cohort_name(value)
+    if cohort_name is not None:
+        defn = load_cohorts().get(cohort_name) or {}
+        icd10 = list(defn.get("icd10_prefixes") or [])
+        icd9 = list(defn.get("icd9_prefixes") or [])
+        clauses: list[str] = []
+        params: list[str] = []
+        for p in icd10:
+            clauses.append("(di.icd_version = 10 AND di.icd_code LIKE ?)")
+            params.append(normalize_icd_prefix(p) + "%")
+        for p in icd9:
+            clauses.append("(di.icd_version = 9 AND di.icd_code LIKE ?)")
+            params.append(normalize_icd_prefix(p) + "%")
+        if clauses:
+            return f"({' OR '.join(clauses)})", params
+        # Registry entry has no prefixes — fall through to OMOPHub
+        # rather than emit no clause at all. Defensive only; current
+        # registry has prefixes for every cohort.
+
+    # Tier 2 — OMOPHub icd_autocode (semantic search).
     from src.conversational.concept_resolver import (
         _ICD_CONFIDENCE_THRESHOLD, _cached_icd_autocode,
     )
@@ -115,11 +160,14 @@ def _maybe_ground_diagnosis_filter(
         cached = _cached_icd_autocode(value.lower(), "10")
     except LookupError:
         return None
-    accepted: list[str] = []
+    accepted_codes: list[str] = []
     for code, conf in cached:
         if conf is None or conf >= _ICD_CONFIDENCE_THRESHOLD:
-            accepted.append(code)
-    return accepted or None
+            accepted_codes.append(code)
+    if not accepted_codes:
+        return None
+    placeholders = ", ".join(["?"] * len(accepted_codes))
+    return f"(di.icd_code IN ({placeholders}))", list(accepted_codes)
 
 
 def _compile_admission_type(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:

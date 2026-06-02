@@ -536,6 +536,36 @@ class HealthAnswer(BaseModel):
     tools_called: list[dict] = []  # [{"name": str, "count": int, "status": str}]
 
 
+class OutlierReport(BaseModel):
+    """Provenance + payload for pre-aggregation biological-impossibility
+    screening (see ``outliers.BiologicalLimitsResolver`` and the SQL
+    fast-path's dual aggregate).
+
+    The orchestrator builds this when an ``OutlierScreen`` removed at least
+    one row from a numeric aggregate. ``value_with_outliers`` /
+    ``data_table_with_outliers`` precompute the unscreened answer so the UI's
+    "include outliers" toggle is an instant re-render — no backend round-trip.
+    """
+
+    analyte: str
+    bound_low: float
+    bound_high: float
+    units: str | None = None
+    # Where the envelope came from: e.g. "seed:literature" or "derived".
+    source: str | None = None
+    # How it was resolved: e.g. "biological_limits".
+    method: str | None = None
+    n_removed: int
+    n_total: int
+    # The removed rows with context columns (valuenum, subject_id, hadm_id,
+    # charttime, label, valueuom) for the UI expander + traceability.
+    removed_rows: list[dict] = []
+    # The unscreened scalar (None for grouped/list shapes).
+    value_with_outliers: float | None = None
+    # The unscreened table rows for the toggle (mirrors ``data_table``).
+    data_table_with_outliers: list[dict] | None = None
+
+
 class AnswerResult(BaseModel):
     text_summary: str
     data_table: list[dict] | None = None
@@ -571,6 +601,12 @@ class AnswerResult(BaseModel):
     # is disabled or didn't fire. Same shape as ``CriticVerdict.cited_sources``
     # so UI rendering can be shared.
     contextual_citations: list[dict] | None = None
+    # Pre-aggregation outlier screening: present only when the SQL fast-path
+    # removed biologically-impossible rows from a numeric aggregate. Carries
+    # the removed rows + bounds + provenance and the precomputed
+    # with-outliers answer for the UI's "include outliers" toggle. None on
+    # every other turn (the common case).
+    outlier_report: OutlierReport | None = None
 
 
 class DecompositionResult(BaseModel):

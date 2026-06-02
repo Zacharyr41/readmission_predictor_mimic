@@ -1,0 +1,16 @@
+{
+  "_comment": "Absolute biological-possibility envelopes per analyte: values outside [low, high] are physiologically impossible / data-entry errors and are screened out before aggregation. DELIBERATELY WIDER than the normal reference ranges in loinc_reference_ranges.json so that high-but-real values (e.g. a sepsis lactate of 12 mmol/L, a DKA glucose of 1200 mg/dL) are KEPT — only the impossible is removed. Seed entries are literature-grounded; cache misses are derived once via the EvidenceAgent (Sonnet/Opus) and written back here. Keyed for lookup by LOINC code and by alias (case-insensitive).",
+  "analytes": [
+    {"loinc": "2524-7", "aliases": ["lactate", "lactic acid", "lactate, blood", "lactate blood"], "low": 0.0, "high": 40.0, "units": "mmol/L", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "2951-2", "aliases": ["sodium", "na", "serum sodium"], "low": 80.0, "high": 200.0, "units": "mEq/L", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "2823-3", "aliases": ["potassium", "k", "serum potassium"], "low": 0.5, "high": 15.0, "units": "mEq/L", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "2345-7", "aliases": ["glucose", "blood glucose", "serum glucose"], "low": 0.0, "high": 2000.0, "units": "mg/dL", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "2160-0", "aliases": ["creatinine", "serum creatinine"], "low": 0.0, "high": 50.0, "units": "mg/dL", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "718-7", "aliases": ["hemoglobin", "haemoglobin", "hgb", "hb"], "low": 0.0, "high": 30.0, "units": "g/dL", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "6690-2", "aliases": ["wbc", "white blood cell count", "white blood cells", "leukocytes"], "low": 0.0, "high": 500.0, "units": "K/uL", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "777-3", "aliases": ["platelet", "platelet count", "platelets", "plt"], "low": 0.0, "high": 3000.0, "units": "K/uL", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "1975-2", "aliases": ["bilirubin", "total bilirubin", "bilirubin total"], "low": 0.0, "high": 100.0, "units": "mg/dL", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "8867-4", "aliases": ["heart rate", "hr", "pulse"], "low": 0.0, "high": 350.0, "units": "bpm", "source": "seed:literature", "derived_at": "2026-06-02"},
+    {"loinc": "59408-5", "aliases": ["spo2", "oxygen saturation", "o2 saturation", "sao2"], "low": 0.0, "high": 100.0, "units": "%", "source": "seed:literature", "derived_at": "2026-06-02"}
+  ]
+}
