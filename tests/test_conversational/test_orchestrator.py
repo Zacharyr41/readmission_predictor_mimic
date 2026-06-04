@@ -981,6 +981,98 @@ class TestSimilarityBranch:
         assert result.data_table is None
         assert "similarity" in result.text_summary.lower()
 
+    @_patch_all
+    def test_cohort_definition_routes_to_run_cohort(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Plan I-E: a CQ whose similarity_spec carries a ``cohort_definition``
+        is the anchorless cohort path — it must call ``run_cohort`` (not the
+        anchor-only ``run_similarity``) and wrap the ``CohortResult`` into a
+        4-column ranked table.
+
+        Booby-trap on three sides: the graph stages, ``run_similarity`` (the
+        anchor path), and the graph build must all stay silent. If the cohort
+        branch is missing the CQ falls through and one of these AssertionErrors
+        fires, so the regression can't pass silently.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortMember,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        defn = CohortDefinition(
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68, range_=(18.0, 90.0),
+                ),
+            ],
+            distance_threshold=0.35,
+            top_k=30,
+        )
+        spec = SimilaritySpec(cohort_definition=defn)
+        cq = CompetencyQuestion(
+            original_question="Find ICU patients like a 68-year-old with sepsis.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        # Booby-traps: neither the graph path nor the anchor path may run.
+        mock_extract.side_effect = AssertionError(
+            "extract must not run on cohort scope"
+        )
+        mock_build.side_effect = AssertionError(
+            "graph build must not run on contextual cohort scope"
+        )
+        mock_reason.side_effect = AssertionError(
+            "reason must not run on cohort scope"
+        )
+        mock_answer.side_effect = AssertionError(
+            "answerer must not run on cohort scope"
+        )
+
+        sentinel = CohortResult(
+            definition=defn,
+            members=[
+                CohortMember(hadm_id=101, subject_id=1, distance=0.06),
+                CohortMember(hadm_id=103, subject_id=2, distance=0.08),
+            ],
+            n_pool=6,
+            n_returned=2,
+            provenance={"distance_threshold": 0.35},
+        )
+
+        with patch(
+            "src.similarity.run.run_cohort", return_value=sentinel
+        ) as mock_run_cohort, patch(
+            "src.similarity.run.run_similarity",
+            side_effect=AssertionError("anchor path must not run for a cohort"),
+        ):
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask(
+                "Find ICU patients like a 68-year-old with sepsis."
+            )
+
+        # The cohort branch fired exactly once with the definition off the CQ.
+        assert mock_run_cohort.call_count == 1
+        assert mock_run_cohort.call_args.args[0] is defn
+
+        # The AnswerResult carries the ranked cohort table (nearest first).
+        assert isinstance(result, AnswerResult)
+        assert result.table_columns == ["rank", "hadm_id", "subject_id", "distance"]
+        assert result.data_table is not None
+        assert len(result.data_table) == 2
+        top = result.data_table[0]
+        assert top == {"rank": 1, "hadm_id": 101, "subject_id": 1, "distance": 0.06}
+        # Summary reports counts but never asks the clinician to read DB keys.
+        assert "2" in result.text_summary and "6" in result.text_summary
+        assert "hadm_id" not in result.text_summary
+
 
 # ---------------------------------------------------------------------------
 # TestCriticIntegration — end-to-end critic wiring (Phase 6)

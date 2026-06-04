@@ -1192,6 +1192,13 @@ class ConversationalPipeline:
                 ),
             )
 
+        # Cohort mode (anchorless): a free-text description of traits has been
+        # translated into a CohortDefinition. This is the one-vs-many path —
+        # distance to a synthesized profile, thresholded — and subsumes the
+        # anchor mode (which is just "read the profile off this admission").
+        if cq.similarity_spec.cohort_definition is not None:
+            return self._run_cohort(cq.similarity_spec.cohort_definition, backend)
+
         result = run_similarity(cq.similarity_spec, backend)
         data_table = [
             {
@@ -1217,6 +1224,56 @@ class ConversationalPipeline:
                 "rank", "hadm_id", "subject_id",
                 "combined", "contextual", "temporal",
             ],
+        )
+
+    def _run_cohort(self, definition, backend) -> AnswerResult:
+        """Format a ``run_cohort`` result into an ``AnswerResult`` (plan I-E).
+
+        The anchorless cohort path: distances to a synthesized profile,
+        thresholded. ``graph_temporal`` traits are not yet wired (plan III-A) —
+        ``run_cohort`` raises ``NotImplementedError`` for them, which we surface
+        as a plain message rather than crashing the turn. A missing frozen range
+        (``ValueError``) is surfaced the same way.
+
+        The chat summary describes the cohort in clinical terms; the database
+        keys (hadm_id / subject_id) appear only in the result table, never as
+        something the clinician must read or type.
+        """
+        from src.similarity.run import run_cohort
+
+        try:
+            result = run_cohort(definition, backend)
+        except NotImplementedError as exc:
+            return AnswerResult(
+                text_summary=(
+                    "This cohort description relies on temporal-trend traits "
+                    "(e.g. a worsening lab slope), which aren't wired into the "
+                    f"cohort engine yet. Details: {exc}"
+                ),
+            )
+        except ValueError as exc:
+            return AnswerResult(
+                text_summary=f"Could not assemble the cohort: {exc}",
+            )
+
+        data_table = [
+            {
+                "rank": i + 1,
+                "hadm_id": m.hadm_id,
+                "subject_id": m.subject_id,
+                "distance": round(m.distance, 4),
+            }
+            for i, m in enumerate(result.members)
+        ]
+        summary = (
+            f"Found {result.n_returned} of {result.n_pool} candidates within "
+            f"Gower distance {definition.distance_threshold} of the described "
+            f"profile. See the table for the ranked cohort (nearest first)."
+        )
+        return AnswerResult(
+            text_summary=summary,
+            data_table=data_table,
+            table_columns=["rank", "hadm_id", "subject_id", "distance"],
         )
 
     def _extract_one(self, cq: CompetencyQuestion):
