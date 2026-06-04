@@ -112,17 +112,17 @@ def build_query_graph(
         if len(admission_uris) > 1:
             link_sequential_admissions(graph, admission_uris)
 
-        # ICU stays for this patient's admissions
-        patient_hadm_ids = {a["hadm_id"] for a in admissions}
-        for stay in extraction.icu_stays:
-            if stay["hadm_id"] not in patient_hadm_ids:
-                continue
-            adm_uri = hadm_to_admission_uri[stay["hadm_id"]]
-            icu_stay_uri = write_icu_stay(graph, stay, adm_uri)
-            icu_day_metadata = write_icu_days(graph, stay, icu_stay_uri)
-            stay_meta[stay["stay_id"]] = (icu_stay_uri, icu_day_metadata)
-            stats["icu_stays"] += 1
-            stats["icu_days"] += len(icu_day_metadata)
+        # ICU stays for this patient's admissions. Look them up via the
+        # hadm->stay index rather than scanning every stay in the cohort:
+        # the latter is O(patients x stays) and hangs on cohort-wide queries.
+        for adm in admissions:
+            for stay in hadm_stay_index.get(adm["hadm_id"], []):
+                adm_uri = hadm_to_admission_uri[stay["hadm_id"]]
+                icu_stay_uri = write_icu_stay(graph, stay, adm_uri)
+                icu_day_metadata = write_icu_days(graph, stay, icu_stay_uri)
+                stay_meta[stay["stay_id"]] = (icu_stay_uri, icu_day_metadata)
+                stats["icu_stays"] += 1
+                stats["icu_days"] += len(icu_day_metadata)
 
     # -- Events ---------------------------------------------------------------
     for event in extraction.events.get("biomarker", []):

@@ -510,3 +510,67 @@ class TestParallelGraphBuild:
         )
         assert stats["patients"] == 1
         assert len(graph) > 0
+
+
+class _StayVisitCounter(list):
+    """A ``list`` that counts every element yielded across all iterations.
+
+    Lets the complexity test below prove ``build_query_graph`` passes over the
+    ICU stays a constant number of times rather than once per patient.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.visits = 0
+
+    def __iter__(self):
+        for item in super().__iter__():
+            self.visits += 1
+            yield item
+
+
+class TestBuildQueryGraphComplexity:
+    def test_stays_not_rescanned_per_patient(self, ontology_dir):
+        """Build is O(patients + stays), not O(patients x stays).
+
+        Regression for a cohort-wide hang: the serial path scanned every ICU
+        stay once per patient, so on the full cohort (~50k patients x ~80k
+        stays) it spun on billions of iterations and never returned. Each
+        patient here owns one matching stay; an instrumented ``icu_stays``
+        counts total visits. The buggy path visits ~patients * stays; the
+        fixed path visits ~stays (a single pass to build the hadm->stay index).
+        """
+        p = 200
+        patients, admissions, stays = [], [], []
+        for i in range(p):
+            sid, hadm, stay = 100_000 + i, 200_000 + i, 300_000 + i
+            patients.append({"subject_id": sid, "gender": "M", "anchor_age": 60})
+            admissions.append({
+                "hadm_id": hadm, "subject_id": sid,
+                "admittime": datetime(2150, 6, 1, 8, 0),
+                "dischtime": datetime(2150, 6, 10, 14, 0),
+                "admission_type": "EMERGENCY", "discharge_location": "HOME",
+            })
+            stays.append({
+                "stay_id": stay, "hadm_id": hadm, "subject_id": sid,
+                "intime": datetime(2150, 6, 1, 10, 0),
+                "outtime": datetime(2150, 6, 4, 10, 0), "los": 3.0,
+            })
+
+        ext = ExtractionResult(
+            patients=patients, admissions=admissions, icu_stays=stays, events={},
+        )
+        # validate_assignment is off on ExtractionResult, so the subclass
+        # survives assignment and instruments the real build.
+        counter = _StayVisitCounter(ext.icu_stays)
+        ext.icu_stays = counter
+
+        graph, stats = build_query_graph(
+            ontology_dir, ext, skip_allen_relations=True, max_workers=1,
+        )
+
+        # Correctness preserved: every stay is still attached to its admission.
+        assert stats["icu_stays"] == p
+        # Complexity guard: total stay visits stay linear in the stay count.
+        # Buggy path ~= p * len(stays) (40,000); fixed path ~= len(stays).
+        assert counter.visits <= 3 * len(stays)
