@@ -33,7 +33,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from src.conversational.models import PatientFilter
+# NOTE: ``PatientFilter`` (used by ``SimilaritySpec.candidate_filters``) is
+# imported at the BOTTOM of this module, not here. See the forward-reference
+# resolution block at the end for why deferring it makes this module's import
+# order-independent w.r.t. ``src.conversational.models``.
 
 
 # ---------------------------------------------------------------------------
@@ -215,20 +218,30 @@ class SimilaritySpec(BaseModel):
         return self
 
 
-# Resolve the forward reference on ``SimilarityResult.spec``.
+# ---------------------------------------------------------------------------
+# Forward-reference resolution.
+#
+# ``PatientFilter`` (referenced by ``SimilaritySpec.candidate_filters``) is
+# imported HERE, after every class in this module is defined, rather than at
+# module top. That keeps this module free of any ``src.conversational`` import
+# during its class-definition phase, so the two modules may be imported in
+# EITHER order without the partial-initialization cycle breaking
+# (``src.conversational.models`` imports ``SimilaritySpec`` from here at its own
+# bottom). ``from __future__ import annotations`` makes every annotation a
+# string, so no class needs ``PatientFilter`` resolved until the rebuilds below.
+#
+# Previously this import lived at module top, which only worked when
+# ``src.conversational.models`` happened to be imported first; importing
+# ``src.similarity.*`` first raised ImportError (e.g. running
+# ``pytest tests/test_similarity/`` in isolation).
+# ---------------------------------------------------------------------------
+from src.conversational.models import (  # noqa: E402
+    CompetencyQuestion,
+    PatientFilter,  # noqa: F401  (resolved from globals by model_rebuild)
+)
+
+SimilaritySpec.model_rebuild()
 SimilarityResult.model_rebuild()
-
-# Resolve the forward reference on
-# ``CompetencyQuestion.similarity_spec``. The conversational schema
-# declares the field via a string type hint to avoid a circular import
-# (``src.similarity.models`` imports ``PatientFilter`` from
-# ``src.conversational.models``). Rebuilding here makes
-# ``CompetencyQuestion(similarity_spec=SimilaritySpec(...))`` work as
-# soon as ``src.similarity`` is imported — which happens in every
-# code path that needs the field (tests, orchestrator, causal
-# narrowing, decomposer).
-from src.conversational.models import CompetencyQuestion  # noqa: E402
-
 CompetencyQuestion.model_rebuild(
     _types_namespace={"SimilaritySpec": SimilaritySpec},
     force=True,

@@ -648,6 +648,16 @@ class DecompositionResult(BaseModel):
 
 from src.similarity.models import SimilaritySpec  # noqa: E402
 
+# ``raise_errors=False``: when THIS module is imported first, ``src.similarity.models``
+# is still mid-import at the line above, so ``SimilaritySpec`` exists as a class but has
+# not yet resolved its own ``PatientFilter`` forward reference (that happens at the bottom
+# of ``src.similarity.models`` AFTER it finishes importing from here). A strict rebuild
+# would raise ``PydanticUndefinedAnnotation: name 'PatientFilter' is not defined``. We let
+# it fail silently here; the authoritative rebuild lives at the bottom of
+# ``src.similarity.models`` (``force=True``), which runs once ``PatientFilter`` is in scope
+# and completes ``CompetencyQuestion`` for both import orders.
 CompetencyQuestion.model_rebuild(
-    _types_namespace={"SimilaritySpec": SimilaritySpec}, force=True,
+    _types_namespace={"SimilaritySpec": SimilaritySpec},
+    force=True,
+    raise_errors=False,
 )
