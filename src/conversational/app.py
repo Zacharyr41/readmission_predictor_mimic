@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,14 @@ load_dotenv()
 
 from src.conversational.models import AnswerResult, ExtractionConfig
 from src.conversational.orchestrator import ConversationalPipeline
+from src.conversational.query_log import log_query_run
+
+# Fixed pixel height of the scrollable chat transcript. A bounded container
+# keeps the message area scrolling *within itself* (auto-anchored to the
+# latest turn) instead of growing the page and jolting the viewport on every
+# rerun once the conversation runs past the fold. Override with the env var
+# for taller/shorter displays.
+CHAT_HEIGHT = int(os.environ.get("NEUROGRAPH_CHAT_HEIGHT", "560"))
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -381,34 +390,58 @@ def _render_answer(
 # Chat history
 # ---------------------------------------------------------------------------
 
-for _msg_idx, msg in enumerate(st.session_state.messages):
-    if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.markdown(msg["content"])
-    else:
-        with st.chat_message("assistant"):
-            _render_answer(msg["content"], key_prefix=f"msg{_msg_idx}")
+# A single fixed-height container holds the whole transcript so it scrolls
+# within itself. The live turn (below) renders into this same container so a
+# just-submitted exchange lands inside the scroll box, consistent with how it
+# re-renders from history on the next run.
+chat_container = st.container(height=CHAT_HEIGHT)
+
+with chat_container:
+    for _msg_idx, msg in enumerate(st.session_state.messages):
+        if msg["role"] == "user":
+            with st.chat_message("user"):
+                st.markdown(msg["content"])
+        else:
+            with st.chat_message("assistant"):
+                _render_answer(msg["content"], key_prefix=f"msg{_msg_idx}")
 
 # ---------------------------------------------------------------------------
 # Chat input
 # ---------------------------------------------------------------------------
 
+# ``st.chat_input`` must stay at the page top level (not inside the height
+# container) to keep its bottom-pinned position.
 if question := st.chat_input("Ask a clinical question..."):
     if st.session_state.pipeline is None:
         st.warning("Please connect to a database first.")
     else:
         st.session_state.messages.append({"role": "user", "content": question})
-        with st.chat_message("user"):
-            st.markdown(question)
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(question)
 
-        with st.chat_message("assistant"):
-            with st.spinner("Analyzing..."):
-                answer = st.session_state.pipeline.ask(question)
-            # Key by the index this message will occupy once appended, so the
-            # history loop reuses the same widget keys on the next re-run and
-            # the outlier toggle's state survives.
-            _render_answer(
-                answer, key_prefix=f"msg{len(st.session_state.messages)}",
-            )
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing..."):
+                    _started = time.monotonic()
+                    try:
+                        answer = st.session_state.pipeline.ask(question)
+                    except Exception as exc:
+                        log_query_run(
+                            question,
+                            duration_s=time.monotonic() - _started,
+                            error=str(exc),
+                        )
+                        raise
+                    log_query_run(
+                        question,
+                        duration_s=time.monotonic() - _started,
+                        answer=answer,
+                    )
+                # Key by the index this message will occupy once appended, so
+                # the history loop reuses the same widget keys on the next
+                # re-run and the outlier toggle's state survives.
+                _render_answer(
+                    answer, key_prefix=f"msg{len(st.session_state.messages)}",
+                )
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
