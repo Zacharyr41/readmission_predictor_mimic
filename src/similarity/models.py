@@ -33,6 +33,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.pygower import ColumnSpec, Direction, Kind, Missing
+
 # NOTE: ``PatientFilter`` (used by ``SimilaritySpec.candidate_filters``) is
 # imported at the BOTTOM of this module, not here. See the forward-reference
 # resolution block at the end for why deferring it makes this module's import
@@ -142,6 +144,112 @@ class SimilarityResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Cohort definition — the formal, schema-validated translation of a free-text
+# cohort request (plan Phase II/III). A ``TraitSpec`` is one Gower column: it
+# carries the pygower ``ColumnSpec`` configuration plus the synthesized
+# *reference value* (the X side of the one-vs-many distance) and where the
+# feature comes from. ``CohortDefinition`` bundles a Boolean prefilter gate,
+# the trait list, an LLM-proposed distance threshold, and a top_k cap.
+# ---------------------------------------------------------------------------
+
+
+class TraitSpec(BaseModel):
+    """One Gower column in a cohort definition.
+
+    Mirrors the fields of :class:`src.pygower.ColumnSpec` (so it is JSON-
+    serializable for the LLM definition builder and the activity log) and adds:
+
+      * ``name`` — the feature/column name.
+      * ``source`` — ``"sql"`` (pulled by a SQL prefilter/extractor) or
+        ``"graph_temporal"`` (derived from the per-question RDF graph, e.g. a
+        severity slope). A definition with ≥1 ``graph_temporal`` trait is what
+        triggers the (expensive) graph build on the cohort path.
+      * ``reference_value`` — the synthesized profile's value for this trait
+        (the "bad-enough" point for a directional trait, the stated value for a
+        symmetric one, presence for a binary one). In anchor mode the runner
+        fills this from the anchor admission, so it is optional here.
+
+    ``to_column_spec`` builds the pygower :class:`ColumnSpec` the cohort runner
+    feeds to ``gower_distances``; kernel selection (symmetric vs one-sided vs
+    asymmetric-binary) follows from ``kind`` + ``direction`` + ``asymmetric``.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: str
+    source: Literal["sql", "graph_temporal"]
+    kind: Kind
+    reference_value: bool | int | float | str | None = None
+
+    # pygower ColumnSpec configuration.
+    weight: float = 1.0
+    direction: Direction = Direction.SYMMETRIC
+    range_: tuple[float, float] | None = None
+    categories: list | None = None
+    asymmetric: bool = False
+    present_value: bool | int | str = True
+    missing: Missing = Missing.EXCLUDE
+
+    @model_validator(mode="after")
+    def _validate_trait(self) -> "TraitSpec":
+        if self.weight < 0:
+            raise ValueError(f"trait weight must be non-negative; got {self.weight}")
+        if self.direction != Direction.SYMMETRIC and self.kind != Kind.QUANTITATIVE:
+            raise ValueError(
+                "directional traits (direction != symmetric) must be "
+                f"quantitative; got kind={self.kind.value} "
+                f"direction={self.direction.value}"
+            )
+        return self
+
+    def to_column_spec(self) -> ColumnSpec:
+        """Project this trait onto a pygower :class:`ColumnSpec`."""
+        return ColumnSpec(
+            kind=self.kind,
+            weight=self.weight,
+            range_=self.range_,
+            categories=self.categories,
+            asymmetric=self.asymmetric,
+            present_value=self.present_value,
+            direction=self.direction,
+            missing=self.missing,
+        )
+
+
+class CohortDefinition(BaseModel):
+    """Formal definition of a trait-defined cohort.
+
+    ``prefilters`` is the cheap Boolean gate that narrows the candidate pool
+    first (crisp clauses like ICU / sepsis / LOS); ``traits`` are the Gower
+    columns scored against the synthesized profile; cohort membership is
+    ``distance ≤ distance_threshold`` capped at ``top_k``. The threshold is
+    LLM-proposed and user-overridable (and logged).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    prefilters: list[PatientFilter] = Field(default_factory=list)
+    traits: list[TraitSpec]
+    distance_threshold: float = 0.35
+    top_k: int | None = 30
+
+    @model_validator(mode="after")
+    def _validate_definition(self) -> "CohortDefinition":
+        if not self.traits:
+            raise ValueError("CohortDefinition requires at least one trait")
+        if not (0.0 <= self.distance_threshold <= 1.0):
+            raise ValueError(
+                f"distance_threshold must be in [0, 1]; got {self.distance_threshold}"
+            )
+        if self.top_k is not None and self.top_k <= 0:
+            raise ValueError(f"top_k must be positive or None; got {self.top_k}")
+        names = [t.name for t in self.traits]
+        if len(names) != len(set(names)):
+            raise ValueError(f"trait names must be unique; got {names}")
+        return self
+
+
+# ---------------------------------------------------------------------------
 # Input spec.
 # ---------------------------------------------------------------------------
 
@@ -163,11 +271,17 @@ class SimilaritySpec(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    # Anchor — exactly one of these three must be set (enforced in
-    # the model validator below).
+    # Anchor — exactly one of these three must be set when no
+    # ``cohort_definition`` is supplied (enforced in the model validator below).
     anchor_hadm_id: int | None = None
     anchor_subject_id: int | None = None
     anchor_template: dict | None = None
+
+    # Trait-defined cohort (anchorless). When set, the profile comes from the
+    # definition's reference values rather than a single anchor admission; the
+    # anchor_* fields must all be None. Anchor mode = the special case where the
+    # profile is read off one admission, so the two are mutually exclusive.
+    cohort_definition: CohortDefinition | None = None
 
     # Weights — defaults per plan.
     temporal_weight: float = 0.5                      # α
@@ -187,13 +301,21 @@ class SimilaritySpec(BaseModel):
 
     @model_validator(mode="after")
     def _validate_spec(self) -> "SimilaritySpec":
-        # Exactly one anchor.
+        # Anchor vs cohort_definition are mutually exclusive: cohort mode is
+        # anchorless; anchor mode is the single-admission special case.
         provided = sum(
             1
             for a in (self.anchor_hadm_id, self.anchor_subject_id, self.anchor_template)
             if a is not None
         )
-        if provided != 1:
+        if self.cohort_definition is not None:
+            if provided != 0:
+                raise ValueError(
+                    "SimilaritySpec cannot set both a cohort_definition and an "
+                    "anchor (anchor_hadm_id | anchor_subject_id | anchor_template); "
+                    f"got {provided} anchor(s)"
+                )
+        elif provided != 1:
             raise ValueError(
                 "SimilaritySpec must carry exactly one anchor "
                 "(anchor_hadm_id | anchor_subject_id | anchor_template); "
@@ -240,6 +362,9 @@ from src.conversational.models import (  # noqa: E402
     PatientFilter,  # noqa: F401  (resolved from globals by model_rebuild)
 )
 
+# ``CohortDefinition`` first: its ``prefilters: list[PatientFilter]`` needs the
+# just-imported ``PatientFilter``, and ``SimilaritySpec`` embeds it.
+CohortDefinition.model_rebuild()
 SimilaritySpec.model_rebuild()
 SimilarityResult.model_rebuild()
 CompetencyQuestion.model_rebuild(
