@@ -38,11 +38,14 @@ Plan: /Users/zacharyrothstein/.claude/plans/vivid-knitting-forest.md
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
+from src.pygower import ColumnSpec, Kind, gower_distances
 from src.similarity.bucketing import assign_buckets
 from src.similarity.combined import combine_scores
 from src.similarity.contextual import (
@@ -50,9 +53,13 @@ from src.similarity.contextual import (
     compute_contextual_similarity,
 )
 from src.similarity.models import (
+    CohortDefinition,
+    CohortMember,
+    CohortResult,
     SimilarityResult,
     SimilarityScore,
     SimilaritySpec,
+    TraitContribution,
 )
 from src.similarity.temporal import compute_temporal_similarity
 
@@ -415,4 +422,182 @@ def run_similarity(spec: SimilaritySpec, backend: Any) -> SimilarityResult:
     )
 
 
-__all__ = ["run_similarity"]
+# ---------------------------------------------------------------------------
+# Anchorless cohort runner (plan III-B) — one-vs-many distance to a synthesized
+# reference profile, thresholded. Contextual-only here: ``graph_temporal`` traits
+# are deferred to III-A.
+# ---------------------------------------------------------------------------
+
+
+def _cohort_candidate_pool(definition: CohortDefinition, backend: Any) -> list[int]:
+    """Hadm pool after the definition's Boolean prefilters.
+
+    With no prefilters the pool is every admission. Prefilters compile through
+    the shared ``OperationRegistry`` (``src.conversational``), so any registered
+    filter field (age, gender, admission_type, diagnosis, …) narrows the pool
+    here for free — there is exactly one place that knows how to turn a
+    ``PatientFilter`` into SQL, and the cohort path reuses it.
+    """
+    if not definition.prefilters:
+        return _fetch_candidate_hadm_ids(backend, exclude=None)
+    from src.conversational.extractor import _get_filtered_hadm_ids
+
+    return _get_filtered_hadm_ids(backend, definition.prefilters)
+
+
+def _build_column_specs(
+    definition: CohortDefinition,
+    reference_ranges: dict[str, tuple[float, float]] | None,
+) -> dict[str, ColumnSpec]:
+    """Project each trait onto a frozen-range pygower ``ColumnSpec``.
+
+    A quantitative trait MUST carry a normalization range — either on the trait
+    (``range_``) or via ``reference_ranges`` (the frozen reference-population
+    stats from plan II-E). Refusing to fall back to a batch-learned range is
+    locked decision #6 (fit/transform separation): a single-row profile would
+    otherwise yield a degenerate range and meaningless distances.
+    """
+    ranges = reference_ranges or {}
+    spec: dict[str, ColumnSpec] = {}
+    for t in definition.traits:
+        cs = t.to_column_spec()
+        if cs.kind == Kind.QUANTITATIVE and cs.range_ is None:
+            rr = ranges.get(t.name)
+            if rr is None:
+                raise ValueError(
+                    f"quantitative trait {t.name!r} has no frozen range_ and "
+                    "none was supplied via reference_ranges; run_cohort refuses "
+                    "to learn a normalization range from the query batch "
+                    "(fit/transform separation, locked decision #6)"
+                )
+            cs = replace(cs, range_=(float(rr[0]), float(rr[1])))
+        spec[t.name] = cs
+    return spec
+
+
+def _cohort_provenance(definition: CohortDefinition, n_pool: int) -> dict:
+    """The logged criteria: prefilters + every trait's kernel-relevant config."""
+    return {
+        "n_pool": n_pool,
+        "distance_threshold": definition.distance_threshold,
+        "top_k": definition.top_k,
+        "prefilters": [f.model_dump() for f in definition.prefilters],
+        "traits": [
+            {
+                "name": t.name,
+                "source": t.source,
+                "kind": t.kind.value,
+                "direction": t.direction.value,
+                "weight": t.weight,
+                "reference_value": t.reference_value,
+            }
+            for t in definition.traits
+        ],
+        "feature_extractor_version": "phase-cohort-contextual-v1",
+    }
+
+
+def run_cohort(
+    definition: CohortDefinition,
+    backend: Any,
+    *,
+    reference_ranges: dict[str, tuple[float, float]] | None = None,
+) -> CohortResult:
+    """Compute an anchorless cohort by Gower distance to a synthesized profile.
+
+    Contextual-only path (plan III-B). Steps:
+
+    1. Narrow the candidate pool with the definition's Boolean prefilters.
+    2. Pull the typed contextual feature matrix for the pool.
+    3. Synthesize the reference *profile* vector from each trait's
+       ``reference_value`` (the X side of the one-vs-many distance).
+    4. Score every candidate's Gower distance to the profile, with FROZEN ranges
+       and the per-trait kernel (symmetric / one-sided / asymmetric-binary)
+       selected from the trait's ``kind`` + ``direction``.
+    5. Cohort = ``distance <= distance_threshold`` ranked nearest-first, capped
+       at ``top_k``; each member carries per-trait signed contributions.
+
+    ``graph_temporal`` traits are deferred to III-A and raise ``NotImplementedError``.
+    """
+    graph_traits = [
+        t.name for t in definition.traits if t.source == "graph_temporal"
+    ]
+    if graph_traits:
+        raise NotImplementedError(
+            "run_cohort does not yet score graph_temporal traits "
+            f"(deferred to plan task III-A): {graph_traits}"
+        )
+
+    pool = _cohort_candidate_pool(definition, backend)
+    candidate_df = _fetch_admission_features(backend, pool)
+    n_pool = len(candidate_df)
+    provenance = _cohort_provenance(definition, n_pool)
+
+    if n_pool == 0:
+        return CohortResult(
+            definition=definition, members=[], n_pool=0, n_returned=0,
+            provenance={**provenance, "note": "no candidates after prefilters"},
+        )
+
+    trait_names = [t.name for t in definition.traits]
+    missing_cols = [n for n in trait_names if n not in candidate_df.columns]
+    if missing_cols:
+        raise ValueError(
+            "cohort traits reference feature columns not produced by the "
+            f"contextual extractor: {missing_cols}"
+        )
+
+    spec = _build_column_specs(definition, reference_ranges)
+    profile = pd.DataFrame(
+        [{t.name: t.reference_value for t in definition.traits}],
+        columns=trait_names,
+    )
+    candidates = candidate_df[trait_names]
+
+    distance_matrix, contribs = gower_distances(
+        profile, candidates, spec=spec, return_contributions=True,
+    )
+    distances = distance_matrix[0]
+    signed = [c.signed()[0] for c in contribs]  # one (m,) array per trait
+
+    subject_by_hadm = dict(zip(candidate_df["hadm_id"], candidate_df["subject_id"]))
+    hadms = candidate_df["hadm_id"].tolist()
+
+    members: list[CohortMember] = []
+    for j, hadm in enumerate(hadms):
+        dist = distances[j]
+        if np.isnan(dist) or dist > definition.distance_threshold:
+            continue
+        contributions = [
+            TraitContribution(
+                name=contribs[c].name,
+                similarity=float(contribs[c].similarity[0, j]),
+                signed=float(signed[c][j]),
+                weight=float(contribs[c].weight),
+                included=bool(contribs[c].delta[0, j] > 0),
+            )
+            for c in range(len(definition.traits))
+        ]
+        members.append(
+            CohortMember(
+                hadm_id=int(hadm),
+                subject_id=int(subject_by_hadm.get(hadm, 0)),
+                distance=float(dist),
+                contributions=contributions,
+            )
+        )
+
+    members.sort(key=lambda mbr: mbr.distance)
+    if definition.top_k is not None:
+        members = members[: definition.top_k]
+
+    return CohortResult(
+        definition=definition,
+        members=members,
+        n_pool=n_pool,
+        n_returned=len(members),
+        provenance=provenance,
+    )
+
+
+__all__ = ["run_similarity", "run_cohort"]

@@ -249,6 +249,56 @@ class CohortDefinition(BaseModel):
         return self
 
 
+class TraitContribution(BaseModel):
+    """One trait's contribution to a single cohort member's distance.
+
+    ``similarity`` is the pygower partial similarity ``s`` in [0, 1];
+    ``signed`` is the explanation-layer signed contribution ``w*(2s-1)`` (so a
+    perfect match contributes ``+weight`` and a perfect mismatch ``-weight``),
+    masked to 0 when the trait was excluded for this pair. ``included`` is
+    False when the trait did not participate (NaN under the ``exclude`` policy).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: str
+    similarity: float
+    signed: float
+    weight: float
+    included: bool
+
+
+class CohortMember(BaseModel):
+    """One admission that fell within the cohort's distance threshold."""
+
+    model_config = {"extra": "forbid"}
+
+    hadm_id: int
+    subject_id: int
+    distance: float
+    contributions: list[TraitContribution] = Field(default_factory=list)
+
+
+class CohortResult(BaseModel):
+    """Output of ``run_cohort`` — the anchorless one-vs-many cohort.
+
+    ``members`` is ranked ascending by Gower ``distance`` to the synthesized
+    reference profile (nearest first) and already trimmed to ``distance <=
+    distance_threshold`` and the ``top_k`` cap. ``definition`` is echoed back so
+    a reader can reproduce membership; ``provenance`` carries the logged
+    criteria (prefilters, every trait's kind / kernel / weight / reference,
+    threshold, top_k, pool size).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    definition: CohortDefinition
+    members: list[CohortMember] = Field(default_factory=list)
+    n_pool: int
+    n_returned: int
+    provenance: dict = Field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Input spec.
 # ---------------------------------------------------------------------------
@@ -363,8 +413,10 @@ from src.conversational.models import (  # noqa: E402
 )
 
 # ``CohortDefinition`` first: its ``prefilters: list[PatientFilter]`` needs the
-# just-imported ``PatientFilter``, and ``SimilaritySpec`` embeds it.
+# just-imported ``PatientFilter``, and ``SimilaritySpec`` + ``CohortResult``
+# both embed it.
 CohortDefinition.model_rebuild()
+CohortResult.model_rebuild()
 SimilaritySpec.model_rebuild()
 SimilarityResult.model_rebuild()
 CompetencyQuestion.model_rebuild(
