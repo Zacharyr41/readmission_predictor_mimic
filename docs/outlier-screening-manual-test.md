@@ -236,10 +236,11 @@ In the sidebar: **Data source → Local DuckDB**, point at your DuckDB
 click **Connect**. (See [`chat-ui-quickstart.md`](./chat-ui-quickstart.md) for the
 full launch options, including BigQuery.)
 
-> To reproduce the exact demo numbers you'd need a lactate row with
-> `valuenum = 1e6` in your data. Against real MIMIC-IV the screen still fires on
-> whatever impossible values exist; the *behavior* below is identical regardless
-> of the specific poison value.
+> **Use BigQuery for a live demo.** The local DuckDB is essentially clean at the
+> canonical lab itemids (blood lactate maxes at 25 mmol/L), so the screen finds
+> nothing to remove there. The full MIMIC-IV on BigQuery *does* contain impossible
+> values (lactate up to 1,276,103 mmol/L). See **§4** below for a table of
+> analytes and prompts verified to fire the screen.
 
 ### Ask
 
@@ -272,6 +273,105 @@ so there's **no second query and no second LLM call**.
 - [ ] Toggling **Include outliers** swaps to the polluted value and back, live.
 - [ ] A high-but-real value (e.g. an actual sepsis lactate of 12) is **kept** —
       never appears in the removed-rows table.
+
+---
+
+## 4. Confirmed analytes & prompts (BigQuery, full MIMIC-IV)
+
+The local 16 GB DuckDB is essentially clean at the canonical lab itemids, so a
+live demo needs **BigQuery** (the full MIMIC-IV, billed to project
+`mimic-485500`). The analytes below were verified to contain genuinely impossible
+values on 2026-06-04 by scanning
+`physionet-data.mimiciv_3_1_hosp.labevents` at each analyte's canonical,
+LOINC-grounded Blood itemid:
+
+| Analyte | itemid | Envelope | Impossible max | # removed |
+| --- | --- | --- | --- | --- |
+| **Glucose** | 50931 | `[0, 2000] mg/dL` | **23,200** | 224 |
+| **WBC** | 51301 | `[0, 500] K/uL` | **12,500** | 35 |
+| **Lactate** | 50813 | `[0, 40] mmol/L` | **1,276,103** | 5 |
+| **Creatinine** | 50912 | `[0, 50] mg/dL` | **808** | 5 |
+| Sodium | 50983 | `[80, 200] mEq/L` | 67 (low side) | 4 |
+| Potassium | 50971 | `[0.5, 15] mEq/L` | 26.5 | 1 |
+| Hemoglobin | 51222 | `[0, 30] g/dL` | — | 0 |
+| Platelets | 51265 | `[0, 3000] K/uL` | — | 0 |
+| Bilirubin (total) | 50885 | `[0, 100] mg/dL` | — | 0 |
+
+> Hemoglobin, platelets, and bilirubin have **zero** impossible values — use one
+> as a negative control to confirm the screen stays out of the way (no expander,
+> answer identical to today).
+
+### Prompts that fire the screen
+
+**Glucose — the headliner (224 impossible values, max 23,200 mg/dL):**
+
+> What is the highest glucose level ever recorded?
+
+Clean answer ≤ 2000 mg/dL (a real extreme-DKA value is kept); the **Include
+outliers** toggle flips it to **23,200**.
+
+> What is the average glucose level?
+
+224 impossible rows are removed pre-aggregation; the toggle adds them back.
+
+**White blood cell count (35 impossible, max 12,500 K/uL):**
+
+> What is the highest white blood cell count recorded?
+
+Clean ≤ 500 K/uL; toggle → **12,500**.
+
+**Creatinine (5 impossible, max 808 mg/dL — a classic data-entry error):**
+
+> What is the average creatinine level?
+
+A real severe-renal-failure creatinine (~15-20) is **kept**; only the absurd rows
+are removed.
+
+**Lactate — the original bug (max 1,276,103 mmol/L):**
+
+> What is the average lactate among patients aged 65 and older?
+>
+> What is the highest lactate level ever recorded?
+
+### Negative control (proves no false positives)
+
+> What is the average hemoglobin level?
+
+Returns a clean answer with **no outlier panel** — there are no impossible
+hemoglobin values in the data, so the uniform screen simply finds nothing to
+bound.
+
+### Reproduce the data check
+
+```bash
+.venv/bin/python - <<'PY'
+from google.cloud import bigquery
+client = bigquery.Client(project="mimic-485500")
+meta = {  # canonical Blood itemid -> (analyte, low, high)
+    50931: ("glucose", 0.0, 2000.0), 51301: ("WBC", 0.0, 500.0),
+    50813: ("lactate", 0.0, 40.0),   50912: ("creatinine", 0.0, 50.0),
+    50983: ("sodium", 80.0, 200.0),  50971: ("potassium", 0.5, 15.0),
+    51222: ("hemoglobin", 0.0, 30.0), 51265: ("platelets", 0.0, 3000.0),
+    50885: ("bilirubin_total", 0.0, 100.0),
+}
+cond = " OR ".join(f"(itemid={i} AND (valuenum<{lo} OR valuenum>{hi}))"
+                   for i, (n, lo, hi) in meta.items())
+ids = ",".join(map(str, meta))
+rows = client.query(f"""
+  SELECT itemid, COUNT(*) n_total, MAX(valuenum) max_v, COUNTIF({cond}) n_impossible
+  FROM `physionet-data.mimiciv_3_1_hosp.labevents`
+  WHERE itemid IN ({ids}) AND valuenum IS NOT NULL GROUP BY itemid ORDER BY itemid
+""").result()
+for r in rows:
+    print(dict(r))
+PY
+```
+
+> **Why not `LIKE`?** Scanning `LIKE '%lactate%'` sweeps in **Lactate
+> Dehydrogenase (LDH)** — an enzyme in IU/L with values in the thousands — and
+> wildly overstates "impossible lactate." The screen avoids this by resolving each
+> analyte to its LOINC-grounded `itemid` (lactate → 50813, blood / mmol/L) and
+> bounding only that.
 
 ---
 
