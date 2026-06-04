@@ -153,7 +153,7 @@ def _fetch_admission_features(backend: Any, hadm_ids: list[int]) -> pd.DataFrame
             f"""
             SELECT l.hadm_id,
                    MAX(CASE WHEN l.itemid = 50912 THEN l.valuenum END) AS creatinine_max,
-                   AVG(CASE WHEN l.itemid = 50971 THEN l.valuenum END) AS sodium_mean,
+                   AVG(CASE WHEN l.itemid = 50983 THEN l.valuenum END) AS sodium_mean,
                    MIN(CASE WHEN l.itemid = 51265 THEN l.valuenum END) AS platelet_min
             FROM labevents l
             WHERE l.hadm_id IN ({placeholders})

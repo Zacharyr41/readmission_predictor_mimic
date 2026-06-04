@@ -136,7 +136,7 @@ def synthetic_duckdb_with_events(synthetic_duckdb: duckdb.DuckDBPyConnection) ->
     conn.execute("""
         INSERT INTO d_labitems VALUES
         (50912, 'Creatinine', 'Blood', 'Chemistry'),
-        (50971, 'Sodium', 'Blood', 'Chemistry'),
+        (50983, 'Sodium', 'Blood', 'Chemistry'),
         (51265, 'Platelet Count', 'Blood', 'Hematology')
     """)
 
@@ -158,7 +158,7 @@ def synthetic_duckdb_with_events(synthetic_duckdb: duckdb.DuckDBPyConnection) ->
     conn.execute("""
         INSERT INTO labevents VALUES
         (1, 1, 101, 1001, 50912, '2150-01-16 06:00:00', 1.2, 'mg/dL', 0.7, 1.3),
-        (2, 1, 101, 1001, 50971, '2150-01-16 06:00:00', 140.0, 'mEq/L', 136.0, 145.0),
+        (2, 1, 101, 1001, 50983, '2150-01-16 06:00:00', 140.0, 'mEq/L', 136.0, 145.0),
         (3, 2, 103, 1002, 50912, '2151-03-03 08:00:00', 0.9, 'mg/dL', 0.7, 1.3),
         (4, 5, 106, 1003, 50912, '2151-04-12 10:00:00', 1.5, 'mg/dL', 0.7, 1.3)
     """)
