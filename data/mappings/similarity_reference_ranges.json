@@ -1,0 +1,36 @@
+{
+  "cohort": "all_admissions",
+  "generated_at": "2026-06-04T22:31:17.456822+00:00",
+  "percentiles": {
+    "high": 0.99,
+    "low": 0.01
+  },
+  "ranges": {
+    "age": {
+      "high": 91.0,
+      "low": 19.0,
+      "n": 546028
+    },
+    "creatinine_max": {
+      "high": 9.8,
+      "low": 0.5,
+      "n": 9256
+    },
+    "icu_los_hours": {
+      "high": 725.5236888888899,
+      "low": 7.456111111111111,
+      "n": 85229
+    },
+    "platelet_min": {
+      "high": 502.0,
+      "low": 27.0,
+      "n": 9216
+    },
+    "sodium_mean": {
+      "high": 151.45200000000006,
+      "low": 129.44444444444446,
+      "n": 9223
+    }
+  },
+  "version": "1"
+}

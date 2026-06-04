@@ -1073,6 +1073,56 @@ class TestSimilarityBranch:
         assert "2" in result.text_summary and "6" in result.text_summary
         assert "hadm_id" not in result.text_summary
 
+    @_patch_all
+    def test_cohort_path_injects_frozen_reference_ranges(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Plan II-E: the cohort branch feeds the frozen reference-population
+        ranges into ``run_cohort`` (locked decision #6 — a quantitative trait is
+        normalized against a fixed, pre-fit scale, never one learned from the
+        candidate batch). The orchestrator loads them and passes them through.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        defn = CohortDefinition(
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68,  # no range_ → must come from frozen ranges
+                ),
+            ],
+        )
+        spec = SimilaritySpec(cohort_definition=defn)
+        cq = CompetencyQuestion(
+            original_question="Find patients like a 68-year-old.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        frozen = {"age": (18.0, 91.0)}
+        sentinel = CohortResult(
+            definition=defn, members=[], n_pool=0, n_returned=0, provenance={},
+        )
+
+        with patch(
+            "src.similarity.reference_ranges.load_reference_ranges",
+            return_value=frozen,
+        ), patch(
+            "src.similarity.run.run_cohort", return_value=sentinel,
+        ) as mock_run_cohort:
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            pipeline.ask("Find patients like a 68-year-old.")
+
+        assert mock_run_cohort.call_count == 1
+        assert mock_run_cohort.call_args.kwargs.get("reference_ranges") == frozen
+
 
 # ---------------------------------------------------------------------------
 # TestCriticIntegration — end-to-end critic wiring (Phase 6)

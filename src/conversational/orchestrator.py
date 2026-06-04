@@ -1239,10 +1239,17 @@ class ConversationalPipeline:
         keys (hadm_id / subject_id) appear only in the result table, never as
         something the clinician must read or type.
         """
+        from src.similarity.reference_ranges import load_reference_ranges
         from src.similarity.run import run_cohort
 
+        # Inject the frozen reference-population ranges (locked decision #6):
+        # quantitative traits are normalized against a fixed, pre-fit scale, not
+        # a range learned from the candidate batch. Traits that carry their own
+        # ``range_`` override this; traits with neither raise a clear error.
         try:
-            result = run_cohort(definition, backend)
+            result = run_cohort(
+                definition, backend, reference_ranges=load_reference_ranges()
+            )
         except NotImplementedError as exc:
             return AnswerResult(
                 text_summary=(
