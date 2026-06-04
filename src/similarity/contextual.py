@@ -1,10 +1,18 @@
-"""Contextual similarity — grouped Gower-like distance (Phase 9).
+"""Contextual similarity — grouped Gower distance (Phase 9).
 
 Five feature groups (defined in ``feature_groups.py``), each computing
 a 0-1 group-similarity score plus per-feature signed contributions.
 Overall contextual similarity is a weighted mean across groups; group
 weights are user-overrideable via ``SimilaritySpec.contextual_weights``
 and validated here to sum to 1.0 across the provided keys.
+
+The per-feature similarity primitives (``_pairwise_similarity`` for
+quantitative features, ``_flag_match`` for binary flags) delegate to the
+shared ``src.pygower`` kernels, so this path and the cohort path use ONE
+Gower implementation. The 5-group structure, the weighted-Jaccard flag
+handling (``comorbidity_burden`` / ``comorbidity_set``), and the signed
+contribution shaping remain here as the presentation layer on top of those
+kernels.
 
 Distance conventions (from the plan):
 
@@ -29,8 +37,10 @@ Plan: /Users/zacharyrothstein/.claude/plans/vivid-knitting-forest.md
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
+from src.pygower.kernels import binary_kernel, quantitative_kernel
 from src.similarity.feature_groups import DEFAULT_GROUP_WEIGHTS, GROUP_FEATURES
 from src.similarity.models import ContextualExplanation
 
@@ -68,17 +78,39 @@ SEVERITY_SCALES: dict[str, float] = {
 
 
 def _pairwise_similarity(a: float, c: float, scale: float) -> float:
-    """Normalised distance → similarity, clipped to [0, 1]."""
+    """Symmetric quantitative Gower similarity, via pygower's kernel.
+
+    Delegates to ``pygower.quantitative_kernel`` — the single source of truth
+    for ``clip(1 − |Δ|/R, 0, 1)`` — so the contextual path and the cohort path
+    share one Gower implementation (locked decision: no second distance metric).
+    ``scale`` is the fixed clinical range ``R``.
+
+    Missing → ``0.0`` (``zero_similarity`` policy): contextual treats an unknown
+    value as maximally dissimilar (a detractor), NOT excluded from the group
+    mean. The kernel's own validity mask is discarded here in favour of that.
+    """
     if pd.isna(a) or pd.isna(c):
         return 0.0
-    return max(0.0, 1.0 - min(abs(a - c) / scale, 1.0))
+    s, _ = quantitative_kernel(
+        np.asarray([a], dtype=float), np.asarray([c], dtype=float), range_=scale,
+    )
+    return float(s[0, 0])
 
 
 def _flag_match(a: int, c: int) -> float:
-    """Flag-valued 0/1 similarity (1 if both match, 0 otherwise)."""
+    """Symmetric binary match (1 if equal else 0), via pygower's kernel.
+
+    Delegates to ``pygower.binary_kernel`` (symmetric variant — both-absent
+    counts as a match, matching contextual's historical 0/1 semantics). Flags
+    are 0/1; int-coerce to preserve the original ``int(a) == int(c)`` compare.
+    Missing → ``0.0`` (``zero_similarity``), as in ``_pairwise_similarity``.
+    """
     if pd.isna(a) or pd.isna(c):
         return 0.0
-    return 1.0 if int(a) == int(c) else 0.0
+    s, _ = binary_kernel(
+        np.asarray([int(a)], dtype=float), np.asarray([int(c)], dtype=float),
+    )
+    return float(s[0, 0])
 
 
 def _score_demographics(anchor: dict, candidate: dict) -> tuple[float, list[tuple[str, float]]]:
