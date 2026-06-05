@@ -338,6 +338,73 @@ class TestWritePrescriptionEvent:
         result = graph_with_ontology.query(query)
         assert bool(result), "PrescriptionEvent should be interval with all properties"
 
+    def test_two_administrations_same_drug_yield_distinct_intervals(
+        self,
+        graph_with_ontology: Graph,
+        sample_patient_data: dict,
+        sample_admission_data: dict,
+        sample_icu_stay_data: dict,
+    ) -> None:
+        """Each administration of a drug is its own interval (plan I-C).
+
+        Two doses of the same drug in one admission must produce two distinct
+        PrescriptionEvent intervals, each carrying its own single dose value, so
+        a dose series ("escalating pressors") is query-orderable. The old keying
+        (one URI per hadm+drug) collapsed them into a single node with two
+        hasDoseValue triples and an un-orderable begin instant.
+        """
+        patient_uri = write_patient(graph_with_ontology, sample_patient_data)
+        admission_uri = write_admission(graph_with_ontology, sample_admission_data, patient_uri)
+        icu_stay_uri = write_icu_stay(graph_with_ontology, sample_icu_stay_data, admission_uri)
+        icu_day_metadata = write_icu_days(graph_with_ontology, sample_icu_stay_data, icu_stay_uri)
+
+        first_dose = {
+            "hadm_id": 200,
+            "stay_id": 300,
+            "drug": "Norepinephrine",
+            "starttime": datetime(2150, 1, 1, 10, 0, 0),
+            "stoptime": datetime(2150, 1, 1, 14, 0, 0),
+            "dose_val_rx": 5.0,
+            "dose_unit_rx": "mcg/kg/min",
+            "route": "IV",
+        }
+        second_dose = {
+            **first_dose,
+            "starttime": datetime(2150, 1, 1, 18, 0, 0),
+            "stoptime": datetime(2150, 1, 1, 22, 0, 0),
+            "dose_val_rx": 12.0,
+        }
+
+        first_uri = write_prescription_event(
+            graph_with_ontology, first_dose, icu_stay_uri, icu_day_metadata
+        )
+        second_uri = write_prescription_event(
+            graph_with_ontology, second_dose, icu_stay_uri, icu_day_metadata
+        )
+
+        # Distinct interval nodes — the core of the re-key.
+        assert first_uri != second_uri
+
+        # Exactly two PrescriptionEvent intervals exist for this drug.
+        count_query = """
+        SELECT (COUNT(DISTINCT ?event) AS ?n) WHERE {
+            ?event rdf:type mimic:PrescriptionEvent ;
+                   rdf:type time:ProperInterval ;
+                   mimic:hasDrugName ?drug .
+            FILTER (?drug = "Norepinephrine")
+        }
+        """
+        rows = list(graph_with_ontology.query(count_query))
+        assert int(rows[0][0]) == 2
+
+        # Each interval carries exactly one dose value (its own), so a dose
+        # series can be ordered by each interval's beginning.
+        for uri, expected_dose in ((first_uri, 5.0), (second_uri, 12.0)):
+            doses = [float(o) for o in graph_with_ontology.objects(uri, MIMIC_NS.hasDoseValue)]
+            assert doses == [expected_dose]
+            begins = list(graph_with_ontology.objects(uri, TIME_NS.hasBeginning))
+            assert len(begins) == 1
+
 
 class TestWriteDiagnosisEvent:
     """Tests for writing DiagnosisEvent individuals to the graph."""

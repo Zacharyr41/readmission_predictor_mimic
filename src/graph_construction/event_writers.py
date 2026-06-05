@@ -410,7 +410,13 @@ def write_prescription_event(
     drug_slug = _slugify(drug)
     starttime = rx_data["starttime"]
 
-    event_uri = MIMIC_NS[f"RXE-{hadm_id}-{drug_slug}"]
+    # Key per administration, not per (hadm, drug): every administration is its
+    # own time:ProperInterval carrying its own dose, so a dose series
+    # ("escalating pressors") stays orderable. Collapsing to one URI per drug
+    # would pile multiple hasDoseValue/hasBeginning triples on a single node.
+    start_slug = _timestamp_slug(starttime) if starttime is not None else "nostart"
+
+    event_uri = MIMIC_NS[f"RXE-{hadm_id}-{drug_slug}-{start_slug}"]
 
     # Type assertions
     graph.add((event_uri, RDF.type, MIMIC_NS.PrescriptionEvent))
@@ -418,13 +424,13 @@ def write_prescription_event(
 
     # Temporal bounds (starttime may be NULL for some prescriptions)
     if rx_data.get("starttime") is not None:
-        begin_uri = MIMIC_NS[f"RXEBegin_{hadm_id}_{drug_slug}"]
+        begin_uri = MIMIC_NS[f"RXEBegin_{hadm_id}_{drug_slug}_{start_slug}"]
         _write_instant(graph, begin_uri, rx_data["starttime"])
         graph.add((event_uri, TIME_NS.hasBeginning, begin_uri))
 
     # End time may be NULL for ongoing prescriptions
     if rx_data.get("stoptime") is not None:
-        end_uri = MIMIC_NS[f"RXEEnd_{hadm_id}_{drug_slug}"]
+        end_uri = MIMIC_NS[f"RXEEnd_{hadm_id}_{drug_slug}_{start_slug}"]
         _write_instant(graph, end_uri, rx_data["stoptime"])
         graph.add((event_uri, TIME_NS.hasEnd, end_uri))
 
