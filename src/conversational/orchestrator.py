@@ -76,6 +76,17 @@ PROGRESS_SCORING_COHORT = "Scoring the candidate cohort…"
 PROGRESS_BUILDING_GRAPH = "Building the knowledge graph…"
 PROGRESS_REASONING = "Reasoning over the data…"
 PROGRESS_REVIEWING = "Reviewing the result…"
+# Emitted when the critic-driven self-heal loop loops back to re-run a query
+# with a corrected LOINC, so a retry reads as a deliberate correction rather
+# than a slow first attempt.
+PROGRESS_RETRYING = "Retrying with a correction…"
+
+# Single source of truth for the user-facing text when ``ask()`` catches a
+# pipeline exception. Paired with ``AnswerResult.error=True`` so the UI can
+# render an error state.
+ERROR_MESSAGE = (
+    "An error occurred while processing your question. Please try rephrasing."
+)
 
 
 class ConversationalPipeline:
@@ -433,12 +444,7 @@ class ConversationalPipeline:
 
         except Exception:
             logger.exception("Pipeline failed for question: %s", question)
-            return AnswerResult(
-                text_summary=(
-                    "An error occurred while processing your question. "
-                    "Please try rephrasing."
-                ),
-            )
+            return AnswerResult(text_summary=ERROR_MESSAGE, error=True)
         finally:
             self._progress_callback = None
 
@@ -917,6 +923,7 @@ class ConversationalPipeline:
             })
             if not self._should_retry(sub, cq, attempt, cap):
                 break
+            self._progress(PROGRESS_RETRYING)
             try:
                 cq.clinical_concepts[0].loinc_code = (
                     sub.critic_verdict.suggested_loinc

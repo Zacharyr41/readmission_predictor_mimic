@@ -1604,6 +1604,40 @@ class TestProgressCallback:
         assert PROGRESS_SCORING_COHORT in labels
 
 
+class TestErrorIndicator:
+    """``ask`` swallows every pipeline exception and returns a normal
+    AnswerResult (it never re-raises). For the UI to flag a failure as an error
+    rather than a green "complete", that result must carry a structured
+    ``error`` flag and a named ``ERROR_MESSAGE`` — distinguishable by a field,
+    not merely by prose.
+    """
+
+    @_patch_all
+    def test_pipeline_failure_sets_error_flag_and_message(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        from src.conversational.orchestrator import ERROR_MESSAGE
+
+        mock_decompose.side_effect = RuntimeError("backend exploded")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("What is the creatinine?")
+
+        assert result.error is True
+        assert result.text_summary == ERROR_MESSAGE
+
+    @_patch_all
+    def test_successful_turn_has_error_false(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        _setup_mocks(mock_decompose, mock_extract, mock_build, mock_reason, mock_answer)
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("What is the creatinine?")
+
+        assert result.error is False
+
+
 # ---------------------------------------------------------------------------
 # TestCriticIntegration — end-to-end critic wiring (Phase 6)
 #
@@ -1793,6 +1827,75 @@ def _verdict_json(
         "suggested_loinc": suggested_loinc,
         "correction_rationale": correction_rationale,
     })
+
+
+class TestRetryProgress:
+    """A pipeline-level retry (the critic-driven LOINC self-heal) must emit a
+    distinct progress label, so the user sees "retrying" rather than mistaking
+    a second attempt for the first query merely taking longer. Placed here —
+    not in TestProgressCallback — because it needs ``_patch_for_self_healing``,
+    which is defined further down the module than that class.
+    """
+
+    @_patch_for_self_healing
+    def test_self_heal_retry_emits_retrying_label(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+        from src.conversational.orchestrator import PROGRESS_RETRYING
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_run_sql_fastpath.side_effect = [
+            (AnswerResult(text_summary="polluted"), ["SELECT ... LIKE"], "fb"),
+            (AnswerResult(text_summary="clean"), ["SELECT ... itemid IN (50813)"], None),
+        ]
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(severity="block", concern="pollution", suggested_loinc="32693-4"),
+            _verdict_json(severity="info"),
+        ])
+
+        labels: list[str] = []
+        pipeline.ask(
+            "What is the average lactate for patients with sepsis?",
+            progress_callback=labels.append,
+        )
+
+        assert PROGRESS_RETRYING in labels
+
+    @_patch_for_self_healing
+    def test_no_retry_does_not_emit_retrying_label(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        """The retry label fires ONLY on an actual retry — a clean first pass
+        (no critic correction) must never show it, or it would be noise."""
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+        from src.conversational.orchestrator import PROGRESS_RETRYING
+
+        cq = _make_lactate_cq(loinc_code="2524-7")
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_run_sql_fastpath.return_value = (
+            AnswerResult(text_summary="clean"), ["SELECT ..."], None,
+        )
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+        )
+        pipeline._client = mock_anthropic([_verdict_json(severity="info")])
+
+        labels: list[str] = []
+        pipeline.ask(
+            "What is the average lactate for patients with sepsis?",
+            progress_callback=labels.append,
+        )
+
+        assert PROGRESS_RETRYING not in labels
 
 
 class TestSelfHealingCritic:

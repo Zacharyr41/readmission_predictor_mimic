@@ -614,6 +614,11 @@ class AnswerResult(BaseModel):
     # the clinician must read or type. None on every non-cohort turn.
     download_csv: str | None = None
     download_filename: str | None = None
+    # True when ``ask()`` caught a pipeline exception and returned this sentinel
+    # instead of a real answer. ``ask()`` swallows all exceptions and never
+    # re-raises, so the UI can't tell a failure from a success by control flow —
+    # it reads this flag to render an error state instead of a green "complete".
+    error: bool = False
 
 
 class DecompositionResult(BaseModel):

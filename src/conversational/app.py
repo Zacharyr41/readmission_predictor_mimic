@@ -464,7 +464,17 @@ if question := st.chat_input("Ask a clinical question..."):
                         duration_s=time.monotonic() - _started,
                         answer=answer,
                     )
-                    status.update(label="Analysis complete", state="complete")
+                    # ``ask`` swallows all exceptions and returns a sentinel
+                    # AnswerResult, so the ``except`` above never fires for a
+                    # real pipeline failure. Drive the final state off the
+                    # structured ``error`` flag instead, so an error message
+                    # doesn't render under a green "complete".
+                    if answer.error:
+                        status.update(label="Analysis failed", state="error")
+                    else:
+                        status.update(
+                            label="Analysis complete", state="complete"
+                        )
                 # Key by the index this message will occupy once appended, so
                 # the history loop reuses the same widget keys on the next
                 # re-run and the outlier toggle's state survives.
