@@ -202,11 +202,24 @@ def _to_bq_params(params: list) -> list:
     Type inference is best-effort — int → INT64, float → FLOAT64,
     everything else → STRING. Dry-run only checks shape, so over-broad
     typing is fine.
+
+    A list/tuple value binds as a positional ``ArrayQueryParameter`` (used as
+    ``IN UNNEST(?)``). This MUST mirror the real backend's array binding
+    (``src.conversational.extractor._BigQueryBackend._convert_params``): the
+    large-pool cohort feature-fetch sends one list-valued param, and binding it
+    as a scalar STRING here makes the dry-run reject a valid query with
+    "Second argument of IN UNNEST must be an array but was STRING" — a false
+    block the user only sees when the pre-validator is on.
     """
     from google.cloud import bigquery
 
     out: list = []
     for p in params:
+        if isinstance(p, (list, tuple)):
+            out.append(
+                bigquery.ArrayQueryParameter(None, _array_element_type(p), list(p))
+            )
+            continue
         if isinstance(p, bool):
             type_ = "BOOL"
         elif isinstance(p, int):
@@ -218,6 +231,22 @@ def _to_bq_params(params: list) -> list:
             p = str(p)
         out.append(bigquery.ScalarQueryParameter(None, type_, p))
     return out
+
+
+def _array_element_type(values) -> str:
+    """BigQuery element type for a positional array param, inferred from the
+    first element. Our array binds are hadm_id lists → INT64; empty defaults to
+    INT64. ``bool`` is checked before ``int`` (bool is an int subclass)."""
+    if not values:
+        return "INT64"
+    first = values[0]
+    if isinstance(first, bool):
+        return "BOOL"
+    if isinstance(first, int):
+        return "INT64"
+    if isinstance(first, float):
+        return "FLOAT64"
+    return "STRING"
 
 
 if __name__ == "__main__":

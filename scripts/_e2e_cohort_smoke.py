@@ -7,15 +7,17 @@ ranked cohort in seconds — not the ~21-minute wedge the O(n^2) param build +
 per-id placeholder explosion used to produce on the ~199k EW EMER./DIRECT EMER.
 pool.
 
-The pre-execution MCP validator is left OFF here: it is an orthogonal piece of
-infra that fails *open* (a timeout just yields ``verdict=None`` and the query
-still runs), and in this environment it has been timing out — including it would
-add latency noise without changing correctness, muddying the signal about the
-scaling fix this smoke exists to verify.
+The pre-execution MCP validator runs by default so this mirrors the live
+dashboard exactly (it is what caught — falsely, until the array-param fix — the
+``IN UNNEST(?)`` cohort feature-fetch). Pass ``--no-validator`` to isolate the
+scoring path from the MCP round-trip when you only care about the scaling fix;
+the validator fails *open*, so disabling it never changes the result, only
+latency.
 
 Usage:
     .venv/bin/python scripts/_e2e_cohort_smoke.py
     .venv/bin/python scripts/_e2e_cohort_smoke.py "some other question"
+    .venv/bin/python scripts/_e2e_cohort_smoke.py --no-validator
 """
 
 from __future__ import annotations
@@ -36,7 +38,10 @@ _DEMO_QUESTION = (
 
 
 def main() -> int:
-    question = sys.argv[1] if len(sys.argv) > 1 else _DEMO_QUESTION
+    args = [a for a in sys.argv[1:]]
+    use_validator = "--no-validator" not in args
+    args = [a for a in args if a != "--no-validator"]
+    question = args[0] if args else _DEMO_QUESTION
     settings = Settings()
     if settings.data_source != "bigquery":
         print(f"!! data_source={settings.data_source!r}, expected 'bigquery'.")
@@ -49,6 +54,7 @@ def main() -> int:
 
     ontology_dir = Path(__file__).resolve().parent.parent / "ontology" / "definition"
     print(f"backend     : bigquery ({settings.bigquery_project})")
+    print(f"validator   : {'ON (prod-faithful)' if use_validator else 'OFF'}")
     print(f"question    : {question}")
     print("-" * 78)
 
@@ -58,7 +64,7 @@ def main() -> int:
         api_key=settings.anthropic_api_key,
         data_source="bigquery",
         bigquery_project=settings.bigquery_project,
-        enable_pre_validator=False,  # see module docstring
+        enable_pre_validator=use_validator,  # see module docstring
     )
 
     t0 = time.monotonic()

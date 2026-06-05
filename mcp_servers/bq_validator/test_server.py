@@ -125,6 +125,30 @@ class TestDryRunStage:
             assert verdict["stage"] == "dry_run"
             assert "boom" in verdict["error"]
 
+    def test_unnest_array_param_wired_into_dry_run(self):
+        """A ``IN UNNEST(?)`` query with a list param must reach the dry-run
+        carrying an ARRAY parameter. This is the exact shape the cohort
+        feature-fetch sends; binding the list as a STRING is what produced the
+        false block in the live demo."""
+        from google.cloud import bigquery
+
+        with patch("mcp_servers.bq_validator.server._bq") as bq:
+            job = MagicMock()
+            job.total_bytes_processed = 100
+            job.referenced_tables = []
+            bq.return_value.query.return_value = job
+            verdict = _run_stages(
+                "SELECT hadm_id "
+                "FROM `physionet-data.mimiciv_3_1_hosp.admissions` "
+                "WHERE hadm_id IN UNNEST(?)",
+                [[1, 2, 3]], 0.5, 10**10,
+            )
+            assert verdict["ok"] is True
+            _, kwargs = bq.return_value.query.call_args
+            qparams = kwargs["job_config"].query_parameters
+            assert isinstance(qparams[0], bigquery.ArrayQueryParameter)
+            assert list(qparams[0].values) == [1, 2, 3]
+
 
 # ---------------------------------------------------------------------------
 # Stage 5: cost gate
@@ -217,3 +241,41 @@ class TestParamConversion:
         assert types[1] == "FLOAT64"
         assert types[2] == "STRING"
         assert types[3] == "BOOL"
+
+    def test_list_param_becomes_array_query_parameter(self):
+        """A list/tuple positional param must bind as an ARRAY, not a STRING.
+
+        Regression: the cohort feature-fetch filters with
+        ``WHERE hadm_id IN UNNEST(?)`` and a single list-valued param. Binding
+        that list as a scalar STRING makes BigQuery's dry-run reject the query
+        ("Second argument of IN UNNEST must be an array but was STRING"), which
+        the pre-validator surfaces as a *false* block of an otherwise valid
+        query. The element type is inferred from the first element.
+        """
+        from google.cloud import bigquery
+
+        out = _to_bq_params([[1, 2, 3]])
+        assert len(out) == 1
+        assert isinstance(out[0], bigquery.ArrayQueryParameter)
+        assert out[0].array_type == "INT64"
+        assert list(out[0].values) == [1, 2, 3]
+
+    def test_tuple_array_and_mixed_scalars(self):
+        from google.cloud import bigquery
+
+        out = _to_bq_params([(10, 20), 5, "x"])
+        assert isinstance(out[0], bigquery.ArrayQueryParameter)
+        assert out[0].array_type == "INT64"
+        assert list(out[0].values) == [10, 20]
+        assert isinstance(out[1], bigquery.ScalarQueryParameter)
+        assert out[1].type_ == "INT64"
+        assert isinstance(out[2], bigquery.ScalarQueryParameter)
+        assert out[2].type_ == "STRING"
+
+    def test_empty_list_param_defaults_to_int64_array(self):
+        from google.cloud import bigquery
+
+        out = _to_bq_params([[]])
+        assert isinstance(out[0], bigquery.ArrayQueryParameter)
+        assert out[0].array_type == "INT64"
+        assert list(out[0].values) == []
