@@ -25,6 +25,7 @@ from src.graph_construction.event_writers import (
     write_microbiology_event,
     write_prescription_event,
 )
+from src.graph_construction.comorbidity_builder import write_patient_comorbidities
 from src.graph_construction.ontology import initialize_graph
 from src.graph_construction.patient_writer import (
     link_sequential_admissions,
@@ -69,6 +70,7 @@ def build_query_graph(
         "prescriptions": 0,
         "diagnoses": 0,
         "microbiology": 0,
+        "comorbidities": 0,
         "allen_relations": 0,
     }
 
@@ -91,11 +93,13 @@ def build_query_graph(
     hadm_to_admission_uri: dict[int, URIRef] = {}
     stay_meta: dict[int, tuple[URIRef, list]] = {}
     patient_uris: list[URIRef] = []
+    patient_uri_by_subject: dict[int, URIRef] = {}
 
     # -- Patients, admissions, ICU stays --------------------------------------
     for patient in extraction.patients:
         patient_uri = write_patient(graph, patient)
         patient_uris.append(patient_uri)
+        patient_uri_by_subject[patient["subject_id"]] = patient_uri
         stats["patients"] += 1
 
         admissions = sorted(
@@ -157,12 +161,25 @@ def build_query_graph(
         write_prescription_event(graph, event, icu_stay_uri, icu_day_meta)
         stats["prescriptions"] += 1
 
+    diagnoses_by_subject: dict[int, list[dict]] = defaultdict(list)
     for event in extraction.events.get("diagnosis", []):
         hadm_id = event.get("hadm_id")
         if hadm_id not in hadm_to_admission_uri:
             continue
         write_diagnosis_event(graph, event, hadm_to_admission_uri[hadm_id])
         stats["diagnoses"] += 1
+        subject_id = event.get("subject_id")
+        if subject_id is not None:
+            diagnoses_by_subject[subject_id].append(event)
+
+    # -- Comorbidities (I-B): Charlson flags from each patient's diagnoses -----
+    # Query-scoped graphs match by mimic: properties, so (matching the other
+    # writers here) SNOMED grounding is left off the per-question path.
+    for subject_id, patient_uri in patient_uri_by_subject.items():
+        comorbidity_uris = write_patient_comorbidities(
+            graph, diagnoses_by_subject.get(subject_id, []), patient_uri, subject_id,
+        )
+        stats["comorbidities"] += len(comorbidity_uris)
 
     for event in extraction.events.get("microbiology", []):
         resolved = _resolve_event_to_stay(

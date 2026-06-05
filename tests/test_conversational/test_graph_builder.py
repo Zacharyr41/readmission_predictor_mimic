@@ -428,6 +428,82 @@ class TestBuildQueryGraphEvents:
 
 
 # ---------------------------------------------------------------------------
+# Comorbidity derivation on the cohort path (plan I-B)
+# ---------------------------------------------------------------------------
+
+
+class TestComorbidityWiring:
+    """I-B: the cohort-path graph derives Charlson comorbidities from each
+    patient's ICD-10 diagnoses (prefix-matched against the Quan et al. 2005
+    mapping) and emits one ``mimic:Comorbidity`` node per present category,
+    linked to the patient. Before wiring, ``write_comorbidity`` was dead code.
+    """
+
+    def test_chf_icd_yields_comorbidity_node_linked_to_patient(self, ontology_dir):
+        # A single patient whose only diagnosis is congestive heart failure
+        # (ICD-10 I50.9, stored dotless as MIMIC does). Charlson should derive
+        # exactly one comorbidity: congestive_heart_failure.
+        extraction = ExtractionResult(
+            patients=[{"subject_id": 6500, "gender": "F", "anchor_age": 74}],
+            admissions=[{
+                "hadm_id": 6510, "subject_id": 6500,
+                "admittime": datetime(2150, 7, 1, 8, 0),
+                "dischtime": datetime(2150, 7, 6, 12, 0),
+                "admission_type": "EMERGENCY",
+                "discharge_location": "HOME",
+            }],
+            events={
+                "diagnosis": [{
+                    "hadm_id": 6510, "subject_id": 6500, "seq_num": 1,
+                    "icd_code": "I509", "icd_version": 10,
+                    "long_title": "Heart failure, unspecified",
+                }],
+            },
+        )
+
+        graph, stats = build_query_graph(ontology_dir, extraction)
+
+        assert stats["comorbidities"] == 1
+
+        result = graph.query(
+            """ASK {
+                mimic:PA-6500 mimic:hasComorbidity ?c .
+                ?c rdf:type mimic:Comorbidity ;
+                   mimic:hasComorbidityName ?name .
+                FILTER(STR(?name) = "congestive_heart_failure")
+            }""",
+            initNs={"mimic": MIMIC_NS},
+        )
+        assert bool(result)
+
+    def test_no_charlson_diagnosis_yields_no_comorbidity(self, ontology_dir):
+        # A diagnosis outside the Charlson mapping derives no comorbidity, and
+        # absence is modeled as the lack of a node (no false-positive flags).
+        extraction = ExtractionResult(
+            patients=[{"subject_id": 6600, "gender": "M", "anchor_age": 40}],
+            admissions=[{
+                "hadm_id": 6610, "subject_id": 6600,
+                "admittime": datetime(2150, 8, 1, 8, 0),
+                "dischtime": datetime(2150, 8, 3, 12, 0),
+                "admission_type": "ELECTIVE",
+                "discharge_location": "HOME",
+            }],
+            events={
+                "diagnosis": [{
+                    "hadm_id": 6610, "subject_id": 6600, "seq_num": 1,
+                    "icd_code": "Z9999", "icd_version": 10,
+                    "long_title": "Unrelated code",
+                }],
+            },
+        )
+
+        graph, stats = build_query_graph(ontology_dir, extraction)
+
+        assert stats["comorbidities"] == 0
+        assert (None, RDF.type, MIMIC_NS.Comorbidity) not in graph
+
+
+# ---------------------------------------------------------------------------
 # TestBuildQueryGraphAdvanced
 # ---------------------------------------------------------------------------
 
@@ -503,7 +579,7 @@ class TestBuildQueryGraphAdvanced:
         expected_keys = {
             "patients", "admissions", "icu_stays", "icu_days",
             "biomarkers", "vitals", "prescriptions", "diagnoses",
-            "microbiology", "allen_relations",
+            "microbiology", "comorbidities", "allen_relations",
         }
         assert set(stats.keys()) == expected_keys
 
@@ -517,6 +593,9 @@ class TestBuildQueryGraphAdvanced:
         assert stats["prescriptions"] == 1
         assert stats["diagnoses"] == 1
         assert stats["microbiology"] == 1
+        # The I63.0 (cerebral infarction) diagnosis is a Charlson
+        # cerebrovascular_disease, so one comorbidity is derived (plan I-B).
+        assert stats["comorbidities"] == 1
         assert stats["allen_relations"] > 0
 
 

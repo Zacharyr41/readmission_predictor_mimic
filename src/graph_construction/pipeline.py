@@ -34,6 +34,7 @@ from src.graph_construction.event_writers import (
     write_prescription_event,
     write_diagnosis_event,
 )
+from src.graph_construction.comorbidity_builder import write_patient_comorbidities
 from src.graph_construction.temporal.allen_relations import compute_allen_relations_for_patient
 from src.graph_construction.terminology import SnomedMapper
 from src.ingestion.derived_tables import (
@@ -147,6 +148,7 @@ def build_graph(
         "microbiology": 0,
         "prescriptions": 0,
         "diagnoses": 0,
+        "comorbidities": 0,
         "allen_relations": 0,
     }
 
@@ -249,6 +251,7 @@ def build_graph(
     logger.info(f"  Microbiology Events: {stats['microbiology']}")
     logger.info(f"  Prescription Events: {stats['prescriptions']}")
     logger.info(f"  Diagnosis Events: {stats['diagnoses']}")
+    logger.info(f"  Comorbidities: {stats['comorbidities']}")
     logger.info(f"  Allen Relations: {stats['allen_relations']}")
 
     return graph
@@ -392,6 +395,7 @@ def _process_patient(
         "microbiology": 0,
         "prescriptions": 0,
         "diagnoses": 0,
+        "comorbidities": 0,
         "allen_relations": 0,
     }
 
@@ -407,6 +411,7 @@ def _process_patient(
     # Get admissions with readmission labels
     admissions = _query_admissions_with_labels(conn, subject_id)
     admission_uris = []
+    patient_diagnoses: list[dict] = []  # accumulated across admissions for Charlson
 
     # Get eligible hadm_ids from cohort
     eligible_hadm_ids = set(
@@ -466,6 +471,14 @@ def _process_patient(
         for dx_data in diagnoses:
             write_diagnosis_event(graph, dx_data, admission_uri, snomed_mapper=snomed_mapper)
             stats["diagnoses"] += 1
+        patient_diagnoses.extend(diagnoses)
+
+    # Derive Charlson comorbidities from the patient's pooled diagnoses (I-B):
+    # one mimic:Comorbidity node per present category, grounded to SNOMED.
+    comorbidity_uris = write_patient_comorbidities(
+        graph, patient_diagnoses, patient_uri, subject_id, snomed_mapper=snomed_mapper,
+    )
+    stats["comorbidities"] = len(comorbidity_uris)
 
     # Link sequential admissions
     if len(admission_uris) > 1:
