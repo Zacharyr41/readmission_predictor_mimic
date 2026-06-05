@@ -103,11 +103,37 @@ def _parse_ts(node) -> datetime:
 
 
 def _num(node) -> float:
-    """Coerce an rdflib numeric literal (xsd:decimal -> Decimal) to ``float``."""
+    """Coerce a *guaranteed-numeric* rdflib literal (e.g. a COUNT) to ``float``.
+
+    For readings that come from free-text clinical columns and may not parse,
+    use :func:`_maybe_num` instead — this one is for aggregates the query itself
+    guarantees numeric.
+    """
     try:
         return float(node.toPython())
     except (AttributeError, TypeError, ValueError):
         return float(str(node))
+
+
+def _maybe_num(node) -> float | None:
+    """Best-effort coerce an rdflib literal to a *finite* ``float``, else ``None``.
+
+    MIMIC's ``labevents.value`` and dose columns are free text: a range result
+    (``"2.4-3.6"``), a qualified result (``"<0.1"``), or an error token can
+    reach the graph even when the numeric column is null. Such a reading has no
+    usable value for a slope/delta, so it is *omitted* (the module's
+    missing-value policy) rather than aborting the whole cohort with a raw
+    ``could not convert string to float`` ``ValueError``. Non-finite values
+    (NaN/inf) are screened too, so they never poison ``np.polyfit``.
+    """
+    try:
+        v = float(node.toPython())
+    except (AttributeError, TypeError, ValueError):
+        try:
+            v = float(str(node))
+        except (TypeError, ValueError):
+            return None
+    return v if np.isfinite(v) else None
 
 
 def _concept_match_block(var: str, cname: str) -> str:
@@ -175,10 +201,14 @@ SELECT DISTINCT ?hadm ?e ?value ?ts WHERE {{
     FILTER(LCASE(STR(?cname)) = LCASE("{concept}"))
 }}
 """
-    # Dedupe by event URI so a UNION never double-weights one reading.
+    # Dedupe by event URI so a UNION never double-weights one reading. A
+    # non-numeric reading (range/qualified/error text) is omitted, not fatal.
     per_admission: dict[int, dict[Any, tuple[datetime, float]]] = defaultdict(dict)
     for hadm, event, value, ts in _run(graph, query):
-        per_admission[int(hadm.toPython())][event] = (_parse_ts(ts), _num(value))
+        v = _maybe_num(value)
+        if v is None:
+            continue
+        per_admission[int(hadm.toPython())][event] = (_parse_ts(ts), v)
 
     agg = req.params.get("agg", "slope")
     window = req.params.get("window_hours")
@@ -209,7 +239,10 @@ SELECT DISTINCT ?hadm ?e ?dose ?ts WHERE {{
 """
     per_admission: dict[int, dict[Any, tuple[datetime, float]]] = defaultdict(dict)
     for hadm, event, dose, ts in _run(graph, query):
-        per_admission[int(hadm.toPython())][event] = (_parse_ts(ts), _num(dose))
+        v = _maybe_num(dose)
+        if v is None:
+            continue
+        per_admission[int(hadm.toPython())][event] = (_parse_ts(ts), v)
 
     agg = req.params.get("agg", "slope")
     window = req.params.get("window_hours")

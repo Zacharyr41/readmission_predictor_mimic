@@ -337,3 +337,125 @@ def test_unknown_template_raises():
     req = GraphFeatureRequest("x", "sim_not_a_template", None)
     with pytest.raises((KeyError, ValueError)):
         extract_graph_features(Graph(), [req])
+
+
+# ---------------------------------------------------------------------------
+# Dirty readings — a non-numeric value must be omitted, never crash the cohort
+# ---------------------------------------------------------------------------
+#
+# MIMIC's ``labevents.value`` / dose columns are free text: a range result
+# ("2.4-3.6"), a qualified result ("<0.1"), or an error token can reach the
+# graph even when the numeric column is null. Such a reading must be *omitted*
+# (the module's missing-value policy) — never abort the whole cohort with a raw
+# ``could not convert string to float`` ``ValueError`` (the demo regression).
+
+
+def _biomarker_literal(
+    g: Graph, stay: URIRef, label: str, value: Literal, at: datetime
+) -> URIRef:
+    """A biomarker event carrying an arbitrary (possibly non-numeric) value."""
+    slug = at.strftime("%Y%m%d%H%M%S")
+    uri = MIMIC_NS[f"BME-{_local(stay)}-{label}-{slug}"]
+    g.add((uri, RDF.type, MIMIC_NS.BioMarkerEvent))
+    g.add((uri, RDF.type, TIME_NS.Instant))
+    g.add((uri, MIMIC_NS.associatedWithICUStay, stay))
+    g.add((uri, MIMIC_NS.hasBiomarkerType, Literal(label, datatype=XSD.string)))
+    g.add((uri, MIMIC_NS.hasValue, value))
+    g.add((uri, TIME_NS.inXSDDateTimeStamp, _ts(at)))
+    return uri
+
+
+def _pressor_dose_literal(
+    g: Graph, stay: URIRef, dose: Literal, start: datetime
+) -> URIRef:
+    """A vasopressor administration carrying an arbitrary dose literal."""
+    slug = start.strftime("%Y%m%d%H%M%S")
+    uri = MIMIC_NS[f"RXE-{_local(stay)}-Norepinephrine-{slug}"]
+    g.add((uri, RDF.type, MIMIC_NS.PrescriptionEvent))
+    g.add((uri, RDF.type, TIME_NS.ProperInterval))
+    g.add((uri, MIMIC_NS.associatedWithICUStay, stay))
+    g.add((uri, MIMIC_NS.hasDrugName, Literal("Norepinephrine", datatype=XSD.string)))
+    g.add((uri, MIMIC_NS.hasDrugCategory, Literal("vasopressors", datatype=XSD.string)))
+    g.add((uri, MIMIC_NS.hasDoseValue, dose))
+    begin = MIMIC_NS[f"RXEBegin-{_local(stay)}-Norepinephrine-{slug}"]
+    _instant(g, begin, start)
+    g.add((uri, TIME_NS.hasBeginning, begin))
+    return uri
+
+
+@pytest.fixture
+def dirty_value_graph() -> Graph:
+    g = Graph()
+
+    # hadm 200: numeric lactate 2.0 and 6.0 bracket a range-string reading
+    # "2.4-3.6" (the exact demo crash value). The bad reading is omitted; the
+    # slope is computed from the two numeric points that remain.
+    a200 = _admission(g, 200)
+    s200 = _icu_stay(g, a200, 600, _T0, _T0 + timedelta(hours=72))
+    _biomarker(g, s200, "Lactate", 2.0, _T0 + timedelta(hours=2))
+    _biomarker_literal(
+        g, s200, "Lactate", Literal("2.4-3.6", datatype=XSD.string),
+        _T0 + timedelta(hours=26),
+    )
+    _biomarker(g, s200, "Lactate", 6.0, _T0 + timedelta(hours=50))
+    # Dose trajectory with a non-numeric middle reading, same shape.
+    _pressor_dose_literal(g, s200, Literal(4.0, datatype=XSD.decimal), _T0 + timedelta(hours=1))
+    _pressor_dose_literal(g, s200, Literal("see note", datatype=XSD.string), _T0 + timedelta(hours=13))
+    _pressor_dose_literal(g, s200, Literal(12.0, datatype=XSD.decimal), _T0 + timedelta(hours=25))
+
+    # hadm 201: every lactate reading is non-numeric -> no usable points ->
+    # absent (NaN), so the trait's missing policy decides (not a spurious 0).
+    a201 = _admission(g, 201)
+    s201 = _icu_stay(g, a201, 601, _T0, _T0 + timedelta(hours=48))
+    _biomarker_literal(
+        g, s201, "Lactate", Literal("<0.1", datatype=XSD.string),
+        _T0 + timedelta(hours=1),
+    )
+    _biomarker_literal(
+        g, s201, "Lactate", Literal("ERROR", datatype=XSD.string),
+        _T0 + timedelta(hours=13),
+    )
+    return g
+
+
+def test_series_omits_nonnumeric_reading_without_crashing(dirty_value_graph):
+    req = GraphFeatureRequest(
+        column="lactate_slope", template="sim_series_by_admission",
+        concept="Lactate", params={"agg": "slope"},
+    )
+    out = TEMPLATES["sim_series_by_admission"].fn(dirty_value_graph, req)
+    # numeric readings 2.0@2h and 6.0@50h -> slope = 4 / 48 per hour; the
+    # "2.4-3.6" reading at hour 26 is omitted rather than crashing.
+    assert out[200] == pytest.approx(4.0 / 48.0, rel=1e-6)
+
+
+def test_series_all_nonnumeric_is_absent(dirty_value_graph):
+    req = GraphFeatureRequest(
+        column="lactate_slope", template="sim_series_by_admission",
+        concept="Lactate", params={"agg": "slope"},
+    )
+    out = TEMPLATES["sim_series_by_admission"].fn(dirty_value_graph, req)
+    assert 201 not in out  # no numeric readings -> absent (NaN downstream)
+
+
+def test_dose_series_omits_nonnumeric_dose(dirty_value_graph):
+    req = GraphFeatureRequest(
+        column="pressor_dose_slope", template="sim_dose_series",
+        concept="vasopressors", params={"agg": "slope"},
+    )
+    out = TEMPLATES["sim_dose_series"].fn(dirty_value_graph, req)
+    # numeric doses 4.0@1h and 12.0@25h -> slope = 8 / 24 per hour; the
+    # "see note" dose at hour 13 is omitted.
+    assert out[200] == pytest.approx(8.0 / 24.0, rel=1e-6)
+
+
+def test_extract_graph_features_survives_dirty_value(dirty_value_graph):
+    # End-to-end: the assembly path the cohort runner uses must not raise on a
+    # range-valued reading; it yields a finite slope from the numeric points.
+    reqs = [
+        GraphFeatureRequest(
+            "lactate_slope", "sim_series_by_admission", "Lactate", {"agg": "slope"}
+        ),
+    ]
+    df = extract_graph_features(dirty_value_graph, reqs)
+    assert df.loc[200, "lactate_slope"] == pytest.approx(4.0 / 48.0, rel=1e-6)
