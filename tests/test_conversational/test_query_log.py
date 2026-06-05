@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 from src.conversational.models import AnswerResult, CriticVerdict, OutlierReport
-from src.conversational.query_log import log_query_run
+from src.conversational.query_log import log_cohort_criteria, log_query_run
 
 
 def _read_records(path: Path) -> list[dict]:
@@ -124,3 +124,86 @@ def test_resolves_path_from_env_at_call_time(tmp_path, monkeypatch):
     log_query_run("env q")  # no explicit log_path
     records = _read_records(log)
     assert records[0]["question"] == "env q"
+
+
+# ---------------------------------------------------------------------------
+# log_cohort_criteria — the cohort-definition audit line (plan II-D).
+#
+# Cohort selection must be reproducible from the activity log alone, so every
+# prefilter and every trait's kind / direction (kernel) / weight / reference
+# value lands on one JSONL line a clinician can ``tail -f``.
+# ---------------------------------------------------------------------------
+
+
+def _make_definition():
+    from src.conversational.models import PatientFilter
+    from src.similarity.models import CohortDefinition, TraitSpec
+
+    return CohortDefinition(
+        prefilters=[
+            PatientFilter(field="admission_type", operator="=", value="EMERGENCY"),
+        ],
+        traits=[
+            TraitSpec(
+                name="age", source="sql", kind="quantitative",
+                reference_value=68, direction="symmetric", weight=0.6,
+            ),
+            TraitSpec(
+                name="creatinine_max", source="sql", kind="quantitative",
+                reference_value=9.8, direction="higher_more_similar", weight=2.0,
+            ),
+        ],
+        distance_threshold=0.35,
+        top_k=30,
+    )
+
+
+def test_log_cohort_criteria_writes_full_criteria(tmp_path):
+    log = tmp_path / "queries.jsonl"
+    defn = _make_definition()
+    rec = log_cohort_criteria(
+        "Find emergency patients like a 68yo woman", defn, log_path=log,
+    )
+
+    records = _read_records(log)
+    assert len(records) == 1
+    on_disk = records[0]
+    assert on_disk == rec  # returned record matches what was written
+    assert on_disk["kind"] == "cohort_definition"
+    assert on_disk["question"] == "Find emergency patients like a 68yo woman"
+    assert on_disk["distance_threshold"] == 0.35
+    assert on_disk["top_k"] == 30
+    assert [f["field"] for f in on_disk["prefilters"]] == ["admission_type"]
+
+    traits = {t["name"]: t for t in on_disk["traits"]}
+    # Every trait's kernel-defining fields are auditable.
+    assert traits["age"]["direction"] == "symmetric"
+    assert traits["age"]["weight"] == 0.6
+    assert traits["age"]["source"] == "sql"
+    assert traits["creatinine_max"]["kind"] == "quantitative"
+    assert traits["creatinine_max"]["direction"] == "higher_more_similar"
+    assert traits["creatinine_max"]["reference_value"] == 9.8
+
+
+def test_log_cohort_criteria_never_raises_on_malformed_definition(tmp_path):
+    # A bare object has none of the expected attributes, so the digest step
+    # fails — but the function is total and still writes a minimal record.
+    log = tmp_path / "queries.jsonl"
+    rec = log_cohort_criteria("q", object(), log_path=log)  # must not raise
+
+    assert rec["kind"] == "cohort_definition"
+    assert rec["question"] == "q"
+    assert "traits" not in rec  # digest failed → only the minimal fields
+    records = _read_records(log)
+    assert len(records) == 1
+
+
+def test_log_cohort_criteria_never_raises_when_path_unwritable(tmp_path):
+    # Parent is a *file*, so ``mkdir(parents=True)`` on its child fails.
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("i am a file")
+    doomed = blocker / "queries.jsonl"
+
+    rec = log_cohort_criteria("q", _make_definition(), log_path=doomed)  # no raise
+    assert rec["kind"] == "cohort_definition"
+    assert not doomed.exists()

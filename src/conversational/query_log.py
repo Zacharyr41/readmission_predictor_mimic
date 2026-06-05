@@ -120,3 +120,67 @@ def log_query_run(
         logger.warning("query_log write to %s failed: %s", path, exc)
 
     return record
+
+
+def log_cohort_criteria(
+    question: str,
+    definition: Any,
+    *,
+    log_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Append one JSON line capturing a cohort definition's *criteria*.
+
+    The user requires the cohort-selection criteria to be auditable: every
+    prefilter and every Gower trait's kind / direction (kernel) / weight /
+    reference value, plus the distance threshold and top_k. This lands one line
+    on the same activity log a clinician can ``tail -f``, so a described-profile
+    cohort query is reproducible from the log alone.
+
+    Total by design (mirrors :func:`log_query_run`): a logging failure must
+    never break the query the user is waiting on, so both the digest and the
+    write are guarded.
+    """
+    try:
+        record: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "kind": "cohort_definition",
+            "question": question,
+            "distance_threshold": definition.distance_threshold,
+            "top_k": definition.top_k,
+            "prefilters": [f.model_dump() for f in definition.prefilters],
+            "traits": [
+                {
+                    "name": t.name,
+                    "source": t.source,
+                    "kind": t.kind.value,
+                    "direction": t.direction.value,
+                    "weight": t.weight,
+                    "reference_value": t.reference_value,
+                }
+                for t in definition.traits
+            ],
+        }
+    except Exception as exc:  # a malformed definition must not break the turn
+        logger.warning("cohort criteria digest failed: %s", exc)
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "kind": "cohort_definition",
+            "question": question,
+        }
+
+    logger.info(
+        "cohort criteria: %s trait(s) threshold=%s q=%r",
+        len(record.get("traits", []) or []),
+        record.get("distance_threshold"),
+        question,
+    )
+
+    path = _resolve_path(log_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, default=str) + "\n")
+    except Exception as exc:  # never break the turn on a logging failure
+        logger.warning("cohort criteria log write to %s failed: %s", path, exc)
+
+    return record

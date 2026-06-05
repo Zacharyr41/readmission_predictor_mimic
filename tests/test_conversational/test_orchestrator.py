@@ -839,9 +839,12 @@ class TestSqlFastpathRouting:
 
 
 class TestSimilarityBranch:
-    """A CQ with ``scope='patient_similarity'`` must hit a dedicated
-    orchestrator branch that calls ``run_similarity`` and wraps the
-    ranked result into an ``AnswerResult`` with a 6-column data_table.
+    """A CQ with ``scope='patient_similarity'`` and a *concrete* patient
+    anchor must hit a dedicated orchestrator branch that calls
+    ``run_similarity`` and wraps the ranked result into an ``AnswerResult``
+    with a 6-column data_table. (A described-profile / template anchor takes
+    the cohort path instead — see ``test_described_profile_routes_through_
+    definition_builder``.)
 
     Booby-trap: if the branch is missing, the CQ falls through to the
     graph path and the ``mock_extract`` / ``mock_build`` / ``mock_reason``
@@ -861,12 +864,15 @@ class TestSimilarityBranch:
             SimilaritySpec,
         )
 
+        # A concrete patient anchor (hadm_id) → "read the profile off this
+        # admission" path, which run_similarity owns. The anchorless
+        # template path is exercised separately.
         spec = SimilaritySpec(
-            anchor_template={"age": 68, "gender_F": 1, "snomed_group_I48": 1},
+            anchor_hadm_id=20000,
             top_k=3,
         )
         cq = CompetencyQuestion(
-            original_question="Find admissions similar to a 68-year-old woman with afib.",
+            original_question="Find admissions similar to admission 20000.",
             scope="patient_similarity",
             similarity_spec=spec,
         )
@@ -887,7 +893,7 @@ class TestSimilarityBranch:
         )
 
         sim_result = SimilarityResult(
-            anchor_description="template anchor (age=68, snomed_group_I48=1)",
+            anchor_description="admission 20000",
             n_pool=2500,
             n_returned=3,
             scores=[
@@ -945,7 +951,7 @@ class TestSimilarityBranch:
         assert top["rank"] == 1
         assert top["hadm_id"] == 20001
         assert top["combined"] == pytest.approx(0.91)
-        assert top["temporal"] is None  # template anchor → contextual-only
+        assert top["temporal"] is None  # mocked scores carry no temporal
         # Summary text mentions the anchor + counts.
         assert "n_pool=2500" not in result.text_summary  # we render words, not literals
         assert "3" in result.text_summary
@@ -1122,6 +1128,178 @@ class TestSimilarityBranch:
 
         assert mock_run_cohort.call_count == 1
         assert mock_run_cohort.call_args.kwargs.get("reference_ranges") == frozen
+
+    @_patch_all
+    def test_described_profile_routes_through_definition_builder(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Plan II-D: a similarity CQ with NO concrete patient anchor — only a
+        free-text covariate template — is the described-profile case. The
+        orchestrator must translate it into a ``CohortDefinition`` via
+        ``build_definition`` (Sonnet), log the criteria, then run the
+        anchorless cohort path. The anchor-only ``run_similarity`` must NOT run.
+
+        Booby-trap on five sides: the graph stages AND ``run_similarity`` stay
+        silent. If the described-profile reroute is missing, the CQ falls
+        through to ``run_similarity`` and that AssertionError fires.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortMember,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        # A described profile: anchorless (no hadm_id / subject_id), just the
+        # covariate template the decomposer produced from the free text.
+        spec = SimilaritySpec(
+            anchor_template={"age": 68, "gender_F": 1},
+            top_k=3,
+        )
+        cq = CompetencyQuestion(
+            original_question=(
+                "Find emergency patients like a 68-year-old woman with rising "
+                "creatinine."
+            ),
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        # Booby-trap: the graph path must stay silent.
+        mock_extract.side_effect = AssertionError("extract must not run")
+        mock_build.side_effect = AssertionError("graph build must not run")
+        mock_reason.side_effect = AssertionError("reason must not run")
+        mock_answer.side_effect = AssertionError("answerer must not run")
+
+        definition = CohortDefinition(
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68,
+                ),
+                TraitSpec(
+                    name="creatinine_max", source="sql", kind="quantitative",
+                    reference_value=9.8, direction="higher_more_similar",
+                ),
+            ],
+            distance_threshold=0.35,
+            top_k=3,
+        )
+        cohort = CohortResult(
+            definition=definition,
+            members=[
+                CohortMember(hadm_id=20001, subject_id=10001, distance=0.05),
+                CohortMember(hadm_id=20002, subject_id=10002, distance=0.12),
+            ],
+            n_pool=2500,
+            n_returned=2,
+        )
+
+        with patch(
+            "src.similarity.definition_builder.build_definition",
+            return_value=definition,
+        ) as mock_build_defn, patch(
+            "src.similarity.run.run_cohort", return_value=cohort,
+        ) as mock_run_cohort, patch(
+            "src.conversational.query_log.log_cohort_criteria",
+        ) as mock_log_criteria, patch(
+            "src.similarity.reference_ranges.load_reference_ranges",
+            return_value={"creatinine_max": (0.5, 9.8)},
+        ), patch(
+            "src.similarity.run.run_similarity",
+            side_effect=AssertionError(
+                "anchor path must not run for a described profile"
+            ),
+        ):
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask(cq.original_question)
+
+        # The builder was handed the free text + the structured CQ.
+        assert mock_build_defn.call_count == 1
+        assert mock_build_defn.call_args.args[1] == cq.original_question
+        assert mock_build_defn.call_args.kwargs["cq"] is cq
+
+        # Criteria were logged (auditable cohort selection — user requirement).
+        assert mock_log_criteria.call_count == 1
+        assert mock_log_criteria.call_args.args[1] is definition
+
+        # The cohort runner scored the synthesized definition.
+        assert mock_run_cohort.call_count == 1
+        assert mock_run_cohort.call_args.args[0] is definition
+
+        # The AnswerResult carries the ranked cohort table (nearest first).
+        assert isinstance(result, AnswerResult)
+        assert result.table_columns == ["rank", "hadm_id", "subject_id", "distance"]
+        assert result.data_table is not None
+        assert len(result.data_table) == 2
+        assert result.data_table[0]["hadm_id"] == 20001
+        # Never asks the clinician to read DB keys in prose.
+        assert "hadm_id" not in result.text_summary
+
+    @_patch_all
+    def test_described_profile_builder_failure_falls_back_to_anchor_path(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """If the Sonnet builder raises, the turn must not crash: the
+        orchestrator falls back to the legacy template path (``run_similarity``)
+        rather than 500-ing. ``_build_cohort_definition`` swallows the error and
+        returns ``None``, so the reroute is skipped.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            ContextualExplanation,
+            SimilarityResult,
+            SimilarityScore,
+            SimilaritySpec,
+        )
+
+        spec = SimilaritySpec(anchor_template={"age": 68}, top_k=3)
+        cq = CompetencyQuestion(
+            original_question="Find patients like a 68-year-old.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+
+        mock_extract.side_effect = AssertionError("extract must not run")
+        mock_build.side_effect = AssertionError("graph build must not run")
+
+        sim_result = SimilarityResult(
+            anchor_description="template anchor",
+            n_pool=10,
+            n_returned=1,
+            scores=[
+                SimilarityScore(
+                    hadm_id=20001, subject_id=10001, combined=0.9,
+                    contextual=0.9, temporal=None,
+                    contextual_explanation=ContextualExplanation(overall_score=0.9),
+                ),
+            ],
+            spec=spec,
+        )
+
+        with patch(
+            "src.similarity.definition_builder.build_definition",
+            side_effect=RuntimeError("LLM exploded"),
+        ), patch(
+            "src.similarity.run.run_cohort",
+            side_effect=AssertionError("cohort path must not run when build fails"),
+        ), patch(
+            "src.similarity.run.run_similarity", return_value=sim_result,
+        ) as mock_run_sim:
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask("Find patients like a 68-year-old.")
+
+        # Builder failed → legacy anchor/template path ran instead.
+        assert mock_run_sim.call_count == 1
+        assert mock_run_sim.call_args.args[0] is spec
+        assert isinstance(result, AnswerResult)
+        assert result.table_columns == [
+            "rank", "hadm_id", "subject_id", "combined", "contextual", "temporal",
+        ]
 
 
 # ---------------------------------------------------------------------------

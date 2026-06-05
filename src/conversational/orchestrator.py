@@ -1199,6 +1199,19 @@ class ConversationalPipeline:
         if cq.similarity_spec.cohort_definition is not None:
             return self._run_cohort(cq.similarity_spec.cohort_definition, backend)
 
+        # Described-profile cohort (plan II-D): no concrete patient anchor was
+        # resolved — only a free-text covariate template. Translate the
+        # description into a CohortDefinition (Sonnet) and run the one-vs-many
+        # cohort path. A concrete anchor (hadm_id / subject_id) stays on
+        # run_similarity below — that is the "read the profile off this one
+        # admission" special case. On a build failure we fall through to the
+        # legacy template path rather than crashing the turn.
+        spec = cq.similarity_spec
+        if spec.anchor_hadm_id is None and spec.anchor_subject_id is None:
+            definition = self._build_cohort_definition(cq)
+            if definition is not None:
+                return self._run_cohort(definition, backend)
+
         result = run_similarity(cq.similarity_spec, backend)
         data_table = [
             {
@@ -1282,6 +1295,36 @@ class ConversationalPipeline:
             data_table=data_table,
             table_columns=["rank", "hadm_id", "subject_id", "distance"],
         )
+
+    def _build_cohort_definition(self, cq: CompetencyQuestion):
+        """Translate a described-profile request into a ``CohortDefinition``
+        (plan II-D), logging the resolved criteria.
+
+        The Sonnet builder is the judgment step; directional traits' reference
+        values are resolved against the frozen reference-population ranges
+        (locked decision #6). Returns ``None`` on any failure so the caller
+        falls back to the legacy template path rather than crashing the turn.
+        The criteria (prefilters + every trait's kind / kernel / weight /
+        reference + threshold) are appended to the JSONL activity log so a
+        described-profile cohort is reproducible from the log alone.
+        """
+        from src.conversational.query_log import log_cohort_criteria
+        from src.similarity.definition_builder import build_definition
+        from src.similarity.reference_ranges import load_reference_ranges
+
+        try:
+            definition = build_definition(
+                self._client,
+                cq.original_question,
+                cq=cq,
+                reference_ranges=load_reference_ranges(),
+            )
+        except Exception as exc:  # never crash the turn on a build failure
+            logger.warning("cohort definition build failed: %s", exc)
+            return None
+
+        log_cohort_criteria(cq.original_question, definition)
+        return definition
 
     def _extract_one(self, cq: CompetencyQuestion):
         """Legacy single-CQ extractor kept for external callers. Modern
