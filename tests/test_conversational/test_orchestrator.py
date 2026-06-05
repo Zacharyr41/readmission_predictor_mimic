@@ -1080,6 +1080,70 @@ class TestSimilarityBranch:
         assert "hadm_id" not in result.text_summary
 
     @_patch_all
+    def test_cohort_answer_carries_csv_download_and_qoi(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Plan III-C: the cohort AnswerResult must carry a downloadable CSV of
+        ``(subject_id, hadm_id)`` pairs and fold cohort-level quantities of
+        interest (the distance distribution) into the summary — while still
+        never printing a raw database key in the chat prose.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortMember,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        defn = CohortDefinition(
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68, range_=(18.0, 90.0),
+                ),
+            ],
+            distance_threshold=0.35,
+            top_k=30,
+        )
+        spec = SimilaritySpec(cohort_definition=defn)
+        cq = CompetencyQuestion(
+            original_question="Find patients like a 68-year-old.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        for mock in (mock_extract, mock_build, mock_reason, mock_answer):
+            mock.side_effect = AssertionError(
+                "reasoning path must not run on cohort scope"
+            )
+
+        sentinel = CohortResult(
+            definition=defn,
+            members=[
+                CohortMember(hadm_id=101, subject_id=11, distance=0.06),
+                CohortMember(hadm_id=103, subject_id=22, distance=0.08),
+            ],
+            n_pool=6,
+            n_returned=2,
+        )
+
+        with patch("src.similarity.run.run_cohort", return_value=sentinel):
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask(cq.original_question)
+
+        # Downloadable cohort: CSV present, with the header + both members.
+        assert result.download_csv is not None
+        assert result.download_filename.endswith(".csv")
+        assert "subject_id" in result.download_csv
+        assert "11" in result.download_csv and "101" in result.download_csv
+        assert "22" in result.download_csv and "103" in result.download_csv
+        # Distance distribution folded into the summary, still no raw DB key.
+        assert "nearest" in result.text_summary.lower()
+        assert "hadm_id" not in result.text_summary
+
+    @_patch_all
     def test_cohort_path_injects_frozen_reference_ranges(
         self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
     ):

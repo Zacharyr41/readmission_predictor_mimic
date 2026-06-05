@@ -1295,15 +1295,51 @@ class ConversationalPipeline:
             }
             for i, m in enumerate(result.members)
         ]
-        summary = (
+
+        # Cohort-level quantities of interest (plan III-C): distance
+        # distribution + per-trait cohort means vs the reference profile, folded
+        # into the summary as text + a small markdown table. The member table
+        # (DB keys) stays the only place hadm_id/subject_id appear; the prose
+        # describes the cohort in clinical terms.
+        qoi = result.quantities_of_interest()
+        lines = [
             f"Found {result.n_returned} of {result.n_pool} candidates within "
             f"Gower distance {definition.distance_threshold} of the described "
-            f"profile. See the table for the ranked cohort (nearest first)."
-        )
+            f"profile."
+        ]
+        dist = qoi["distance"]
+        if dist is not None:
+            lines.append(
+                f"Cohort distance — nearest {dist['min']:.3f}, median "
+                f"{dist['median']:.3f}, farthest {dist['max']:.3f}."
+            )
+        if qoi["per_trait"]:
+            lines.append("")
+            lines.append("| trait | weight | reference | cohort mean similarity |")
+            lines.append("| --- | --- | --- | --- |")
+            for pt in qoi["per_trait"]:
+                mean_sim = pt["mean_similarity"]
+                mean_txt = f"{mean_sim:.2f}" if mean_sim is not None else "—"
+                lines.append(
+                    f"| {pt['name']} | {pt['weight']:g} | "
+                    f"{pt['reference_value']} | {mean_txt} |"
+                )
+        lines.append("")
+        lines.append("See the table for the ranked cohort (nearest first).")
+        summary = "\n".join(lines)
+
+        # Downloadable cohort: the (subject_id, hadm_id) pairs as CSV, only when
+        # the cohort is non-empty. The clinician never types these keys; they
+        # exist purely as a take-away for downstream analysis.
+        download_csv = result.to_csv() if result.members else None
+        download_filename = "cohort.csv" if result.members else None
+
         return AnswerResult(
             text_summary=summary,
             data_table=data_table,
             table_columns=["rank", "hadm_id", "subject_id", "distance"],
+            download_csv=download_csv,
+            download_filename=download_filename,
         )
 
     def _build_cohort_definition(self, cq: CompetencyQuestion):

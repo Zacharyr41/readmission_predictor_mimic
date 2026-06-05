@@ -607,6 +607,13 @@ class AnswerResult(BaseModel):
     # with-outliers answer for the UI's "include outliers" toggle. None on
     # every other turn (the common case).
     outlier_report: OutlierReport | None = None
+    # Phase 9 (III-C): a downloadable cohort payload. ``download_csv`` is the
+    # ready-to-save CSV text (rank, subject_id, hadm_id, distance) the UI
+    # surfaces via st.download_button; ``download_filename`` is its suggested
+    # name. Database keys live here in the *download* only, never in chat prose
+    # the clinician must read or type. None on every non-cohort turn.
+    download_csv: str | None = None
+    download_filename: str | None = None
 
 
 class DecompositionResult(BaseModel):

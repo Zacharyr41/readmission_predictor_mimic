@@ -352,6 +352,19 @@ def _render_answer(
     if display_table:
         st.dataframe(pd.DataFrame(display_table))
 
+    # Cohort take-away (plan III-C): when the answer carries a cohort CSV,
+    # offer it as a download. This is the one place the database keys
+    # (subject_id / hadm_id) are exposed — as a file for downstream analysis,
+    # never as something the clinician must read or type in chat.
+    if answer.download_csv:
+        st.download_button(
+            "⬇ Download cohort (CSV)",
+            data=answer.download_csv,
+            file_name=answer.download_filename or "cohort.csv",
+            mime="text/csv",
+            key=f"{key_prefix}_cohort_download",
+        )
+
     # Visualize the clean data only — a plot dominated by a 1e6 data-entry
     # error is uninformative regardless of the toggle.
     if answer.visualization_spec and answer.data_table:

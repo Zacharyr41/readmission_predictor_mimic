@@ -318,6 +318,75 @@ class CohortResult(BaseModel):
     n_returned: int
     provenance: dict = Field(default_factory=dict)
 
+    def quantities_of_interest(self) -> dict:
+        """Cohort-level summary stats for the UI (plan III-C).
+
+        Returns size (``n_returned`` / ``n_pool``), the distance distribution
+        over members (``None`` for an empty cohort), and, per trait, the cohort
+        mean similarity / signed contribution vs the reference profile. The
+        similarity mean averages only the members for which the trait was
+        *included* (so an excluded trait — NaN under the exclude policy — does
+        not dilute it); the count of those members is reported alongside.
+        """
+        import statistics
+
+        dists = [m.distance for m in self.members]
+        qoi: dict = {
+            "n_returned": self.n_returned,
+            "n_pool": self.n_pool,
+            "distance_threshold": self.definition.distance_threshold,
+            "distance": None,
+            "per_trait": [],
+        }
+        if dists:
+            qoi["distance"] = {
+                "min": min(dists),
+                "median": statistics.median(dists),
+                "mean": statistics.fmean(dists),
+                "max": max(dists),
+            }
+        for trait in self.definition.traits:
+            sims = [
+                c.similarity
+                for m in self.members
+                for c in m.contributions
+                if c.name == trait.name and c.included
+            ]
+            signed = [
+                c.signed
+                for m in self.members
+                for c in m.contributions
+                if c.name == trait.name and c.included
+            ]
+            qoi["per_trait"].append({
+                "name": trait.name,
+                "weight": trait.weight,
+                "reference_value": trait.reference_value,
+                "mean_similarity": statistics.fmean(sims) if sims else None,
+                "mean_signed": statistics.fmean(signed) if signed else None,
+                "included_count": len(sims),
+            })
+        return qoi
+
+    def to_csv(self) -> str:
+        """Render the ranked cohort as CSV for download (plan III-C).
+
+        Columns: ``rank, subject_id, hadm_id, distance``. The cohort is
+        admission-keyed, so ``hadm_id`` is the encounter identifier (MIMIC's
+        ICU-specific ``stay_id`` is not fabricated for admissions that never
+        reached the ICU). These database keys live in the download only — never
+        in chat prose the clinician must read or type.
+        """
+        import csv
+        import io
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["rank", "subject_id", "hadm_id", "distance"])
+        for rank, m in enumerate(self.members, 1):
+            writer.writerow([rank, m.subject_id, m.hadm_id, round(m.distance, 6)])
+        return buf.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # Input spec.
