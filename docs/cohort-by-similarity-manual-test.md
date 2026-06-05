@@ -52,28 +52,78 @@ treat a patient who is *worse than* the reference as *less* similar.
 # Conversational extras (streamlit, plotly, anthropic) + an API key in .env
 uv pip install --python .venv/bin/python -e ".[conversational]"
 #   ANTHROPIC_API_KEY=sk-ant-...   (auto-fills the sidebar)
+```
 
+The cohort code path is **identical** on either backend — only the data source
+differs. Pick one:
+
+### Option A — BigQuery (full MIMIC-IV; use this for real temporal cohorts)
+
+BigQuery carries the **complete** lab/chart history, so lab-slope and
+dose-trajectory traits actually populate (see the caveat below for why the
+bundled DuckDB does not). This is the right backend for the §3 "worsening labs"
+test.
+
+```bash
+# 1. Authenticate
+gcloud auth login
+gcloud auth application-default login
+
+# 2. Point at your MIMIC-IV project (should match BIGQUERY_PROJECT in .env)
+gcloud config set project <your-gcp-project-with-mimic-iv-access>
+
+# 3. Verify dataset access (if it hangs, press Enter — bq may be waiting on a
+#    prompt you can't see)
+bq ls physionet-data:mimiciv_3_1_hosp
+
+# 4. Launch
 bash scripts/run_chat.sh
 ```
 
 In the **sidebar**:
 
-- **Data source:** `Local DuckDB`
-- **DuckDB path:** `data/processed/mimiciv.duckdb` (default)
+- **Data source:** `BigQuery`
+- **GCP project ID:** `<your-gcp-project-with-mimic-iv-access>` (auto-fills from `.env`)
 - Click **Connect** → you should see **Connected**.
 
-Two sidebar controls matter for cohorts:
+> **Scale & cost (read before the temporal test).** BigQuery bills **per byte
+> scanned**, and a cohort scores the *whole* matching pool — there is no row cap.
+> A graph-temporal cohort additionally builds an RDF graph over that pool, so an
+> unfiltered temporal request can scan a lot and run for minutes. Two habits keep
+> it cheap and fast:
+> - **Always lead with a crisp prefilter** ("**ICU** patients", "with **sepsis**",
+>   "**emergency** admissions") so the pool is narrowed *before* scoring. Confirm
+>   the prefilter landed in the JSONL log (§4).
+> - For temporal cohorts, raise **Concurrent batches** (e.g. 8→16) and **Parallel
+>   workers** (e.g. 1→4) in the sidebar to parallelize the graph build.
+>
+> If Streamlit hangs on "Analyzing…" for >3 min the query is scanning too much —
+> tighten the filters or cancel and watch the job in the BigQuery console. See
+> [`e2e-bigquery-testing.md`](./e2e-bigquery-testing.md) for cost expectations.
 
-- **Cohort strategy** (`recent` | `random`) — how the candidate pool is ordered
-  into batches. Affects *which* admissions get pulled when the pool is larger
-  than a batch, **not** the final scoring. Leave on `recent`.
-- **Parallel workers** — graph-build parallelism for `graph_temporal` cohorts.
-  Leave at `1` for a first run; raise it for large temporal cohorts.
+### Option B — Local DuckDB (fast, offline; contextual cohorts only)
+
+```bash
+bash scripts/run_chat.sh
+```
+
+In the **sidebar**: **Data source:** `Local DuckDB`; **DuckDB path:**
+`data/processed/mimiciv.duckdb` (default); **Connect**.
 
 > **Local-data caveat:** the bundled DuckDB has labs for only ~9.4k of 546k
-> admissions, so lab-slope traits will be sparse (many candidates → `NaN` → not
-> in the cohort). For a dense temporal trait, prefer **ICU length-of-stay**
-> (every ICU admission has it) — see the §3 temporal example.
+> admissions, so lab-slope traits are sparse (most candidates → `NaN` → not in
+> the cohort). Good enough for the contextual Test A and the **ICU-LOS** temporal
+> variant (every ICU admission has a length-of-stay), but for a real
+> *worsening-lactate* cohort use **BigQuery** (Option A).
+
+### Sidebar controls that matter for cohorts (both backends)
+
+- **Cohort strategy** (`recent` | `random`) — how the pool is *ordered* into
+  batches. Affects which admissions are pulled when the pool exceeds one batch,
+  **not** the final scoring. Leave on `recent`.
+- **Concurrent batches** — parallel DB fetches; raise it for large BigQuery pools.
+- **Parallel workers** — graph-build parallelism for `graph_temporal` cohorts.
+  `1` for a first run; `4+` for large temporal cohorts.
 
 ---
 
@@ -142,6 +192,46 @@ whose header is `rank,subject_id,hadm_id,distance`.
 
 ## 3. Test B — a temporal cohort (builds the RDF graph)
 
+A `graph_temporal` trait makes the run **build a per-question RDF graph** over
+the candidate pool and score the temporal feature off it. Pick the variant that
+matches your backend.
+
+### B1 — worsening labs (BigQuery; the real motivating case)
+
+This is the plan's headline example and the reason to test on BigQuery — it needs
+the full multi-reading lab history that only BigQuery has.
+
+**Type this into the chat box:**
+
+```
+Find ICU patients with sepsis like one whose lactate got progressively worse
+over the first 48 hours and who needed escalating vasopressors.
+```
+
+What to confirm:
+
+- **Prefilters in the log (§4):** `ICU` and `sepsis` become a Boolean gate that
+  narrows the pool *before* scoring — this is what keeps the BigQuery scan cheap.
+- **Two `graph_temporal` traits** in the log: `lactate_slope_48h`
+  (`template="sim_series_by_admission"`, `concept="lactate"`,
+  `graph_params={"agg":"slope","window_hours":48}`,
+  `direction="higher_more_similar"`) and a vasopressor dose-trajectory trait
+  (`template="sim_dose_series"`).
+- A **non-empty** cohort (with full labs the slopes are defined), ranked nearest
+  the described worsening profile.
+- The one-sided kernel: an admission whose lactate worsened *more* steeply than
+  the reference is **not** penalized for it.
+
+> Expect this to take longer than a contextual cohort — it scans lab + chart +
+> prescription history and builds a graph over the pool. If it drags, tighten the
+> prefilter ("**only** ICU admissions with sepsis"), and raise **Concurrent
+> batches** / **Parallel workers** (§1).
+
+### B2 — ICU length-of-stay (works on DuckDB too)
+
+A dense temporal trait that every ICU admission has, so it populates even on the
+partial-labs DuckDB. Good for a quick smoke test of the graph path.
+
 **Type this into the chat box:**
 
 ```
@@ -149,28 +239,18 @@ Find ICU patients similar to one with a long ICU stay.
 ```
 
 This yields a single `graph_temporal` trait (`icu_los_hours` via the
-`sim_icu_los` template), so the run **builds a per-question RDF graph** over the
-candidate pool and scores ICU length-of-stay off it.
+`sim_icu_los` template).
 
-### What you should see
+### What you should see (either variant)
 
 - Same shape as Test A: summary + per-trait table + ranked dataframe + CSV.
-- The per-trait table lists **`icu_los_hours`** with `source` graph-derived; the
-  logged criteria (§4) will show `"source": "graph_temporal"`.
-- Only admissions **with an ICU stay** appear — admissions without one yield no
-  graph-derived LOS (`NaN`) and are correctly **excluded** from the cohort.
-- A larger **Parallel workers** value should speed this up (and must not change
-  membership).
-
-> **Worsening-labs variant.** The plan's motivating example is *"…whose lactate
-> got progressively worse over the first 48 hours and who needed escalating
-> vasopressors."* Type it verbatim to confirm the builder emits
-> `sim_series_by_admission` (lactate, `agg="slope"`, `window_hours=48`,
-> `direction="higher_more_similar"`) and `sim_dose_series` (vasopressors). On the
-> **bundled DuckDB** the sparse single-reading labs mean the slope is usually
-> `NaN`, so the cohort may be small or empty — that is the *data*, not a bug.
-> Confirm the *criteria* were built correctly via the log (§4); for a populated
-> result run it against BigQuery.
+- The per-trait table lists the temporal trait; the logged criteria (§4) show
+  `"source": "graph_temporal"`.
+- Only admissions that **have** the temporal feature appear — those without it
+  yield `NaN` and are correctly **excluded** from the cohort (for B2, only
+  admissions with an ICU stay).
+- A larger **Parallel workers** value should speed the build up (and must not
+  change membership).
 
 ---
 
@@ -250,7 +330,9 @@ Workflow to see the effect:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | *"Could not assemble the cohort: …"* | a quantitative trait has no frozen range and no stated value | check the trait name in the log against the frozen-ranges set (`src/similarity/reference_ranges.py`); rephrase to a supported feature |
-| Empty cohort, temporal trait | bundled DuckDB lab sparsity → slope `NaN` for most candidates | use the **ICU-LOS** example (§3), or run against BigQuery |
+| Empty cohort, temporal trait (lab slope) | running on **DuckDB**, whose partial labs → slope `NaN` for most candidates | switch to **BigQuery** (Option A, §1) for B1; or use the **ICU-LOS** variant B2 (§3) on DuckDB |
+| Streamlit hangs on "Analyzing…" >3 min (BigQuery) | the query is scanning too much of MIMIC-IV before the cohort narrows | tighten the prefilter ("**only** ICU admissions with sepsis"), lower `batch_size`, or cancel and watch the job in the BigQuery console |
+| BigQuery temporal cohort is slow but works | graph build over a large pool is single-threaded | raise **Concurrent batches** and **Parallel workers** in the sidebar (§1) |
 | No download button | the cohort came back empty (`download_csv` is only set for non-empty cohorts) | loosen the request (§5) or relax a prefilter |
 | A generic error answer, no table | the turn hit the orchestrator's swallow-all guard | check `logs/dashboard_queries.jsonl` and the app console for the underlying exception |
 | Members include admissions you expected a prefilter to exclude | the phrase wasn't read as crisp | confirm a `prefilters` entry exists in the JSONL; make the phrase explicit ("**only** ICU admissions") |
@@ -268,6 +350,8 @@ Workflow to see the effect:
       `rank,subject_id,hadm_id,distance`.
 - [ ] Temporal question pulls in only admissions **with** the temporal feature;
       others (`NaN`) are excluded.
+- [ ] (BigQuery) crisp phrases ("ICU", "sepsis") land as **prefilters** in the
+      log so the pool narrows before scoring — and B1 returns a non-empty cohort.
 - [ ] `logs/dashboard_queries.jsonl` has a `cohort_definition` line whose
       threshold/top_k/traits match what you asked.
 - [ ] Tightening the wording **lowers** the logged threshold and **shrinks** the
