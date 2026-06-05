@@ -31,8 +31,18 @@ _TREND_KEYWORDS = frozenset(
 
 
 def _extract_json(text: str) -> str:
-    """Extract a JSON object from *text*, handling markdown code fences."""
-    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    """Extract a JSON object from *text*, handling markdown code fences.
+
+    The fence delimiters are anchored to line boundaries so that triple
+    backticks appearing *inside* a JSON string value (e.g. a payload whose
+    ``original_question`` literally contains ```` ``` ````) are not mistaken
+    for the closing fence and do not truncate the extracted JSON.
+    """
+    match = re.search(
+        r"^[ \t]*```(?:json)?[ \t]*\n(.*?)\n[ \t]*```[ \t]*$",
+        text,
+        re.DOTALL | re.MULTILINE,
+    )
     if match:
         return match.group(1).strip()
     start = text.find("{")
