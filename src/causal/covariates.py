@@ -20,8 +20,14 @@ Design notes
   estimators in 8d can consume them without additional encoding.
 * Categorical columns (gender, admission_type) are one-hot-encoded.
   The encoding is stable across calls: column names include the
-  category value (``gender_M``, ``admission_type_EMERGENCY``) so a
-  reviewer can read the matrix.
+  category value (``gender_M``, ``admission_type_EW EMER.``) so a
+  reviewer can read the matrix. The ``admission_type`` indicator set
+  is **schema-grounded** — it is derived from the frozen categorical
+  domain (``src.similarity.categorical_domains``), not a hardcoded
+  literal list, so real MIMIC-IV values (``EW EMER.``, ``DIRECT EMER.``)
+  get live indicators instead of collapsing to an all-zero ``_other``.
+  A value outside the schema domain (a legacy MIMIC-III literal, or a
+  NULL) falls into ``admission_type_other``.
 * Missing demographics are rare in MIMIC but possible. The builder
   raises on missing age (an integer column; nullability would silently
   affect distance metrics in 8h's overlap diagnostics); for gender it
@@ -40,6 +46,8 @@ import logging
 from typing import Literal, Protocol
 
 import pandas as pd
+
+from src.similarity.categorical_domains import load_categorical_domains
 
 logger = logging.getLogger(__name__)
 
@@ -92,17 +100,33 @@ def build_covariate_matrix(
     )
 
 
+def _admission_type_domain() -> tuple[str, ...]:
+    """Schema-grounded ``admission_type`` value set (most-common first).
+
+    Sourced from the frozen categorical-domain artifact so the indicator
+    columns match the real MIMIC-IV vocabulary. Empty when the artifact is
+    missing — the builder then emits only the ``_other`` catch-all, which still
+    yields a valid (if uninformative) numeric column."""
+    return tuple(load_categorical_domains().get("admission_type", ()))
+
+
+def _admission_type_columns(domain: tuple[str, ...]) -> list[str]:
+    """One indicator per schema-domain value, plus an ``_other`` catch-all for
+    NULL / out-of-domain (e.g. legacy MIMIC-III) values. Total encoding: every
+    row sums to exactly 1 across these columns."""
+    return [f"admission_type_{v}" for v in domain] + ["admission_type_other"]
+
+
 def _expected_columns(profile: CovariateProfile) -> list[str]:
     """For empty-cohort short-circuit only — avoid building an empty
     DataFrame with no schema info (breaks downstream concat)."""
     if profile == "demographics":
         return ["age", "gender_M", "gender_F", "gender_unknown"]
-    return [
-        "age", "gender_M", "gender_F", "gender_unknown",
-        "admission_type_EMERGENCY", "admission_type_ELECTIVE",
-        "admission_type_URGENT", "admission_type_other",
-        "hospital_los_days",
-    ]
+    return (
+        ["age", "gender_M", "gender_F", "gender_unknown"]
+        + _admission_type_columns(_admission_type_domain())
+        + ["hospital_los_days"]
+    )
 
 
 def _demographics_only(
@@ -141,23 +165,20 @@ def _admission_features(
     )
     rows = backend.execute(sql, list(hadm_ids))
     df = pd.DataFrame(rows, columns=["hadm_id", "admission_type", "admittime", "dischtime"])
-    df["admission_type_EMERGENCY"] = (df["admission_type"] == "EMERGENCY").astype(int)
-    df["admission_type_ELECTIVE"] = (df["admission_type"] == "ELECTIVE").astype(int)
-    df["admission_type_URGENT"] = (df["admission_type"] == "URGENT").astype(int)
-    df["admission_type_other"] = (~df["admission_type"].isin(
-        ["EMERGENCY", "ELECTIVE", "URGENT"]
-    )).astype(int)
+    # Schema-grounded one-hot: one indicator per real MIMIC-IV admission_type,
+    # plus ``_other`` for NULL / out-of-domain values. Derived from the frozen
+    # domain so a real ``EW EMER.`` admission gets a live column instead of the
+    # all-zero collapse the old hardcoded EMERGENCY/ELECTIVE/URGENT set produced.
+    domain = _admission_type_domain()
+    for v in domain:
+        df[f"admission_type_{v}"] = (df["admission_type"] == v).astype(int)
+    df["admission_type_other"] = (~df["admission_type"].isin(domain)).astype(int)
     df["admittime"] = pd.to_datetime(df["admittime"], errors="coerce")
     df["dischtime"] = pd.to_datetime(df["dischtime"], errors="coerce")
     df["hospital_los_days"] = (
         (df["dischtime"] - df["admittime"]).dt.total_seconds() / 86400.0
     )
-    return df[[
-        "hadm_id",
-        "admission_type_EMERGENCY", "admission_type_ELECTIVE",
-        "admission_type_URGENT", "admission_type_other",
-        "hospital_los_days",
-    ]]
+    return df[["hadm_id"] + _admission_type_columns(domain) + ["hospital_los_days"]]
 
 
 __all__ = [

@@ -88,8 +88,10 @@ def _apply_defaults(row: dict) -> dict:
     midpoints for severity; 0 for LOS / social."""
     defaults = {
         "age": 0, "gender_M": 0, "gender_F": 0, "gender_unknown": 0,
-        "admission_type_EMERGENCY": 0, "admission_type_ELECTIVE": 0,
-        "admission_type_URGENT": 0, "admission_type_other": 0,
+        # Raw admission_type label (nominal). Missing → None so the contextual
+        # nominal match treats an unknown admission type as dissimilar (the same
+        # missing-policy the gender flags follow), instead of a dead one-hot.
+        "admission_type": None,
         "charlson_index": 0,
         "creatinine_max": 1.0, "sodium_mean": 140.0, "platelet_min": 220.0,
         "icu_los_hours": 0.0,
@@ -128,11 +130,11 @@ def _fetch_admission_features(backend: Any, hadm_ids: list[int]) -> pd.DataFrame
     base["gender_M"] = (base["gender"] == "M").astype(int)
     base["gender_F"] = (base["gender"] == "F").astype(int)
     base["gender_unknown"] = (~base["gender"].isin(["M", "F"])).astype(int)
-    for typ in ("EMERGENCY", "ELECTIVE", "URGENT"):
-        base[f"admission_type_{typ}"] = (base["admission_type"] == typ).astype(int)
-    base["admission_type_other"] = (
-        ~base["admission_type"].isin(["EMERGENCY", "ELECTIVE", "URGENT"])
-    ).astype(int)
+    # admission_type is kept as its RAW schema label (a nominal feature scored
+    # by an identity match), not one-hot encoded. The old EMERGENCY/ELECTIVE/
+    # URGENT one-hot was a MIMIC-III vocabulary that mapped every MIMIC-IV row to
+    # "_other", so it contributed zero discriminating signal; the raw compare
+    # needs no hardcoded value list and works for any schema vocabulary.
 
     # ICU LOS aggregated across stays.
     icu_rows = backend.execute(

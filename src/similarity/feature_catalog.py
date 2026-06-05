@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.pygower import Kind
+from src.similarity.categorical_domains import load_categorical_domains
 
 
 @dataclass(frozen=True)
@@ -46,24 +47,36 @@ _QUANTITATIVE: dict[str, str] = {
     "platelet_min": "minimum platelet count during the admission (K/uL)",
 }
 
-# Nominal features — raw categorical columns the extractor also emits. The
-# category tuples mirror the values ``_fetch_admission_features`` one-hots.
-_NOMINAL: dict[str, tuple[str, tuple[str, ...]]] = {
-    "gender": ("recorded sex", ("M", "F")),
-    "admission_type": (
-        "admission type",
-        ("EMERGENCY", "ELECTIVE", "URGENT", "other"),
-    ),
+# Nominal features — raw categorical columns the extractor also emits. Only the
+# human description lives here; the legal category VALUES are NOT hardcoded but
+# sourced from the frozen schema-grounded categorical-domain artifact
+# (``data/mappings/similarity_categorical_domains.json``), so the prompt teaches
+# the LLM the real MIMIC-IV vocabulary (``EW EMER.``/``DIRECT EMER.``/…) instead
+# of stale MIMIC-III literals (``EMERGENCY``) that match nothing. Keep these
+# names in sync with the extractor columns and the artifact.
+_NOMINAL: dict[str, str] = {
+    "gender": "recorded sex",
+    "admission_type": "admission type",
 }
 
 
 def cohort_feature_catalog() -> dict[str, FeatureInfo]:
-    """Return ``{name: FeatureInfo}`` for every legal ``source="sql"`` trait."""
+    """Return ``{name: FeatureInfo}`` for every legal ``source="sql"`` trait.
+
+    Nominal categories are sourced from the frozen categorical-domain artifact
+    (schema-grounded), so they always reflect the live MIMIC-IV vocabulary. A
+    missing artifact degrades gracefully — the trait stays legal, just with no
+    enumerated categories surfaced in the prompt.
+    """
+    domains = load_categorical_domains()
     catalog: dict[str, FeatureInfo] = {}
     for name, desc in _QUANTITATIVE.items():
         catalog[name] = FeatureInfo(name, Kind.QUANTITATIVE, desc)
-    for name, (desc, cats) in _NOMINAL.items():
-        catalog[name] = FeatureInfo(name, Kind.NOMINAL, desc, categories=cats)
+    for name, desc in _NOMINAL.items():
+        cats = domains.get(name)
+        catalog[name] = FeatureInfo(
+            name, Kind.NOMINAL, desc, categories=cats or None
+        )
     return catalog
 
 

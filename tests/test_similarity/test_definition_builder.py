@@ -49,7 +49,10 @@ def _mock_client(responses: list[str]) -> MagicMock:
 def _defn_json(**overrides) -> str:
     base = {
         "prefilters": [
-            {"field": "admission_type", "operator": "=", "value": "EMERGENCY"},
+            # A REAL MIMIC-IV admission_type value (not the stale MIMIC-III
+            # "EMERGENCY"), so the validate-and-repair guard treats this happy-
+            # path definition as in-domain and does not trigger a corrective turn.
+            {"field": "admission_type", "operator": "=", "value": "EW EMER."},
         ],
         "traits": [
             {
@@ -110,7 +113,11 @@ class TestFeatureCatalog:
         cat = cohort_feature_catalog()
         assert "F" in cat["gender"].categories
         assert "M" in cat["gender"].categories
-        assert "EMERGENCY" in cat["admission_type"].categories
+        # Categories are sourced from the schema-grounded artifact, so they
+        # carry REAL MIMIC-IV admission types — never the stale MIMIC-III
+        # "EMERGENCY" literal that matched nothing.
+        assert "EW EMER." in cat["admission_type"].categories
+        assert "EMERGENCY" not in cat["admission_type"].categories
 
     def test_catalog_names_are_extractor_columns(self):
         # Every catalog name must be a column produced by
@@ -396,3 +403,128 @@ class TestGraphTemporalGuardrails:
         payload = '{"x": "```", "y": 1}'
         wrapped = f"```json\n{payload}\n```"
         assert json.loads(_extract_json(wrapped)) == {"x": "```", "y": 1}
+
+
+# ---------------------------------------------------------------------------
+# Validate-and-repair: out-of-domain categorical values (the "0 of 0" bug).
+#
+# A prefilter / nominal-trait value outside the schema-derived domain is the
+# root cause of the reported failure: the model emitted ``admission_type =
+# "EMERGENCY"`` (a MIMIC-III literal) which matches no MIMIC-IV row, so the
+# pool was empty before scoring. The locked decision is re-prompt, never
+# fuzzy-map — the (mocked) model must self-correct to a legal literal. These
+# tests monkeypatch the domain artifact so the legal set is fixed regardless of
+# the committed file.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def patched_domains(tmp_path, monkeypatch):
+    """Point the categorical-domain loader at a controlled artifact.
+
+    ``definition_builder`` imported ``load_categorical_domains`` (the function),
+    but the function reads the module-level ``CATEGORICAL_DOMAINS_PATH`` at call
+    time — so patching the constant redirects the guard to this fixture's value
+    set without touching the committed artifact.
+    """
+    import src.similarity.categorical_domains as cd
+
+    artifact = {
+        "version": "1",
+        "source": "test",
+        "domains": {
+            "admission_type": {
+                "values": ["EW EMER.", "DIRECT EMER.", "URGENT", "ELECTIVE"],
+                "counts": {
+                    "EW EMER.": 4, "DIRECT EMER.": 3, "URGENT": 2, "ELECTIVE": 1,
+                },
+                "n": 10,
+            },
+            "gender": {"values": ["F", "M"], "counts": {"F": 1, "M": 1}, "n": 2},
+        },
+    }
+    path = tmp_path / "domains.json"
+    path.write_text(json.dumps(artifact))
+    monkeypatch.setattr(cd, "CATEGORICAL_DOMAINS_PATH", path)
+    return artifact
+
+
+class TestCategoricalValueRepair:
+    def test_out_of_domain_prefilter_triggers_corrective_retry(self, patched_domains):
+        # The model first emits the stale MIMIC-III literal "EMERGENCY" — not in
+        # MIMIC-IV's admission_type domain, so it would yield an empty pool. The
+        # guard must reject it and re-prompt; the corrected turn uses a real value.
+        bad = _defn_json(prefilters=[
+            {"field": "admission_type", "operator": "=", "value": "EMERGENCY"},
+        ])
+        client = _mock_client([bad, _defn_json()])
+        defn = build_definition(client, "Find emergency patients like a 68yo woman")
+        assert client.messages.create.call_count == 2
+        # The corrective turn names the offending value AND surfaces the legal set.
+        convo = json.dumps(client.messages.create.call_args_list[1].kwargs["messages"])
+        assert "EMERGENCY" in convo
+        assert "EW EMER." in convo  # a legal value echoed back
+        # The repaired definition carries the real value, not the stale literal.
+        assert defn.prefilters[0].value == "EW EMER."
+
+    def test_out_of_domain_value_in_list_triggers_corrective_retry(self, patched_domains):
+        # The "in" operator's list value is checked element-wise: one stale
+        # literal alongside real ones still trips the guard.
+        bad = _defn_json(prefilters=[
+            {"field": "admission_type", "operator": "in",
+             "value": ["EW EMER.", "EMERGENCY"]},
+        ])
+        client = _mock_client([bad, _defn_json()])
+        defn = build_definition(client, "…")
+        assert client.messages.create.call_count == 2
+        convo = json.dumps(client.messages.create.call_args_list[1].kwargs["messages"])
+        assert "EMERGENCY" in convo
+        assert isinstance(defn, CohortDefinition)
+
+    def test_out_of_domain_nominal_trait_value_triggers_corrective_retry(
+        self, patched_domains
+    ):
+        # The guard covers nominal TRAIT reference_values, not just prefilters:
+        # an invented gender category is rejected and named in the re-prompt.
+        bad = _defn_json(traits=[
+            {"name": "gender", "source": "sql", "kind": "nominal",
+             "reference_value": "Q", "weight": 1.0},
+        ])
+        client = _mock_client([bad, _defn_json()])
+        defn = build_definition(client, "…")
+        assert client.messages.create.call_count == 2
+        convo = json.dumps(client.messages.create.call_args_list[1].kwargs["messages"])
+        assert "gender" in convo
+        assert "Q" in convo
+        assert isinstance(defn, CohortDefinition)
+
+    def test_persistent_out_of_domain_value_raises(self, patched_domains):
+        bad = _defn_json(prefilters=[
+            {"field": "admission_type", "operator": "=", "value": "EMERGENCY"},
+        ])
+        client = _mock_client([bad, bad])
+        with pytest.raises(ValueError, match="schema domain"):
+            build_definition(client, "…")
+
+    def test_in_domain_definition_passes_in_one_call(self, patched_domains):
+        # Guard must not over-fire: a definition whose categorical values are all
+        # in-domain is accepted on the first call (no spurious corrective turn).
+        client = _mock_client([_defn_json()])
+        defn = build_definition(client, "…")
+        assert client.messages.create.call_count == 1
+        assert defn.prefilters[0].value == "EW EMER."
+
+    def test_missing_artifact_disables_guard(self, tmp_path, monkeypatch):
+        # When the artifact is absent (load returns {}), the guard is disabled
+        # rather than flagging every value — the prompt-grounding + zero-pool
+        # warning are the other defenses, and we must not block on no schema.
+        import src.similarity.categorical_domains as cd
+
+        monkeypatch.setattr(cd, "CATEGORICAL_DOMAINS_PATH", tmp_path / "absent.json")
+        bad = _defn_json(prefilters=[
+            {"field": "admission_type", "operator": "=", "value": "EMERGENCY"},
+        ])
+        client = _mock_client([bad])
+        defn = build_definition(client, "…")
+        assert client.messages.create.call_count == 1
+        assert defn.prefilters[0].value == "EMERGENCY"

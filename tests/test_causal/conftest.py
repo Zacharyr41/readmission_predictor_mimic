@@ -50,6 +50,20 @@ def synthetic_duckdb_for_causal(
     """
     conn = synthetic_duckdb_with_events
 
+    # A real-MIMIC-IV-vocabulary admission. The base fixture's 6 admissions all
+    # carry legacy MIMIC-III literals (EMERGENCY/ELECTIVE/URGENT); 107 uses the
+    # actual MIMIC-IV value 'EW EMER.' (the schema-grounded form of "emergency").
+    # It belongs to a *new* subject 6 with no other admission, so it forms no
+    # readmission link (adding it to an existing subject would perturb the
+    # readmission-outcome fixtures). The covariate regression test pins that a
+    # real value gets a *live* admission_type indicator, not the all-zero _other
+    # collapse the old hardcoded EMERGENCY/ELECTIVE/URGENT set produced.
+    conn.execute("INSERT INTO patients VALUES (6, 'M', 75, 2151, NULL)")
+    conn.execute("""
+        INSERT INTO admissions VALUES
+        (107, 6, '2151-05-01 08:00:00', '2151-05-04 08:00:00', 'EW EMER.', 'HOME', 0)
+    """)
+
     # Augment prescriptions. The base fixture inserted 2 rows (vanc→101,
     # ceftriaxone→103). We add: tPA→101, Warfarin→102, tPA+Warfarin→105.
     conn.execute("""

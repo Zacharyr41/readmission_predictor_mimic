@@ -9,6 +9,7 @@ from src.causal.covariates import (
     UnknownCovariateProfileError,
     build_covariate_matrix,
 )
+from src.similarity.categorical_domains import load_categorical_domains
 
 
 class TestDemographicsProfile:
@@ -53,12 +54,17 @@ class TestDemographicsProfile:
 class TestAdmissionProfile:
     def test_adds_admission_type_and_los(self, duckdb_backend):
         df = build_covariate_matrix(duckdb_backend, [101, 103, 106], profile="demographics+admission")
-        expected = {
-            "hadm_id", "age", "gender_M", "gender_F", "gender_unknown",
-            "admission_type_EMERGENCY", "admission_type_ELECTIVE",
-            "admission_type_URGENT", "admission_type_other",
-            "hospital_los_days",
-        }
+        # admission_type indicators are schema-grounded — one per real MIMIC-IV
+        # value in the frozen domain (so this set tracks the artifact, not a
+        # hardcoded literal list) plus an _other catch-all.
+        domain = load_categorical_domains()["admission_type"]
+        expected = (
+            {
+                "hadm_id", "age", "gender_M", "gender_F", "gender_unknown",
+                "admission_type_other", "hospital_los_days",
+            }
+            | {f"admission_type_{v}" for v in domain}
+        )
         assert set(df.columns) == expected
 
     def test_admission_type_values_match_fixture(self, duckdb_backend):
@@ -66,11 +72,26 @@ class TestAdmissionProfile:
             duckdb_backend, [101, 103, 105], profile="demographics+admission",
         )
         by_hadm = df.set_index("hadm_id").to_dict("index")
-        # 101 EMERGENCY, 103 ELECTIVE, 105 URGENT
-        assert by_hadm[101]["admission_type_EMERGENCY"] == 1
-        assert by_hadm[101]["admission_type_ELECTIVE"] == 0
+        # 101 EMERGENCY is a legacy MIMIC-III literal absent from the MIMIC-IV
+        # schema domain → it falls into the _other catch-all, not a live column.
+        assert by_hadm[101]["admission_type_other"] == 1
+        # 103 ELECTIVE and 105 URGENT are real MIMIC-IV values → live indicators.
         assert by_hadm[103]["admission_type_ELECTIVE"] == 1
+        assert by_hadm[103]["admission_type_other"] == 0
         assert by_hadm[105]["admission_type_URGENT"] == 1
+        assert by_hadm[105]["admission_type_other"] == 0
+
+    def test_real_mimic_iv_value_gets_live_indicator_not_other(self, duckdb_backend):
+        """Regression for the schema-grounding fix: an 'EW EMER.' admission (the
+        real MIMIC-IV "emergency" value) must get a *live* admission_type
+        indicator rather than collapsing to all-zero / _other the way the old
+        hardcoded EMERGENCY/ELECTIVE/URGENT one-hot did on real data."""
+        df = build_covariate_matrix(
+            duckdb_backend, [107], profile="demographics+admission",
+        )
+        row = df.set_index("hadm_id").to_dict("index")[107]
+        assert row["admission_type_EW EMER."] == 1
+        assert row["admission_type_other"] == 0
 
     def test_los_days_computed_correctly(self, duckdb_backend):
         df = build_covariate_matrix(duckdb_backend, [101], profile="demographics+admission")

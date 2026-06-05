@@ -10,6 +10,13 @@ including their tie-broken order).
 
 If a future change intentionally alters the contextual math, regenerate the
 goldens below rather than loosening the assertions.
+
+Regenerated for the admission_type schema-grounding rework: the severity group
+dropped its dead ``admission_type_EMERGENCY`` flag (5→4 features), and
+admission_type moved to a RAW nominal identity match in demographics. The
+demographics per-group scores are unchanged here because every fixture row
+shares one admission_type (so it matches at 1.0 as the old all-EMERGENCY
+one-hot did); only the severity group's values shifted.
 """
 
 from __future__ import annotations
@@ -22,25 +29,25 @@ from src.similarity.contextual import compute_contextual_similarity
 # they are shared across the default and severity-dominant scenarios.
 PER_GROUP = {
     2001: {"demographics": 0.9866666666666667, "comorbidity_burden": 1.0,
-           "comorbidity_set": 1.0, "severity": 0.9822222222222223, "social": 1.0},
+           "comorbidity_set": 1.0, "severity": 0.9777777777777779, "social": 1.0},
     2002: {"demographics": 0.9533333333333333, "comorbidity_burden": 0.5666666666666667,
-           "comorbidity_set": 0.5, "severity": 0.9133333333333333, "social": 1.0},
+           "comorbidity_set": 0.5, "severity": 0.8916666666666667, "social": 1.0},
     2003: {"demographics": 1.0, "comorbidity_burden": 1.0,
-           "comorbidity_set": 1.0, "severity": 0.25, "social": 1.0},
+           "comorbidity_set": 1.0, "severity": 0.0625, "social": 1.0},
     2004: {"demographics": 0.4266666666666667, "comorbidity_burden": 0.25,
-           "comorbidity_set": 0.0, "severity": 0.8355555555555554, "social": 1.0},
+           "comorbidity_set": 0.0, "severity": 0.7944444444444444, "social": 1.0},
 }
 
 GOLDENS_DEFAULT = {
     2001: {
-        "overall": 0.9953333333333333,
+        "overall": 0.9946666666666667,
         "contributors": [("charlson_index", 0.175), ("snomed_group_I48", 0.05),
                          ("snomed_group_N18", 0.05), ("language_barrier", 0.05),
                          ("is_neuro_service", 0.05)],
         "detractors": [],
     },
     2002: {
-        "overall": 0.7033333333333333,
+        "overall": 0.7000833333333333,
         "contributors": [("charlson_index", 0.10500000000000001),
                          ("snomed_group_I48", 0.05), ("language_barrier", 0.05),
                          ("is_neuro_service", 0.05), ("gender", 0.049999999999999996)],
@@ -48,18 +55,18 @@ GOLDENS_DEFAULT = {
                        ("charlson_renal", -0.010294117647058823)],
     },
     2003: {
-        "overall": 0.8875,
+        "overall": 0.859375,
         "contributors": [("charlson_index", 0.175), ("snomed_group_I48", 0.05),
                          ("snomed_group_N18", 0.05), ("language_barrier", 0.05),
                          ("is_neuro_service", 0.05)],
-        "detractors": [("icu_los_hours", -0.03), ("platelet_min", -0.03),
-                       ("creatinine_max", -0.03), ("sodium_mean", -0.015)],
+        "detractors": [("icu_los_hours", -0.0375), ("platelet_min", -0.0375),
+                       ("creatinine_max", -0.0375), ("sodium_mean", -0.01875)],
     },
     2004: {
-        "overall": 0.37683333333333324,
+        "overall": 0.3706666666666667,
         "contributors": [("language_barrier", 0.05), ("is_neuro_service", 0.05),
                          ("admission_type", 0.049999999999999996),
-                         ("sodium_mean", 0.03), ("platelet_min", 0.03)],
+                         ("sodium_mean", 0.0375), ("platelet_min", 0.0375)],
         "detractors": [("snomed_group_N18", -0.05), ("snomed_group_I48", -0.05),
                        ("gender", -0.049999999999999996),
                        ("age", -0.021999999999999995),
@@ -74,41 +81,41 @@ SEVERITY_WEIGHTS = {
 
 GOLDENS_SEVERITY = {
     2001: {
-        "overall": 0.9851111111111113,
-        "contributors": [("sodium_mean", 0.16000000000000003),
-                         ("platelet_min", 0.16000000000000003),
-                         ("admission_type_EMERGENCY", 0.16000000000000003),
-                         ("creatinine_max", 0.14933333333333335),
-                         ("icu_los_hours", 0.14222222222222222)],
+        "overall": 0.9815555555555557,
+        "contributors": [("sodium_mean", 0.2),
+                         ("platelet_min", 0.2),
+                         ("creatinine_max", 0.18666666666666668),
+                         ("icu_los_hours", 0.17777777777777778),
+                         ("charlson_index", 0.025)],
         "detractors": [],
     },
     2002: {
-        "overall": 0.8816666666666667,
-        "contributors": [("sodium_mean", 0.16000000000000003),
-                         ("platelet_min", 0.16000000000000003),
-                         ("admission_type_EMERGENCY", 0.16000000000000003),
-                         ("icu_los_hours", 0.10666666666666669),
-                         ("creatinine_max", 0.07466666666666669)],
+        "overall": 0.8643333333333334,
+        "contributors": [("sodium_mean", 0.2),
+                         ("platelet_min", 0.2),
+                         ("icu_los_hours", 0.13333333333333336),
+                         ("creatinine_max", 0.09333333333333337),
+                         ("language_barrier", 0.025)],
         "detractors": [("snomed_group_N18", -0.010000000000000002),
                        ("charlson_renal", -0.0014705882352941176)],
     },
     2003: {
-        "overall": 0.4,
-        "contributors": [("admission_type_EMERGENCY", 0.16000000000000003),
-                         ("charlson_index", 0.025), ("language_barrier", 0.025),
+        "overall": 0.25,
+        "contributors": [("charlson_index", 0.025), ("language_barrier", 0.025),
                          ("is_neuro_service", 0.025),
-                         ("age", 0.016666666666666666)],
-        "detractors": [("icu_los_hours", -0.16000000000000003),
-                       ("platelet_min", -0.16000000000000003),
-                       ("creatinine_max", -0.16000000000000003),
-                       ("sodium_mean", -0.08000000000000002)],
+                         ("age", 0.016666666666666666),
+                         ("gender", 0.016666666666666666)],
+        "detractors": [("icu_los_hours", -0.2),
+                       ("platelet_min", -0.2),
+                       ("creatinine_max", -0.2),
+                       ("sodium_mean", -0.1)],
     },
     2004: {
-        "overall": 0.7522777777777778,
-        "contributors": [("sodium_mean", 0.16000000000000003),
-                         ("platelet_min", 0.16000000000000003),
-                         ("admission_type_EMERGENCY", 0.16000000000000003),
-                         ("icu_los_hours", 0.035555555555555576),
+        "overall": 0.719388888888889,
+        "contributors": [("sodium_mean", 0.2),
+                         ("platelet_min", 0.2),
+                         ("icu_los_hours", 0.04444444444444447),
+                         ("creatinine_max", 0.02666666666666666),
                          ("language_barrier", 0.025)],
         "detractors": [("gender", -0.016666666666666666),
                        ("snomed_group_N18", -0.010000000000000002),

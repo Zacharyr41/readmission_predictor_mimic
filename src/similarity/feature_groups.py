@@ -30,10 +30,11 @@ DEFAULT_GROUP_WEIGHTS: dict[str, float] = {
 GROUP_FEATURES: dict[str, dict] = {
     "demographics": {
         "numeric": ["age"],
+        # First three are the gender one-hots; ``admission_type`` is the RAW
+        # nominal label (identity match), not a one-hot — see contextual.py.
         "categorical": [
             "gender_M", "gender_F", "gender_unknown",
-            "admission_type_EMERGENCY", "admission_type_ELECTIVE",
-            "admission_type_URGENT", "admission_type_other",
+            "admission_type",
         ],
     },
     "comorbidity_burden": {
@@ -47,7 +48,9 @@ GROUP_FEATURES: dict[str, dict] = {
         "numeric": [
             "creatinine_max", "sodium_mean", "platelet_min", "icu_los_hours",
         ],
-        "categorical": ["admission_type_EMERGENCY"],
+        # The old ``admission_type_EMERGENCY`` flag was dropped: on MIMIC-IV it
+        # was a constant 0 (a MIMIC-III literal that matched no row) and
+        # duplicated the demographics admission_type signal — zero added value.
     },
     "social": {
         "categorical": ["language_barrier", "is_neuro_service"],

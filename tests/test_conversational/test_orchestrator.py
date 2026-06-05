@@ -1144,6 +1144,117 @@ class TestSimilarityBranch:
         assert "hadm_id" not in result.text_summary
 
     @_patch_all
+    def test_zero_pool_by_prefilter_names_the_offending_filter(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Schema-grounding: when a prefilter eliminates EVERY candidate before
+        scoring (the "0 of 0" bug — e.g. a stale ``admission_type = EMERGENCY``
+        that matches no MIMIC-IV row), the summary must NAME the offending
+        prefilter instead of printing a bare "0 of 0", so the bad value is
+        visible rather than silently swallowed.
+        """
+        from src.conversational.models import DecompositionResult, PatientFilter
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        defn = CohortDefinition(
+            prefilters=[
+                PatientFilter(field="admission_type", operator="=", value="EMERGENCY"),
+            ],
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68, range_=(18.0, 90.0),
+                ),
+            ],
+            distance_threshold=0.35,
+        )
+        spec = SimilaritySpec(cohort_definition=defn)
+        cq = CompetencyQuestion(
+            original_question="Find emergency patients like a 68-year-old.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        for mock in (mock_extract, mock_build, mock_reason, mock_answer):
+            mock.side_effect = AssertionError(
+                "reasoning path must not run on cohort scope"
+            )
+
+        # An empty pool: the prefilter matched nothing, so run_cohort returns
+        # n_pool == 0 with no members.
+        sentinel = CohortResult(
+            definition=defn, members=[], n_pool=0, n_returned=0, provenance={},
+        )
+
+        with patch("src.similarity.run.run_cohort", return_value=sentinel):
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask(cq.original_question)
+
+        text = result.text_summary
+        # The offending prefilter is named (field + the bad value), framed as a
+        # value/schema mismatch — not a bare "0 of 0".
+        assert "admission_type" in text
+        assert "EMERGENCY" in text
+        assert "0 candidates" in text
+        # No misleading "ranked cohort" trailer when the cohort is empty.
+        assert "ranked cohort" not in text.lower()
+        # Still no raw DB key in the prose.
+        assert "hadm_id" not in text
+
+    @_patch_all
+    def test_zero_pool_without_prefilter_keeps_generic_message(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Counterpart: an empty pool with NO prefilter is a genuinely empty
+        result, not a bad value — keep the generic "within Gower distance"
+        wording and don't fabricate a prefilter culprit.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        defn = CohortDefinition(
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68, range_=(18.0, 90.0),
+                ),
+            ],
+            distance_threshold=0.35,
+        )
+        spec = SimilaritySpec(cohort_definition=defn)
+        cq = CompetencyQuestion(
+            original_question="Find patients like a 68-year-old.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        for mock in (mock_extract, mock_build, mock_reason, mock_answer):
+            mock.side_effect = AssertionError(
+                "reasoning path must not run on cohort scope"
+            )
+
+        sentinel = CohortResult(
+            definition=defn, members=[], n_pool=0, n_returned=0, provenance={},
+        )
+        with patch("src.similarity.run.run_cohort", return_value=sentinel):
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            result = pipeline.ask(cq.original_question)
+
+        # Generic empty-result wording; no fabricated prefilter culprit.
+        assert "within Gower distance" in result.text_summary
+        assert "prefilter" not in result.text_summary.lower()
+
+    @_patch_all
     def test_cohort_path_injects_frozen_reference_ranges(
         self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
     ):

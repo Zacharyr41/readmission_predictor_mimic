@@ -1,0 +1,43 @@
+{
+  "domains": {
+    "admission_type": {
+      "counts": {
+        "AMBULATORY OBSERVATION": 7195,
+        "DIRECT EMER.": 21973,
+        "DIRECT OBSERVATION": 24551,
+        "ELECTIVE": 13130,
+        "EU OBSERVATION": 119456,
+        "EW EMER.": 177459,
+        "OBSERVATION ADMIT": 84437,
+        "SURGICAL SAME DAY ADMISSION": 42898,
+        "URGENT": 54929
+      },
+      "n": 546028,
+      "values": [
+        "EW EMER.",
+        "EU OBSERVATION",
+        "OBSERVATION ADMIT",
+        "URGENT",
+        "SURGICAL SAME DAY ADMISSION",
+        "DIRECT OBSERVATION",
+        "DIRECT EMER.",
+        "ELECTIVE",
+        "AMBULATORY OBSERVATION"
+      ]
+    },
+    "gender": {
+      "counts": {
+        "F": 191984,
+        "M": 172643
+      },
+      "n": 364627,
+      "values": [
+        "F",
+        "M"
+      ]
+    }
+  },
+  "generated_at": "2026-06-05T15:02:52.793041+00:00",
+  "source": "all_admissions",
+  "version": "1"
+}

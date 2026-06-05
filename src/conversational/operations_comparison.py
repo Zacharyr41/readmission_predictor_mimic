@@ -19,6 +19,20 @@ from src.conversational.operations import (
 )
 
 
+def _admission_type_description() -> str:
+    """Comparison-axis description naming the REAL MIMIC-IV admission types.
+
+    Drawn from the frozen schema-grounded categorical-domain artifact so the
+    decomposer groups on the vocabulary the data actually uses (``EW EMER.``,
+    ``EU OBSERVATION``, …) rather than stale MIMIC-III literals.
+    """
+    from src.similarity.categorical_domains import describe_domain
+
+    examples = describe_domain("admission_type")
+    tail = f"{examples} — " if examples else ""
+    return f"{tail}grouped on the admission"
+
+
 def register_default_comparisons(registry: OperationRegistry) -> None:
     """Register the six comparison axes the reasoner currently supports.
 
@@ -55,7 +69,7 @@ def register_default_comparisons(registry: OperationRegistry) -> None:
     ))
     registry.register(ComparisonOperation(
         name="admission_type",
-        description="EMERGENCY / ELECTIVE / URGENT — grouped on the admission",
+        description=_admission_type_description(),
         admission_clause="mimic:hasAdmissionType ?group_value ;",
         sql_group_by="a.admission_type",
     ))

@@ -17,7 +17,7 @@ kernels.
 Distance conventions (from the plan):
 
   * demographics: weighted L1 — age ``|Δ|/50`` clipped to [0, 1];
-    gender / admission_type 0/1 flag match
+    gender one-hot 0/1 flag match; admission_type RAW nominal identity match
   * comorbidity_burden: weighted Jaccard on Charlson flags (weights
     from ``data/mappings/icd10_to_charlson.json``) + normalized ``|Δ|``
     on ``charlson_index``
@@ -113,6 +113,23 @@ def _flag_match(a: int, c: int) -> float:
     return float(s[0, 0])
 
 
+def _nominal_match(a, c) -> float:
+    """Raw-label nominal Gower similarity (1 if the labels are equal else 0).
+
+    The categorical analogue of ``_flag_match`` for a RAW schema label (e.g.
+    ``admission_type``): no one-hot, just the identity compare — exactly
+    ``pygower.nominal_kernel``'s ``a == b`` rule, applied to a single pair. We
+    don't route through the kernel directly because its missing-mask uses
+    ``np.isnan`` (numeric only), whereas these are string labels; the rule is
+    identical. Missing on either side → ``0.0`` (``zero_similarity``), matching
+    the other contextual primitives, so an unknown admission type is a detractor
+    rather than excluded.
+    """
+    if pd.isna(a) or pd.isna(c):
+        return 0.0
+    return 1.0 if str(a) == str(c) else 0.0
+
+
 def _score_demographics(anchor: dict, candidate: dict) -> tuple[float, list[tuple[str, float]]]:
     """demographics group: age + gender + admission_type."""
     age_sim = _pairwise_similarity(
@@ -125,11 +142,10 @@ def _score_demographics(anchor: dict, candidate: dict) -> tuple[float, list[tupl
         for c in gender_cols
     ) else 0.0
 
-    adm_cols = GROUP_FEATURES["demographics"]["categorical"][3:]
-    adm_sim = 1.0 if any(
-        int(anchor.get(c, 0)) == 1 and int(candidate.get(c, 0)) == 1
-        for c in adm_cols
-    ) else 0.0
+    # admission_type is a RAW nominal label now — identity match, not one-hot.
+    adm_sim = _nominal_match(
+        anchor.get("admission_type"), candidate.get("admission_type"),
+    )
 
     per_feature = [
         ("age", age_sim),
@@ -218,17 +234,16 @@ def _score_comorbidity_set(
 
 
 def _score_severity(anchor: dict, candidate: dict) -> tuple[float, list[tuple[str, float]]]:
-    """severity group: continuous labs + LOS + emergency flag."""
+    """severity group: continuous labs + ICU LOS.
+
+    The old ``admission_type_EMERGENCY`` flag was removed: on MIMIC-IV it was a
+    dead constant (a MIMIC-III literal matching no row) and duplicated the
+    admission_type signal now carried in the demographics group.
+    """
     per_feature: list[tuple[str, float]] = []
     for name, scale in SEVERITY_SCALES.items():
         s = _pairwise_similarity(anchor.get(name), candidate.get(name), scale=scale)
         per_feature.append((name, s))
-    # admission_type_EMERGENCY contributes as a binary match.
-    emer_sim = _flag_match(
-        anchor.get("admission_type_EMERGENCY", 0),
-        candidate.get("admission_type_EMERGENCY", 0),
-    )
-    per_feature.append(("admission_type_EMERGENCY", emer_sim))
 
     group_score = sum(s for _, s in per_feature) / len(per_feature)
     contributions = [

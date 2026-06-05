@@ -43,7 +43,7 @@ class TestTemplateAnchor:
         spec = SimilaritySpec(
             anchor_template={
                 "age": 65, "gender_F": 1, "gender_M": 0, "gender_unknown": 0,
-                "admission_type_EMERGENCY": 1,
+                "admission_type": "EW EMER.",
                 "charlson_chf": 1, "snomed_group_I48": 1,
             },
             top_k=5,

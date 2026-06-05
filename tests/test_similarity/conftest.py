@@ -35,13 +35,13 @@ def _feature_row(**overrides) -> dict:
     base = {
         "hadm_id": 0,
         "subject_id": 0,
-        # demographics
+        # demographics — admission_type is a RAW MIMIC-IV label (nominal
+        # identity match), not the old dead one-hot. All fixture rows share it,
+        # so admission_type matches across anchor + candidates (sim 1.0) and the
+        # known similarity ordering below is unaffected by this column.
         "age": 60,
         "gender_M": 0, "gender_F": 1, "gender_unknown": 0,
-        "admission_type_EMERGENCY": 1,
-        "admission_type_ELECTIVE": 0,
-        "admission_type_URGENT": 0,
-        "admission_type_other": 0,
+        "admission_type": "EW EMER.",
         # comorbidity burden (Charlson)
         "charlson_index": 2,
         "charlson_myocardial_infarction": 0,

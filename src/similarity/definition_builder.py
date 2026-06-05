@@ -33,6 +33,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from src.pygower import Direction, Kind
+from src.similarity.categorical_domains import load_categorical_domains
 from src.similarity.feature_catalog import (
     catalog_feature_names,
     cohort_feature_catalog,
@@ -173,7 +174,7 @@ PatientFilter operators: > < = >= <= contains in
 
 OUTPUT JSON SCHEMA (emit ONLY these keys):
 {{
-  "prefilters": [{{"field": <prefilter field>, "operator": <op>, "value": <str>}}],
+  "prefilters": [{{"field": <prefilter field>, "operator": <op>, "value": <str, or a list of str for the "in" operator>}}],
   "traits": [{{
     "name": <feature name>,
     "source": "sql" | "graph_temporal",
@@ -199,7 +200,7 @@ Request: "Find emergency ICU patients similar to a 68-year-old woman whose \
 creatinine ran high and whose platelets dropped, hospital stay on the shorter \
 side."
 {{
-  "prefilters": [{{"field": "admission_type", "operator": "=", "value": "EMERGENCY"}}],
+  "prefilters": [{{"field": "admission_type", "operator": "in", "value": ["EW EMER.", "DIRECT EMER."]}}],
   "traits": [
     {{"name": "age", "source": "sql", "kind": "quantitative", "reference_value": 68, "direction": "symmetric", "weight": 0.8}},
     {{"name": "gender", "source": "sql", "kind": "nominal", "reference_value": "F", "weight": 1.0}},
@@ -305,6 +306,54 @@ def _offending_graph_traits(defn: CohortDefinition) -> dict[str, str]:
         template = getattr(t, "template", None)
         if not template or template not in legal:
             offenders[t.name] = template or ""
+    return offenders
+
+
+def _offending_categorical_values(defn: CohortDefinition) -> dict[str, dict[str, Any]]:
+    """Prefilter / nominal-trait values that are NOT in their column's frozen domain.
+
+    The root cause of the "0 of 0 candidates" bug: the model emitted a prefilter
+    ``admission_type = "EMERGENCY"`` — a MIMIC-III literal that matches no row in
+    MIMIC-IV (which stores ``EW EMER.`` / ``DIRECT EMER.`` / …), so the candidate
+    pool was empty *before* scoring. This guard rejects any categorical value
+    that is not an EXACT member of the schema-derived domain (locked decision:
+    re-prompt, never fuzzy-map). Exact matching is deliberate — the prefilter
+    compiles to case-sensitive SQL, so even a near-miss like ``"ew emer."`` would
+    match nothing and must be corrected, not silently accepted.
+
+    Only columns with a known categorical domain (``admission_type``, ``gender``)
+    are checked; everything else (age, diagnosis, …) is passed through. Returns
+    ``{column: {"bad": [values…], "legal": [domain…]}}`` so the corrective turn
+    can name the field, the offending value(s), and the legal set. A missing
+    artifact (empty domains) disables the guard rather than flagging everything.
+    """
+    domains = load_categorical_domains()
+    if not domains:
+        return {}
+    offenders: dict[str, dict[str, Any]] = {}
+
+    def _check(column: str, values: list[Any]) -> None:
+        legal = domains.get(column)
+        if not legal:
+            return
+        legal_set = set(legal)
+        for v in values:
+            if str(v) in legal_set:
+                continue
+            rec = offenders.setdefault(column, {"bad": [], "legal": list(legal)})
+            if v not in rec["bad"]:
+                rec["bad"].append(v)
+
+    for f in defn.prefilters:
+        if f.field in domains:
+            _check(f.field, f.value if isinstance(f.value, list) else [f.value])
+    for t in defn.traits:
+        if (
+            t.kind == Kind.NOMINAL
+            and t.name in domains
+            and t.reference_value is not None
+        ):
+            _check(t.name, [t.reference_value])
     return offenders
 
 
@@ -420,6 +469,31 @@ def build_definition(
                     f'feature-extractor "template": {sorted(graph_offenders)}. '
                     f"Every graph_temporal trait MUST set \"template\" to one "
                     f"of: {legal}. Return ONLY the corrected JSON."
+                ),
+            })
+            continue
+
+        value_offenders = _offending_categorical_values(defn)
+        if value_offenders:
+            detail = "; ".join(
+                f'{col}={rec["bad"]} (legal values: {rec["legal"]})'
+                for col, rec in value_offenders.items()
+            )
+            if last:
+                raise ValueError(
+                    f"cohort definition uses categorical value(s) outside the "
+                    f"data's schema domain: {detail}"
+                )
+            messages.append({"role": "assistant", "content": raw_text})
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"These categorical values are not in the data's schema "
+                    f"domain: {detail}. Use ONLY the exact literals shown as "
+                    f"legal values — they are the categories the database "
+                    f"actually stores, so a value outside that set matches no "
+                    f'rows. For multiple categories use operator "in" with a '
+                    f"list. Return ONLY the corrected JSON."
                 ),
             })
             continue

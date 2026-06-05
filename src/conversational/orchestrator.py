@@ -1296,6 +1296,29 @@ class ConversationalPipeline:
             for i, m in enumerate(result.members)
         ]
 
+        # Zero-pool diagnostic (schema-grounding): when the prefilters eliminated
+        # every candidate BEFORE scoring, a bare "0 of 0" hides WHY. Name the
+        # offending prefilter(s) so an out-of-domain value (e.g. a stale
+        # MIMIC-III literal like ``admission_type = EMERGENCY`` that matches no
+        # MIMIC-IV row) is visible instead of silently swallowed. Only fires when
+        # prefilters exist — an empty pool with no prefilter is a genuinely empty
+        # database, not a bad value.
+        if result.n_pool == 0 and definition.prefilters:
+            rendered = ", ".join(
+                f"`{f.field} {f.operator} {f.value}`" for f in definition.prefilters
+            )
+            return AnswerResult(
+                text_summary=(
+                    f"Found 0 candidates: the prefilter(s) {rendered} matched no "
+                    f"admissions, so the candidate pool was empty before any "
+                    f"scoring. Check each value against the data's actual "
+                    f"categories — a value the schema does not store matches no "
+                    f"rows."
+                ),
+                data_table=data_table,
+                table_columns=["rank", "hadm_id", "subject_id", "distance"],
+            )
+
         # Cohort-level quantities of interest (plan III-C): distance
         # distribution + per-trait cohort means vs the reference profile, folded
         # into the summary as text + a small markdown table. The member table

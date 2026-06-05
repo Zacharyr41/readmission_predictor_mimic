@@ -170,6 +170,22 @@ def _maybe_ground_diagnosis_filter_clause(
     return f"(di.icd_code IN ({placeholders}))", list(accepted_codes)
 
 
+def _admission_type_description() -> str:
+    """Filter-field description naming the REAL MIMIC-IV admission types.
+
+    The example values are pulled from the frozen schema-grounded categorical-
+    domain artifact (not hardcoded MIMIC-III literals), so the decomposer is
+    taught the vocabulary the data actually uses — ``EW EMER.``/``DIRECT EMER.``
+    rather than a stale ``EMERGENCY`` that matches no rows. Falls back to a
+    generic description if the artifact is unavailable.
+    """
+    from src.similarity.categorical_domains import describe_domain
+
+    examples = describe_domain("admission_type")
+    lead = f"admission type (e.g. {examples})" if examples else "admission type"
+    return f'{lead}; use operator "in" with a list value to match multiple'
+
+
 def _compile_admission_type(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
     # Existing: single predicate on admissions.admission_type.
     # New: ``in`` operator accepts a list of allowed values and emits ``IN (?, ?, ...)``.
@@ -251,10 +267,7 @@ def register_default_filters(registry: OperationRegistry) -> None:
         name="admission_type",
         operators=frozenset({"=", "in"}),
         value_type="scalar_or_list",
-        description=(
-            'admission type (e.g. "EMERGENCY", "ELECTIVE", "URGENT"); '
-            'use operator "in" with a list value to match multiple'
-        ),
+        description=_admission_type_description(),
         compile_fn=_compile_admission_type,
     ))
     registry.register(FilterOperation(

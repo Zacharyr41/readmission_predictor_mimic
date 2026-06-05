@@ -160,7 +160,7 @@ Use ONLY the names listed here for patient_filters[].field, aggregation, and com
 
 ## filter  (used in patient_filters[].field)
 
-  admission_type         (=|in            ) scalar_or_list  admission type (e.g. "EMERGENCY", "ELECTIVE", "URGENT"); use operator "in" with a list value to match multiple
+  admission_type         (=|in            ) scalar_or_list  admission type (e.g. "EW EMER.", "EU OBSERVATION", "OBSERVATION ADMIT", "URGENT", …); use operator "in" with a list value to match multiple
   age                    (<|<=|=|>|>=     ) scalar    patient anchor age in years (integer)
   diagnosis              (contains        ) scalar    substring match against ICD-10 long title OR ICD code prefix
   gender                 (=               ) scalar    patient gender ("M"|"F"; case-insensitive on input)
@@ -181,7 +181,7 @@ Use ONLY the names listed here for patient_filters[].field, aggregation, and com
 
 ## comparison_axis  (used in comparison_field)
 
-  admission_type          EMERGENCY / ELECTIVE / URGENT — grouped on the admission
+  admission_type          "EW EMER.", "EU OBSERVATION", "OBSERVATION ADMIT", "URGENT", … — grouped on the admission
   age                     patient anchor_age — grouped on the Patient node
   discharge_location      HOME / SNF / HOSPICE / etc — grouped on the admission
   gender                  M vs F — grouped on the Patient node
@@ -482,7 +482,7 @@ Question: "Find patients similar to a 68-year-old female with atrial fibrillatio
       "gender_F": 1,
       "gender_M": 0,
       "gender_unknown": 0,
-      "admission_type_EMERGENCY": 1,
+      "admission_type": "EW EMER.",
       "snomed_group_I48": 1,
       "snomed_group_N18": 1
     },
