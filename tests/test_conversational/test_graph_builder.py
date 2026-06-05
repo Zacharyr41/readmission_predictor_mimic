@@ -135,6 +135,60 @@ def multi_patient_extraction():
 
 
 @pytest.fixture
+def temporal_cohort_extraction():
+    """A patient whose ICU stay carries an adjacency (meets) + precedence
+    (before) chain — the substrate the temporal cohort path (plan III-A)
+    queries for dose-trend traits like "escalating vasopressors".
+
+    Two vasopressor administrations *meet* (the first ends exactly when the
+    second begins); a later drug starts strictly after both, giving coarse
+    precedence. All three are proper intervals, so the Allen classifier emits
+    ``time:intervalMeets`` for the adjacency and ``time:before`` for precedence.
+    """
+    return ExtractionResult(
+        patients=[{"subject_id": 6001, "gender": "F", "anchor_age": 68}],
+        admissions=[{
+            "hadm_id": 6101, "subject_id": 6001,
+            "admittime": datetime(2150, 6, 1, 8, 0),
+            "dischtime": datetime(2150, 6, 5, 14, 0),
+            "admission_type": "EMERGENCY",
+            "discharge_location": "HOME",
+        }],
+        icu_stays=[{
+            "stay_id": 6201, "hadm_id": 6101, "subject_id": 6001,
+            "intime": datetime(2150, 6, 1, 10, 0),
+            "outtime": datetime(2150, 6, 4, 10, 0),
+            "los": 3.0,
+        }],
+        events={
+            "drug": [
+                {
+                    "hadm_id": 6101, "subject_id": 6001,
+                    "drug": "Norepinephrine",
+                    "starttime": datetime(2150, 6, 1, 12, 0),
+                    "stoptime": datetime(2150, 6, 1, 18, 0),
+                    "dose_val_rx": 5.0, "dose_unit_rx": "mcg/kg/min", "route": "IV",
+                },
+                {
+                    "hadm_id": 6101, "subject_id": 6001,
+                    "drug": "Vasopressin",
+                    "starttime": datetime(2150, 6, 1, 18, 0),  # meets Norepinephrine
+                    "stoptime": datetime(2150, 6, 2, 0, 0),
+                    "dose_val_rx": 0.04, "dose_unit_rx": "units/min", "route": "IV",
+                },
+                {
+                    "hadm_id": 6101, "subject_id": 6001,
+                    "drug": "Phenylephrine",
+                    "starttime": datetime(2150, 6, 3, 6, 0),  # strictly after both
+                    "stoptime": datetime(2150, 6, 3, 10, 0),
+                    "dose_val_rx": 50.0, "dose_unit_rx": "mcg/min", "route": "IV",
+                },
+            ],
+        },
+    )
+
+
+@pytest.fixture
 def no_icu_extraction():
     """1 patient, 1 admission, 0 ICU stays, 1 diagnosis event only."""
     return ExtractionResult(
@@ -483,6 +537,57 @@ class TestSkipAllenRelations:
         """Default behavior still computes Allen relations."""
         graph, stats = build_query_graph(ontology_dir, minimal_extraction)
         assert stats["allen_relations"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Allen precedence edges on the cohort path (plan I-D)
+# ---------------------------------------------------------------------------
+
+
+class TestAllenPrecedenceEdges:
+    """I-D: verify the cohort-path graph carries the actual Allen *edges* the
+    temporal feature extractor (plan III-A) will read — not just a nonzero
+    count. ``build_query_graph`` computes Allen by default
+    (``skip_allen_relations=False``), which is exactly what the orchestrator's
+    temporal cohort path requests (``skip_allen_relations=not any_temporal``).
+    Adjacency uses ``time:intervalMeets`` (OWL-Time's interval-meets); coarse
+    precedence uses ``time:before`` — which is fanned-out, so it is only safe
+    for "A precedes B", never for adjacency.
+    """
+
+    def test_meets_and_before_edges_between_events(
+        self, ontology_dir, temporal_cohort_extraction,
+    ):
+        graph, stats = build_query_graph(ontology_dir, temporal_cohort_extraction)
+        assert stats["allen_relations"] > 0
+
+        # Adjacency: the first administration meets the one that begins as it
+        # ends. Both endpoints must be clinical events (not the begin/end
+        # Instant nodes, which are not stay-associated and so never paired).
+        meets = list(graph.subject_objects(TIME_NS.intervalMeets))
+        assert meets, "expected a time:intervalMeets adjacency edge"
+        for s, o in meets:
+            assert (s, RDF.type, MIMIC_NS.PrescriptionEvent) in graph
+            assert (o, RDF.type, MIMIC_NS.PrescriptionEvent) in graph
+
+        # Coarse precedence: the strictly-later administration is before-linked.
+        before = list(graph.subject_objects(TIME_NS.before))
+        assert before, "expected a time:before precedence edge"
+        for s, o in before:
+            assert (s, RDF.type, MIMIC_NS.PrescriptionEvent) in graph
+            assert (o, RDF.type, MIMIC_NS.PrescriptionEvent) in graph
+
+    def test_precedence_edges_absent_when_allen_skipped(
+        self, ontology_dir, temporal_cohort_extraction,
+    ):
+        """Built with Allen skipped, the same graph carries no precedence
+        edges — a pure-contextual cohort neither pays for nor depends on them.
+        """
+        graph, _ = build_query_graph(
+            ontology_dir, temporal_cohort_extraction, skip_allen_relations=True,
+        )
+        assert (None, TIME_NS.intervalMeets, None) not in graph
+        assert (None, TIME_NS.before, None) not in graph
 
 
 # ---------------------------------------------------------------------------
