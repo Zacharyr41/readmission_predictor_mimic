@@ -28,7 +28,9 @@ class _FakePipeline:
         self._answer = answer
         self.asked: list[str] = []
 
-    def ask(self, question: str) -> AnswerResult:
+    def ask(self, question: str, progress_callback=None) -> AnswerResult:
+        # Mirror the real pipeline: ``app.py`` passes ``progress_callback``;
+        # the fake accepts and ignores it (the stage labels aren't asserted).
         self.asked.append(question)
         return self._answer
 

@@ -106,6 +106,29 @@ def _apply_defaults(row: dict) -> dict:
     return row
 
 
+def _in_list_clause(
+    backend: Any, column: str, values: list[int]
+) -> tuple[str, list]:
+    """Build a ``column IN (...)`` fragment plus its bind params, scaling
+    safely to very large pools.
+
+    On an array-capable backend (BigQuery: ``supports_array_params``) the whole
+    list binds as ONE array parameter via ``IN UNNEST(?)`` — one placeholder
+    regardless of pool size. Otherwise fall back to inline ``IN (?,?,…)`` with
+    one scalar placeholder per value (fine for DuckDB / small pools).
+
+    The per-id placeholder form is what made a ~199k EW EMER./DIRECT EMER. pool
+    explode past BigQuery's parameter limit (and triggered an O(n²) ``?``→``@pN``
+    rewrite); the array form keeps the feature-fetch O(1) in parameters. IDs are
+    cast to ``int`` defensively (hadm_id is always integral).
+    """
+    ids = [int(v) for v in values]
+    if getattr(backend, "supports_array_params", False):
+        return f"{column} IN UNNEST(?)", [ids]
+    placeholders = ",".join(["?"] * len(ids))
+    return f"{column} IN ({placeholders})", ids
+
+
 def _fetch_admission_features(backend: Any, hadm_ids: list[int]) -> pd.DataFrame:
     """Pull demographic + ICU-LOS + minimal-severity features for a
     list of hadm_ids. Returns a DataFrame keyed by ``hadm_id`` + all
@@ -113,16 +136,20 @@ def _fetch_admission_features(backend: Any, hadm_ids: list[int]) -> pd.DataFrame
     """
     if not hadm_ids:
         return pd.DataFrame()
-    placeholders = ",".join(["?"] * len(hadm_ids))
+    # Dataset-qualify table names — BigQuery has no default dataset configured,
+    # so bare ``FROM admissions`` fails there. Backends expose ``.table(name)``;
+    # fall back to the bare name for any backend that doesn't (e.g. raw fakes).
+    t = getattr(backend, "table", None) or (lambda n: n)
+    clause, params = _in_list_clause(backend, "a.hadm_id", hadm_ids)
     rows = backend.execute(
         f"""
         SELECT a.hadm_id, a.subject_id, p.anchor_age, p.gender,
                a.admission_type
-        FROM admissions a
-        JOIN patients p ON a.subject_id = p.subject_id
-        WHERE a.hadm_id IN ({placeholders})
+        FROM {t('admissions')} a
+        JOIN {t('patients')} p ON a.subject_id = p.subject_id
+        WHERE {clause}
         """,
-        list(hadm_ids),
+        params,
     )
     base = pd.DataFrame(
         rows, columns=["hadm_id", "subject_id", "age", "gender", "admission_type"],
@@ -137,14 +164,15 @@ def _fetch_admission_features(backend: Any, hadm_ids: list[int]) -> pd.DataFrame
     # needs no hardcoded value list and works for any schema vocabulary.
 
     # ICU LOS aggregated across stays.
+    icu_clause, icu_params = _in_list_clause(backend, "hadm_id", hadm_ids)
     icu_rows = backend.execute(
         f"""
         SELECT hadm_id, SUM(los) * 24.0 AS icu_los_hours
-        FROM icustays
-        WHERE hadm_id IN ({placeholders})
+        FROM {t('icustays')}
+        WHERE {icu_clause}
         GROUP BY hadm_id
         """,
-        list(hadm_ids),
+        icu_params,
     )
     icu_df = pd.DataFrame(icu_rows, columns=["hadm_id", "icu_los_hours"])
     base = base.merge(icu_df, on="hadm_id", how="left")
@@ -152,17 +180,18 @@ def _fetch_admission_features(backend: Any, hadm_ids: list[int]) -> pd.DataFrame
 
     # Minimal severity features from labevents — keep extractor small.
     try:
+        lab_clause, lab_params = _in_list_clause(backend, "l.hadm_id", hadm_ids)
         lab_rows = backend.execute(
             f"""
             SELECT l.hadm_id,
                    MAX(CASE WHEN l.itemid = 50912 THEN l.valuenum END) AS creatinine_max,
                    AVG(CASE WHEN l.itemid = 50983 THEN l.valuenum END) AS sodium_mean,
                    MIN(CASE WHEN l.itemid = 51265 THEN l.valuenum END) AS platelet_min
-            FROM labevents l
-            WHERE l.hadm_id IN ({placeholders})
+            FROM {t('labevents')} l
+            WHERE {lab_clause}
             GROUP BY l.hadm_id
             """,
-            list(hadm_ids),
+            lab_params,
         )
         lab_df = pd.DataFrame(
             lab_rows, columns=["hadm_id", "creatinine_max", "sodium_mean", "platelet_min"],

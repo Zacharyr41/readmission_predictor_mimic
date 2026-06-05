@@ -162,6 +162,11 @@ def _make_mock_bq():
     mock_bq.ScalarQueryParameter = MagicMock(
         side_effect=lambda n, t, v: (n, t, v)
     )
+    # Array params surface as a distinguishable 4-tuple so tests can assert a
+    # list-valued bind became ONE ArrayQueryParameter (not N scalar params).
+    mock_bq.ArrayQueryParameter = MagicMock(
+        side_effect=lambda n, t, v: ("array", n, t, list(v))
+    )
     mock_bq.QueryJobConfig = MagicMock()
     return mock_bq
 
@@ -207,6 +212,61 @@ class TestBigQueryBackend:
         backend.close()
 
     @patch("src.conversational.extractor._get_bigquery_module")
+    def test_list_param_becomes_single_array_query_parameter(self, mock_get_bq):
+        """A list-valued bind compiles to ONE ArrayQueryParameter behind a single
+        ``@pN`` (used as ``IN UNNEST(@pN)``). This is what lets an N-id IN-list be
+        one array param instead of N scalar params — the latter blew past
+        BigQuery's parameter limit and an O(n^2) per-? string rewrite on the
+        ~199k-admission emergency cohort."""
+        mock_get_bq.return_value = _make_mock_bq()
+        backend = _BigQueryBackend(project="test-project")
+
+        sql = "SELECT * FROM t WHERE hadm_id IN UNNEST(?)"
+        converted_sql, bq_params = backend._convert_params(sql, [[1, 2, 3]])
+
+        assert "UNNEST(@p0)" in converted_sql
+        assert "?" not in converted_sql
+        assert len(bq_params) == 1
+        assert bq_params[0] == ("array", "p0", "INT64", [1, 2, 3])
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_mixed_scalar_and_array_params(self, mock_get_bq):
+        """Scalars and a list bind side by side, each to its own ``@pN``."""
+        mock_get_bq.return_value = _make_mock_bq()
+        backend = _BigQueryBackend(project="test-project")
+
+        sql = "SELECT * FROM t WHERE age > ? AND hadm_id IN UNNEST(?)"
+        converted_sql, bq_params = backend._convert_params(sql, [70, [4, 5]])
+
+        assert "@p0" in converted_sql
+        assert "UNNEST(@p1)" in converted_sql
+        assert "?" not in converted_sql
+        assert bq_params[0] == ("p0", "INT64", 70)
+        assert bq_params[1] == ("array", "p1", "INT64", [4, 5])
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_convert_params_maps_placeholders_left_to_right(self, mock_get_bq):
+        """Pins the O(n) rewrite: N placeholders map to ``@p0``..``@p(N-1)`` in
+        source order, each ``?`` replaced exactly once. (The prior implementation
+        did a fresh ``sql.replace('?', ..., 1)`` per parameter — O(n^2) in the
+        number of binds, which is what wedged the 199k-id cohort fetch.)"""
+        mock_get_bq.return_value = _make_mock_bq()
+        backend = _BigQueryBackend(project="test-project")
+
+        n = 40
+        sql = "SELECT " + ", ".join(["?"] * n)
+        converted_sql, bq_params = backend._convert_params(sql, list(range(n)))
+
+        assert "?" not in converted_sql
+        assert len(bq_params) == n
+        assert [p[0] for p in bq_params] == [f"p{i}" for i in range(n)]
+        positions = [converted_sql.index(f"@p{i}") for i in range(n)]
+        assert positions == sorted(positions)
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
     def test_extract_bigquery_generates_qualified_sql(self, mock_get_bq):
         """Full extract_bigquery call with mocked client verifies table names in SQL."""
         mock_bq = _make_mock_bq()
@@ -234,6 +294,119 @@ class TestBigQueryBackend:
         assert mock_client.query.called
         first_sql = mock_client.query.call_args_list[0][0][0]
         assert "physionet-data.mimiciv_3_1_hosp.admissions" in first_sql
+
+
+class TestBigQueryReconnect:
+    """The long-lived BigQuery client's connection pool can hold a stale
+    keep-alive socket (laptop sleep/wake, WiFi roam, Google idle-closing an
+    idle connection). Reusing it raises the intermittent macOS
+    ``SSL_ERROR_SYSCALL`` / ``[SYS] unknown error (_ssl.c:2427)``. google-api-core
+    treats that as retryable and retries on the *same* poisoned session, so it
+    never recovers — it just burns the full ~600s deadline (a ~20-min hang).
+
+    These tests pin the fix: bound the per-attempt timeout AND, on a transport
+    error, reconnect with a *fresh* client (new connection pool) so a
+    stale-socket blip self-heals on retry instead of hanging.
+    """
+
+    @staticmethod
+    def _fake_rows(*rows):
+        out = []
+        for r in rows:
+            m = MagicMock()
+            m.values.return_value = r
+            out.append(m)
+        return out
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_query_uses_bounded_timeout_and_no_unbounded_retry(self, mock_get_bq):
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+        client = mock_bq.Client.return_value
+        job = MagicMock()
+        job.result.return_value = self._fake_rows((1,))
+        client.query.return_value = job
+
+        backend = _BigQueryBackend(project="test-project")
+        backend.execute("SELECT 1", [])
+
+        qkwargs = client.query.call_args.kwargs
+        # a bounded per-request timeout is the core anti-hang guarantee
+        assert qkwargs.get("timeout") is not None
+        assert 0 < qkwargs["timeout"] < 600
+        # google's own retry must be disabled so it cannot re-burn the ~600s
+        # deadline on a poisoned session; our reconnect loop owns retries.
+        assert qkwargs.get("retry") is None
+        rkwargs = job.result.call_args.kwargs
+        assert rkwargs.get("timeout") is not None
+        assert rkwargs["timeout"] > 0
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_recovers_from_transient_transport_error(self, mock_get_bq):
+        import ssl
+
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+
+        client1 = MagicMock()
+        client2 = MagicMock()
+        mock_bq.Client.side_effect = [client1, client2]
+        client1.query.side_effect = ssl.SSLError(
+            5, "[SYS] unknown error (_ssl.c:2427)"
+        )
+        job = MagicMock()
+        job.result.return_value = self._fake_rows((42,))
+        client2.query.return_value = job
+
+        backend = _BigQueryBackend(project="test-project", reconnect_backoff=0.0)
+        rows = backend.execute("SELECT 1", [])
+
+        assert rows == [(42,)]
+        # a fresh client (new connection pool) was built for the retry
+        assert mock_bq.Client.call_count == 2
+        # the poisoned client was closed
+        assert client1.close.called
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_gives_up_after_max_attempts_without_hanging(self, mock_get_bq):
+        import ssl
+
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+
+        clients = [MagicMock() for _ in range(3)]
+        for c in clients:
+            c.query.side_effect = ssl.SSLError(5, "[SYS] unknown error")
+        mock_bq.Client.side_effect = clients
+
+        backend = _BigQueryBackend(
+            project="test-project", max_attempts=3, reconnect_backoff=0.0
+        )
+        with pytest.raises(ssl.SSLError):
+            backend.execute("SELECT 1", [])
+
+        # exactly max_attempts attempts → bounded, no infinite loop
+        total_query_calls = sum(c.query.call_count for c in clients)
+        assert total_query_calls == 3
+        assert mock_bq.Client.call_count == 3
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_non_transport_error_propagates_without_retry(self, mock_get_bq):
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+        client = mock_bq.Client.return_value
+        client.query.side_effect = ValueError("bad sql syntax")
+
+        backend = _BigQueryBackend(project="test-project")
+        with pytest.raises(ValueError):
+            backend.execute("SELECT bad", [])
+
+        # a genuine query error must surface immediately, not be masked by
+        # pointless reconnect-and-retry
+        assert client.query.call_count == 1
+        assert mock_bq.Client.call_count == 1  # no reconnect
+        backend.close()
 
 
 # ---------------------------------------------------------------------------

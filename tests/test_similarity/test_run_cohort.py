@@ -46,7 +46,11 @@ from src.similarity.models import (
     TraitContribution,
     TraitSpec,
 )
-from src.similarity.run import run_cohort
+from src.similarity.run import (
+    _fetch_admission_features,
+    _in_list_clause,
+    run_cohort,
+)
 
 ONTOLOGY_DIR = Path(__file__).parent.parent.parent / "ontology" / "definition"
 
@@ -439,3 +443,82 @@ class TestProvenance:
         assert prov["distance_threshold"] == 0.4
         assert prov["top_k"] == 10
         assert any(t["name"] == "age" for t in prov["traits"])
+
+
+# ---------------------------------------------------------------------------
+# Feature-fetch scaling — a large prefilter pool (e.g. ~199k EW EMER./DIRECT
+# EMER. admissions) must NOT build one bind parameter per hadm_id. On BigQuery
+# that explodes past the parameter limit and an O(n^2) per-? string rewrite;
+# the fix is a single array parameter (`IN UNNEST(?)`). Tables must also be
+# dataset-qualified via ``backend.table`` (BigQuery has no default dataset).
+# ---------------------------------------------------------------------------
+
+
+class _RecordingBackend:
+    """Captures every ``execute(sql, params)`` and returns shaped rows so the
+    feature DataFrame builds. ``supports_array_params`` toggles the IN-list
+    form; ``table`` qualifies like the real BigQuery backend would."""
+
+    def __init__(self, supports_array_params: bool) -> None:
+        self.supports_array_params = supports_array_params
+        self.calls: list[tuple[str, list]] = []
+
+    def table(self, name: str) -> str:
+        return f"`proj.ds.{name}`" if self.supports_array_params else name
+
+    def execute(self, sql: str, params: list) -> list[tuple]:
+        self.calls.append((sql, params))
+        low = sql.lower()
+        if "labevents" in low:
+            return [(1, 1.5, 140.0, 90.0), (2, 2.0, 138.0, 80.0)]
+        if "icustays" in low:
+            return [(1, 48.0), (2, 24.0)]
+        if "admissions" in low:  # the admissions⋈patients base query
+            return [(1, 100, 68, "M", "EW EMER."),
+                    (2, 101, 70, "F", "DIRECT EMER.")]
+        return []
+
+
+class TestInListClause:
+    def test_array_form_for_capable_backend(self):
+        backend = _RecordingBackend(supports_array_params=True)
+        frag, params = _in_list_clause(backend, "a.hadm_id", [1, 2, 3])
+        assert frag == "a.hadm_id IN UNNEST(?)"
+        assert params == [[1, 2, 3]]
+
+    def test_inline_form_for_plain_backend(self):
+        backend = _RecordingBackend(supports_array_params=False)
+        frag, params = _in_list_clause(backend, "a.hadm_id", [1, 2, 3])
+        assert frag == "a.hadm_id IN (?,?,?)"
+        assert params == [1, 2, 3]
+
+    def test_casts_ids_to_int(self):
+        backend = _RecordingBackend(supports_array_params=True)
+        _, params = _in_list_clause(backend, "x", ["7", 8])
+        assert params == [[7, 8]]
+
+
+class TestFetchAdmissionFeaturesScaling:
+    def test_single_array_param_and_qualified_tables_on_capable_backend(self):
+        pool = [1, 2]
+        backend = _RecordingBackend(supports_array_params=True)
+        df = _fetch_admission_features(backend, pool)
+
+        in_list_calls = [(s, p) for (s, p) in backend.calls if "UNNEST" in s]
+        assert in_list_calls, "expected IN UNNEST(...) array-param queries"
+        for _sql, params in in_list_calls:
+            # one array param carrying the whole pool, NOT one scalar per id
+            assert params == [pool]
+        assert any("`proj.ds.admissions`" in s for s, _ in backend.calls)
+        assert len(df) == 2
+
+    def test_inline_in_list_on_plain_backend(self):
+        pool = [1, 2]
+        backend = _RecordingBackend(supports_array_params=False)
+        df = _fetch_admission_features(backend, pool)
+
+        in_list_calls = [(s, p) for (s, p) in backend.calls if " in (" in s.lower()]
+        assert in_list_calls, "expected inline IN (?, ?, ...) queries"
+        for _sql, params in in_list_calls:
+            assert params == pool  # one scalar placeholder per id
+        assert len(df) == 2

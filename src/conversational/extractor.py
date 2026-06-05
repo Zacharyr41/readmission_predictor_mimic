@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -53,6 +54,68 @@ def _get_bigquery_module():
     from google.cloud import bigquery as bq
 
     return bq
+
+
+# Exception *type names* that signal a transport/connection failure where the
+# right recovery is a fresh client (new connection pool), not more polling on
+# the same poisoned session. OSError subclasses — ssl.SSLError, socket errors,
+# builtin ConnectionError/TimeoutError, and requests' RequestException (which
+# subclasses OSError) — are matched by isinstance below; this name set covers
+# the google-api-core wrappers that are *not* OSError subclasses.
+_TRANSIENT_TRANSPORT_ERROR_NAMES = frozenset({
+    "RetryError",
+    "ServiceUnavailable",
+    "ServerError",
+    "InternalServerError",
+    "BadGateway",
+    "GatewayTimeout",
+    "TooManyRequests",
+    "ConnectionError",
+    "SSLError",
+    "Timeout",
+    "ReadTimeout",
+    "ConnectTimeout",
+    "ChunkedEncodingError",
+    "ProtocolError",
+    "MaxRetryError",
+})
+
+
+def _is_transient_transport_error(exc: BaseException) -> bool:
+    """True when ``exc`` (or any error in its ``__cause__`` / ``__context__``
+    chain) is a network/transport failure where reconnecting with a fresh
+    BigQuery client is the correct recovery.
+
+    Targets the intermittent macOS ``SSL_ERROR_SYSCALL`` / ``[SYS] unknown
+    error (_ssl.c:2427)`` raised when the client reuses a stale keep-alive
+    socket, plus the google-api-core 5xx / retry-deadline wrappers. Genuine
+    query errors (BadRequest, NotFound, Forbidden, SQL syntax) are deliberately
+    *not* matched, so a real failure surfaces immediately instead of being
+    masked by pointless retries.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, OSError):
+            return True
+        if type(cur).__name__ in _TRANSIENT_TRANSPORT_ERROR_NAMES:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+def _bq_array_element_type(values) -> str:
+    """BigQuery element type for an array parameter, inferred from the first
+    element. Our array binds are hadm_id lists (INT64); empty → INT64 default."""
+    if not values:
+        return "INT64"
+    first = values[0]
+    if isinstance(first, float):
+        return "FLOAT64"
+    if isinstance(first, int):  # bool is an int subclass — INT64 domain
+        return "INT64"
+    return "STRING"
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +234,26 @@ class _BigQueryBackend:
       Belt-and-suspenders for the case where the validator misjudges.
     """
 
+    # A list-valued bind compiles to a single ArrayQueryParameter
+    # (``IN UNNEST(@p)``), so callers can filter by a large id set with one
+    # parameter instead of one-per-id. See ``_convert_params`` / the cohort
+    # feature-fetch (``src.similarity.run._in_list_clause``).
+    supports_array_params = True
+
     DEFAULT_MAX_BYTES_BILLED = 10 * 1024**3  # 10 GiB
+    # Bounded per-attempt timeouts + reconnect retry so a stale-socket SSL blip
+    # fails fast and self-heals, instead of burning google-api-core's ~600s
+    # default retry deadline on a poisoned session (a ~20-min hang). Tunable.
+    # Job *creation* (the POST to /jobs) is where the observed SSL hang lived,
+    # so it gets a short bound — that's the lever that kills the ~20-min hang.
+    DEFAULT_QUERY_TIMEOUT = 60.0      # seconds for the job-creation HTTP request
+    # Job *completion* must be generous: a heavy cohort feature-fetch (labevents
+    # join over the candidate pool) can legitimately run a few minutes. Too
+    # tight a bound would falsely treat a healthy slow query as a stuck socket
+    # and retry it. 600s comfortably covers real execution time.
+    DEFAULT_RESULT_TIMEOUT = 600.0    # seconds to wait for the job to finish
+    DEFAULT_MAX_ATTEMPTS = 3
+    DEFAULT_RECONNECT_BACKOFF = 0.5   # base seconds; exponential per retry
 
     def __init__(
         self,
@@ -179,12 +261,21 @@ class _BigQueryBackend:
         *,
         validator=None,
         max_bytes_billed: int | None = DEFAULT_MAX_BYTES_BILLED,
+        query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        result_timeout: float = DEFAULT_RESULT_TIMEOUT,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        reconnect_backoff: float = DEFAULT_RECONNECT_BACKOFF,
     ) -> None:
         bq = _get_bigquery_module()
-        self._client: bigquery.Client = bq.Client(project=project)
+        self._project = project
         self._bq = bq
+        self._client: bigquery.Client = bq.Client(project=project)
         self._validator = validator
         self._max_bytes_billed = max_bytes_billed
+        self._query_timeout = query_timeout
+        self._result_timeout = result_timeout
+        self._max_attempts = max_attempts
+        self._reconnect_backoff = reconnect_backoff
         # Per-session log of pre-execution blocks. The orchestrator drains
         # this after extraction to surface a structured warning to the user.
         self.blocked_queries: list[dict] = []
@@ -207,8 +298,60 @@ class _BigQueryBackend:
             query_parameters=bq_params,
             maximum_bytes_billed=self._max_bytes_billed,
         )
-        rows = self._client.query(bq_sql, job_config=config).result()
-        return [tuple(row.values()) for row in rows]
+        return self._run_with_reconnect(bq_sql, config)
+
+    def _run_with_reconnect(self, bq_sql: str, config) -> list[tuple]:
+        """Run the query with a bounded per-attempt timeout, reconnecting with
+        a fresh client on a transport error.
+
+        The long-lived client's connection pool can hold a stale keep-alive
+        socket; reusing it raises the intermittent macOS SSL_ERROR_SYSCALL
+        (``[SYS] unknown error``). google-api-core would retry that on the same
+        poisoned session until its ~600s deadline elapses (a ~20-min hang), so
+        we disable its retry and own the loop here: on a transport error we
+        build a fresh client (new pool) and try again, which lets the blip
+        self-heal. Genuine query errors are re-raised immediately.
+        """
+        last_exc: BaseException | None = None
+        for attempt in range(self._max_attempts):
+            try:
+                job = self._client.query(
+                    bq_sql,
+                    job_config=config,
+                    timeout=self._query_timeout,
+                    retry=None,
+                )
+                rows = job.result(timeout=self._result_timeout)
+                return [tuple(row.values()) for row in rows]
+            except Exception as exc:  # noqa: BLE001
+                if not _is_transient_transport_error(exc):
+                    raise
+                last_exc = exc
+                is_last = attempt + 1 >= self._max_attempts
+                logger.warning(
+                    "BigQuery transport error (attempt %d/%d): %s%s",
+                    attempt + 1,
+                    self._max_attempts,
+                    exc,
+                    "" if is_last else " — reconnecting with a fresh client",
+                )
+                if is_last:
+                    break
+                self._reconnect()
+                if self._reconnect_backoff:
+                    time.sleep(self._reconnect_backoff * (2 ** attempt))
+        assert last_exc is not None
+        raise last_exc
+
+    def _reconnect(self) -> None:
+        """Discard the current client (its pool may hold a dead keep-alive
+        socket) and build a fresh one. The new connection pool is what lets a
+        transient SSL/transport failure self-heal on the next attempt."""
+        try:
+            self._client.close()
+        except Exception:  # noqa: BLE001 — best-effort; the socket may be dead
+            pass
+        self._client = self._bq.Client(project=self._project)
 
     def execute_tolerant(self, sql: str, params: list) -> list[tuple]:
         """Like ``execute`` but on a pre-execution block, log to
@@ -259,20 +402,40 @@ class _BigQueryBackend:
     def _convert_params(
         self, sql: str, params: list
     ) -> tuple[str, list]:
-        """Replace ``?`` with ``@p0, @p1, ...`` and build typed parameters."""
-        bq_params = []
-        for i, val in enumerate(params):
-            name = f"p{i}"
-            sql = sql.replace("?", f"@{name}", 1)
-            if isinstance(val, int):
-                bq_params.append(self._bq.ScalarQueryParameter(name, "INT64", val))
-            elif isinstance(val, float):
-                bq_params.append(self._bq.ScalarQueryParameter(name, "FLOAT64", val))
-            else:
-                bq_params.append(
-                    self._bq.ScalarQueryParameter(name, "STRING", str(val))
-                )
-        return sql, bq_params
+        """Replace each ``?`` with ``@p0, @p1, …`` and build typed parameters.
+
+        Single left-to-right pass (split once on ``?``), so the cost is
+        O(len(sql) + n_params) rather than the O(n²) of a fresh
+        ``str.replace`` per parameter — the latter wedged the ~199k-id cohort
+        feature-fetch. A list/tuple value binds as one ``ArrayQueryParameter``
+        (used as ``IN UNNEST(@pN)``), keeping an N-id membership test to a
+        single parameter instead of N scalars (which also exceeds BigQuery's
+        parameter limit).
+        """
+        segments = sql.split("?")
+        n = min(len(params), len(segments) - 1)
+        bq_params = [self._build_param(f"p{i}", params[i]) for i in range(n)]
+        out = [segments[0]]
+        for i in range(n):
+            out.append(f"@p{i}")
+            out.append(segments[i + 1])
+        # More ``?`` than params (shouldn't happen): leave the extras literal.
+        for seg in segments[n + 1:]:
+            out.append("?")
+            out.append(seg)
+        return "".join(out), bq_params
+
+    def _build_param(self, name: str, val):
+        """One typed BigQuery parameter. List/tuple → ArrayQueryParameter."""
+        if isinstance(val, (list, tuple)):
+            return self._bq.ArrayQueryParameter(
+                name, _bq_array_element_type(val), list(val)
+            )
+        if isinstance(val, int):  # incl. bool, as before
+            return self._bq.ScalarQueryParameter(name, "INT64", val)
+        if isinstance(val, float):
+            return self._bq.ScalarQueryParameter(name, "FLOAT64", val)
+        return self._bq.ScalarQueryParameter(name, "STRING", str(val))
 
     def close(self) -> None:
         self._client.close()
