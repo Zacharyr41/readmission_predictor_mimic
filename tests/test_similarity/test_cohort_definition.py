@@ -122,7 +122,9 @@ class TestCohortDefinition:
     def test_minimal_valid_definition(self):
         d = CohortDefinition(traits=[_trait()])
         assert d.distance_threshold == pytest.approx(0.35)
-        assert d.top_k == 30
+        # Default is NO cap: once a candidate is within the Gower distance it
+        # belongs in the cohort — top_k is opt-in ("top N"), not the default.
+        assert d.top_k is None
         assert d.prefilters == []
 
     def test_definition_with_prefilters(self):

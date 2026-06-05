@@ -242,8 +242,12 @@ class CohortDefinition(BaseModel):
     ``prefilters`` is the cheap Boolean gate that narrows the candidate pool
     first (crisp clauses like ICU / sepsis / LOS); ``traits`` are the Gower
     columns scored against the synthesized profile; cohort membership is
-    ``distance ≤ distance_threshold`` capped at ``top_k``. The threshold is
-    LLM-proposed and user-overridable (and logged).
+    ``distance ≤ distance_threshold``, optionally capped at ``top_k``. The
+    threshold is LLM-proposed and user-overridable (and logged).
+
+    ``top_k`` defaults to ``None`` — **no cap**. Once a candidate is within the
+    Gower distance it belongs in the cohort; a count cap is opt-in (the user
+    asking for "top N"), never an artificial default ceiling.
     """
 
     model_config = {"extra": "forbid"}
@@ -251,7 +255,7 @@ class CohortDefinition(BaseModel):
     prefilters: list[PatientFilter] = Field(default_factory=list)
     traits: list[TraitSpec]
     distance_threshold: float = 0.35
-    top_k: int | None = 30
+    top_k: int | None = None
 
     @model_validator(mode="after")
     def _validate_definition(self) -> "CohortDefinition":

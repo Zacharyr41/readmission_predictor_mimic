@@ -150,6 +150,23 @@ class TestBuildDefinition:
         defn = build_definition(client, "…")
         assert isinstance(defn, CohortDefinition)
 
+    def test_top_k_defaults_to_none_when_model_omits_it(self):
+        # The model is taught to leave top_k out (or null) unless the user asks
+        # for "top N"; the schema default must then be NO cap, so the cohort is
+        # everyone within the Gower distance.
+        payload = json.loads(_defn_json())
+        del payload["top_k"]
+        defn = build_definition(_mock_client([json.dumps(payload)]), "…")
+        assert defn.top_k is None
+
+        defn_null = build_definition(_mock_client([_defn_json(top_k=None)]), "…")
+        assert defn_null.top_k is None
+
+    def test_explicit_top_k_is_honored(self):
+        # "the 10 most similar" → the model emits an integer cap, preserved.
+        defn = build_definition(_mock_client([_defn_json(top_k=10)]), "…")
+        assert defn.top_k == 10
+
     def test_directional_reference_resolved_from_frozen_high_end(self):
         client = _mock_client([_defn_json()])
         frozen = {"creatinine_max": (0.5, 9.8), "age": (19.0, 91.0)}
@@ -278,6 +295,17 @@ class TestSystemPrompt:
             assert name in p
         # prefilter vocabulary (the PatientFilter fields) is surfaced too.
         assert "diagnosis" in p
+
+    def test_prompt_defaults_top_k_to_no_cap(self):
+        # The model must default top_k to null (no cap — keep everyone within
+        # the Gower distance) and only emit an integer when the user explicitly
+        # limits the count ("top N").
+        p = build_definition_system_prompt().lower()
+        assert "null" in p
+        assert "top_k" in p
+        # The "no cap by default, integer only on an explicit count" principle
+        # is stated, not just the JSON schema slot.
+        assert "no cap" in p
 
 
 # ---------------------------------------------------------------------------

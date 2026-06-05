@@ -21,7 +21,8 @@ into a strict `CohortDefinition`: a list of **prefilters** (a cheap Boolean gate
 that narrows the candidate pool) and a list of **traits** (the Gower columns).
 Each candidate admission is then scored by its Gower distance to the profile
 those traits describe, and the **cohort is every candidate with
-`distance ≤ distance_threshold`**, ranked nearest-first and capped at `top_k`.
+`distance ≤ distance_threshold`**, ranked nearest-first. By default there is
+**no count cap** — the distance is the only gate; `top_k` is opt-in (§5).
 
 Two kinds of trait exist, and the routing differs:
 
@@ -267,14 +268,14 @@ grep '"kind": "cohort_definition"' logs/dashboard_queries.jsonl | tail -1 | \
 ```
 
 You should see the prefilters and every trait's kernel/weight/reference plus the
-threshold and cap:
+threshold and cap (`top_k: null` = no cap, the default — see §5):
 
 ```json
 {
   "kind": "cohort_definition",
   "question": "Find emergency patients similar to a 68-year-old ...",
   "distance_threshold": 0.35,
-  "top_k": 30,
+  "top_k": null,
   "prefilters": [
     {"field": "admission_type", "operator": "=", "value": "EMERGENCY"}
   ],
@@ -305,23 +306,30 @@ The threshold and cap are **LLM-proposed and user-overridable** (logged in §4).
 There is no separate slider — you steer them with the **wording of the request**,
 and the values land in the JSONL record so you can confirm what was used.
 
+**`top_k` defaults to no cap.** Once a candidate is within the Gower distance it
+is in the cohort — the *distance threshold* is the only gate by default. A count
+cap is **opt-in**: you only get one if you ask for "top N". So a logged
+`"top_k": null` is the normal, intended state, not a missing value.
+
 | To change | Phrase it like… | Effect |
 |---|---|---|
 | **Looser** cohort (higher threshold) | "*a broad / loose net of patients roughly like…*" | more candidates admitted; larger cohort |
 | **Tighter** cohort (lower threshold) | "*only very close matches to…*", "*near-identical patients*" | fewer, closer members |
-| **Cap the count** (`top_k`) | "*the 10 most similar patients*", "*top 15…*" | at most N rows even if more pass the threshold |
+| **Add a count cap** (`top_k`, off by default) | "*the 10 most similar patients*", "*top 15…*" | at most N rows even if more pass the threshold |
 
 Workflow to see the effect:
 
-1. Ask the loose version → note `distance_threshold` / `top_k` and the cohort
-   size in the summary, and the values in the JSONL line.
-2. Re-ask the tight version → the threshold in the log should drop and the
-   cohort should shrink; the farthest `distance` in the table should fall at or
-   under the new threshold.
+1. Ask without any count → the JSONL line shows `"top_k": null`; the cohort is
+   *everyone* within the threshold (read the size off the summary).
+2. Tighten the wording ("only very close matches") → the logged
+   `distance_threshold` should drop and the cohort should shrink; the farthest
+   `distance` in the table should fall at or under the new threshold.
+3. Add "the 10 most similar" → the log now shows `"top_k": 10` and the table is
+   capped at 10 rows (nearest-first), even if more candidates are within range.
 
 > Defaults when you don't steer it: `distance_threshold` ≈ **0.30–0.40**,
-> `top_k` = **30**. `top_k` is a *cap*, not a target — a tight, small cohort can
-> return far fewer than `top_k` rows.
+> `top_k` = **null** (no cap). When `top_k` *is* set it is a ceiling, not a
+> target — a tight, small cohort can still return fewer than `top_k` rows.
 
 ---
 

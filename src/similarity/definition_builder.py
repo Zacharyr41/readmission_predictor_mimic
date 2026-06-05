@@ -131,8 +131,11 @@ JSON object, no prose, no markdown fence.
 HOW COHORT MATCHING WORKS
 Every candidate admission is scored by Gower distance to a synthesized \
 reference *profile* assembled from the traits below. The cohort is every \
-candidate with distance <= distance_threshold, ranked nearest-first and capped \
-at top_k. Prefilters cheaply narrow the candidate pool BEFORE scoring.
+candidate with distance <= distance_threshold, ranked nearest-first. By DEFAULT \
+there is NO cap: return EVERY candidate within the distance, so set \
+top_k = null. Only set top_k to an integer when the user explicitly limits the \
+count ("the top 10", "20 most similar patients"). Prefilters cheaply narrow the \
+candidate pool BEFORE scoring.
 
 CHOOSE EACH TRAIT'S KERNEL FROM THE CLAUSE'S LINGUISTIC FORM (a general rule, \
 not a per-lab lookup):
@@ -184,7 +187,7 @@ OUTPUT JSON SCHEMA (emit ONLY these keys):
     "graph_params": <graph_temporal: object, e.g. {{"agg": "slope", "window_hours": 48}}>
   }}],
   "distance_threshold": <float in [0,1], typically 0.30-0.40>,
-  "top_k": <int, e.g. 30>
+  "top_k": <null for no cap (DEFAULT); an int ONLY when the user limits the count, e.g. "top 10">
 }}
 Do NOT emit a "range_" for quantitative traits — the normalization scale comes \
 from frozen population stats. The template/concept/concept_type/graph_params \
@@ -205,7 +208,7 @@ side."
     {{"name": "icu_los_hours", "source": "sql", "kind": "quantitative", "reference_value": null, "direction": "lower_more_similar", "weight": 0.5}}
   ],
   "distance_threshold": 0.35,
-  "top_k": 30
+  "top_k": null
 }}
 
 WORKED EXAMPLE (with temporal trends)
@@ -220,7 +223,7 @@ vasopressors."
     {{"name": "vasopressor_dose_slope", "source": "graph_temporal", "kind": "quantitative", "reference_value": null, "direction": "higher_more_similar", "weight": 1.5, "template": "sim_dose_series", "concept": "vasopressors", "concept_type": "drug_category", "graph_params": {{"agg": "slope"}}}}
   ],
   "distance_threshold": 0.35,
-  "top_k": 30
+  "top_k": null
 }}"""
 
 

@@ -122,6 +122,19 @@ class TestRunCohortContextual:
         # The two nearest by age are the 65yo admissions 101 + 102.
         assert {m.hadm_id for m in result.members} == {101, 102}
 
+    def test_no_cap_returns_all_within_distance(self, rich_backend):
+        # top_k=None (the default): no artificial cap — every candidate within
+        # the Gower distance is returned. Threshold 1.0 admits the whole pool,
+        # so all 6 come back even though the previous test capped the same pool
+        # at 2.
+        result = run_cohort(
+            CohortDefinition(traits=[_age_trait()], distance_threshold=1.0, top_k=None),
+            rich_backend,
+        )
+        assert result.n_pool == 6
+        assert result.n_returned == 6
+        assert len(result.members) == 6
+
     def test_tight_threshold_excludes(self, rich_backend):
         result = run_cohort(
             CohortDefinition(traits=[_age_trait()], distance_threshold=0.07),
