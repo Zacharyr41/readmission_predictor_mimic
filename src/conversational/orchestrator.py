@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from src.conversational.answerer import _rename_columns, generate_answer
 from src.conversational.clinical_consult import (
@@ -58,6 +58,24 @@ if TYPE_CHECKING:
     import anthropic
 
 logger = logging.getLogger(__name__)
+
+
+# Coarse pipeline-stage labels surfaced to an optional UI progress callback
+# (see ``ConversationalPipeline.ask``). Kept here as named constants — one
+# place to read/edit the user-facing copy, and the single source the tests
+# assert against. They are deliberately phase-agnostic ("scoring the candidate
+# cohort", not "run_cohort") and honest: each fires immediately *before* the
+# step it names so a long-blocking step (above all BigQuery cohort scoring)
+# is visible while it runs rather than after it returns.
+PROGRESS_INTERPRETING = "Interpreting your question…"
+PROGRESS_RUNNING_QUERY = "Running the query…"
+PROGRESS_ESTIMATING_CAUSAL = "Estimating the causal effect…"
+PROGRESS_FINDING_SIMILAR = "Finding similar patients…"
+PROGRESS_BUILDING_COHORT = "Building the cohort definition…"
+PROGRESS_SCORING_COHORT = "Scoring the candidate cohort…"
+PROGRESS_BUILDING_GRAPH = "Building the knowledge graph…"
+PROGRESS_REASONING = "Reasoning over the data…"
+PROGRESS_REVIEWING = "Reviewing the result…"
 
 
 class ConversationalPipeline:
@@ -161,6 +179,10 @@ class ConversationalPipeline:
         # clarify short-circuit reads this so it can pass partials to the
         # clarify() formatter. Reset at the top of each ask().
         self._last_disambiguations: dict[int, list] = {}
+        # Optional UI progress sink, set for the duration of each ``ask`` call
+        # (reset in its ``finally``). ``None`` means no observer — ``_progress``
+        # then no-ops. Mirrors the per-turn lifetime of ``_last_disambiguations``.
+        self._progress_callback: Callable[[str], None] | None = None
         repo_root = Path(__file__).parent.parent.parent
         # Phase 5: wire SNOMED hierarchy if the cached JSON is present.
         # The SnomedHierarchy class itself degrades gracefully on missing
@@ -203,8 +225,20 @@ class ConversationalPipeline:
         self.conversation_history: list[tuple[CompetencyQuestion, AnswerResult]] = []
         self.max_history: int = 10
 
-    def ask(self, question: str) -> AnswerResult:
+    def ask(
+        self,
+        question: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> AnswerResult:
         """Run the full pipeline for a natural-language question.
+
+        ``progress_callback`` is an optional, passive observer: if supplied,
+        it is invoked with a coarse stage label (one of the ``PROGRESS_*``
+        constants) immediately before each major step begins, so a UI can show
+        *which* stage is live during a slow turn — above all the BigQuery
+        cohort scoring, which can block for minutes. It is best-effort: a
+        callback that raises is swallowed (see ``_progress``) and never affects
+        the answer. The callback is held only for the duration of the call.
 
         Phase 4.5 + Phase 7a: the decomposer returns one or more
         CompetencyQuestions. Each sub-CQ is independently classified by
@@ -224,7 +258,9 @@ class ConversationalPipeline:
         Clarify short-circuit: if ANY sub-CQ has ``clarifying_question``,
         no downstream stages run.
         """
+        self._progress_callback = progress_callback
         try:
+            self._progress(PROGRESS_INTERPRETING)
             decomp = decompose_question(
                 self._client, question,
                 conversation_history=list(self.conversation_history) or None,
@@ -301,6 +337,7 @@ class ConversationalPipeline:
                 for idx, cq in enumerate(decomp.competency_questions):
                     plan = self._planner.classify(cq)
                     if plan == QueryPlan.SQL_FAST:
+                        self._progress(PROGRESS_RUNNING_QUERY)
                         sub, sql_used, _fb = self._run_with_critic_retry(
                             cq, backend, resolved_names=per_cq_resolved[idx][0],
                         )
@@ -316,6 +353,7 @@ class ConversationalPipeline:
                         # before estimators land in 8d. When the stub fires
                         # in a live session, the summary text makes it
                         # obvious we're not returning a real estimate.
+                        self._progress(PROGRESS_ESTIMATING_CAUSAL)
                         sub = self._run_causal(cq)
                         sub.interpretation_summary = cq.interpretation_summary
                         sub = self._critique(sub, cq)
@@ -356,6 +394,7 @@ class ConversationalPipeline:
                     any_temporal = any(
                         bool(cq.temporal_constraints) for _, cq in graph_cqs
                     )
+                    self._progress(PROGRESS_BUILDING_GRAPH)
                     graph, graph_stats = build_query_graph(
                         self._ontology_dir, merged,
                         skip_allen_relations=not any_temporal,
@@ -363,6 +402,7 @@ class ConversationalPipeline:
                         drug_category_resolver=self._drug_category_resolver,
                     )
                     for idx, cq in graph_cqs:
+                        self._progress(PROGRESS_REASONING)
                         reasoning = reason(graph, cq)
                         graph_sparql.extend(reasoning.sparql_queries)
                         sub = generate_answer(
@@ -399,6 +439,24 @@ class ConversationalPipeline:
                     "Please try rephrasing."
                 ),
             )
+        finally:
+            self._progress_callback = None
+
+    def _progress(self, message: str) -> None:
+        """Emit a coarse pipeline-stage label to the optional UI callback.
+
+        No-ops when no callback is registered. The progress channel is purely
+        observational, so a callback that raises must never break the turn —
+        all exceptions are swallowed (logged at debug). Called only from within
+        ``ask`` and its helpers, where ``_progress_callback`` is set.
+        """
+        cb = self._progress_callback
+        if cb is None:
+            return
+        try:
+            cb(message)
+        except Exception:  # a UI observer must never be able to fail the pipeline
+            logger.debug("progress callback raised; ignoring", exc_info=True)
 
     # -- internal helpers --------------------------------------------------
 
@@ -556,6 +614,7 @@ class ConversationalPipeline:
         """
         if not self._enable_critic:
             return sub
+        self._progress(PROGRESS_REVIEWING)
         verdict = critique(self._client, cq, sub, fallback_warning=fallback_warning)
         if verdict is not None:
             sub.critic_verdict = verdict
@@ -1214,10 +1273,12 @@ class ConversationalPipeline:
         # legacy template path rather than crashing the turn.
         spec = cq.similarity_spec
         if spec.anchor_hadm_id is None and spec.anchor_subject_id is None:
+            self._progress(PROGRESS_BUILDING_COHORT)
             definition = self._build_cohort_definition(cq)
             if definition is not None:
                 return self._run_cohort(definition, backend)
 
+        self._progress(PROGRESS_FINDING_SIMILAR)
         result = run_similarity(cq.similarity_spec, backend)
         data_table = [
             {
@@ -1271,6 +1332,7 @@ class ConversationalPipeline:
         # cohort path builds the RDF graph over the pool exactly as the
         # reasoning path does, only paying the Allen pass when a precedence
         # trait needs it.
+        self._progress(PROGRESS_SCORING_COHORT)
         try:
             result = run_cohort(
                 definition, backend,

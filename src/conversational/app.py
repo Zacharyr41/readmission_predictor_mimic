@@ -14,7 +14,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.conversational.models import AnswerResult, ExtractionConfig
-from src.conversational.orchestrator import ConversationalPipeline
+from src.conversational.orchestrator import (
+    PROGRESS_INTERPRETING,
+    ConversationalPipeline,
+)
 from src.conversational.query_log import log_query_run
 
 # Fixed pixel height of the scrollable chat transcript. A bounded container
@@ -434,11 +437,22 @@ if question := st.chat_input("Ask a clinical question..."):
                 st.markdown(question)
 
             with st.chat_message("assistant"):
-                with st.spinner("Analyzing..."):
+                # ``st.status`` (not a bare spinner) so the pipeline can report
+                # *which* stage is live. A cohort turn's BigQuery scoring can
+                # block for minutes; an opaque spinner can't tell "working" from
+                # "hung". ``ask`` drives the label via ``progress_callback``.
+                with st.status(PROGRESS_INTERPRETING, expanded=False) as status:
                     _started = time.monotonic()
+
+                    def _on_progress(stage: str) -> None:
+                        status.update(label=stage)
+
                     try:
-                        answer = st.session_state.pipeline.ask(question)
+                        answer = st.session_state.pipeline.ask(
+                            question, progress_callback=_on_progress
+                        )
                     except Exception as exc:
+                        status.update(label="Analysis failed", state="error")
                         log_query_run(
                             question,
                             duration_s=time.monotonic() - _started,
@@ -450,6 +464,7 @@ if question := st.chat_input("Ask a clinical question..."):
                         duration_s=time.monotonic() - _started,
                         answer=answer,
                     )
+                    status.update(label="Analysis complete", state="complete")
                 # Key by the index this message will occupy once appended, so
                 # the history loop reuses the same widget keys on the next
                 # re-run and the outlier toggle's state survives.

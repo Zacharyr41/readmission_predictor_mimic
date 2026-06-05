@@ -1477,6 +1477,133 @@ class TestSimilarityBranch:
         ]
 
 
+class TestProgressCallback:
+    """``ask(question, progress_callback=...)`` emits coarse, honest
+    pipeline-stage labels so a slow turn — above all the BigQuery cohort
+    scoring that can run minutes — shows *which* stage is live instead of an
+    opaque spinner. The callback is optional (default ``None``) and is treated
+    as a passive observer: a callback that raises must never break the turn.
+    """
+
+    @_patch_all
+    def test_callback_receives_interpreting_first_and_reviewing(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """The default (graph) CQ emits an ordered stream of stage labels. The
+        very first thing the user sees is "interpreting" (emitted before the
+        decomposer LLM call), and the critic pass announces itself too — so
+        both ends of the pipeline are observable."""
+        from src.conversational.orchestrator import (
+            PROGRESS_INTERPRETING,
+            PROGRESS_REVIEWING,
+        )
+
+        _setup_mocks(mock_decompose, mock_extract, mock_build, mock_reason, mock_answer)
+
+        labels: list[str] = []
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        pipeline.ask("What is the creatinine?", progress_callback=labels.append)
+
+        assert labels, "expected at least one progress label"
+        assert labels[0] == PROGRESS_INTERPRETING
+        assert PROGRESS_REVIEWING in labels
+
+    @_patch_all
+    def test_progress_callback_is_optional(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """Omitting the callback keeps the historical contract — ``ask`` runs
+        and returns a normal AnswerResult with no callback wired."""
+        _, _, answer = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer
+        )
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("What is the creatinine?")
+
+        assert isinstance(result, AnswerResult)
+        assert result.text_summary == answer.text_summary
+
+    @_patch_all
+    def test_raising_callback_does_not_break_the_pipeline(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """A UI callback that raises is swallowed — the turn still completes and
+        returns the real answer, NOT the generic error fallback. The progress
+        channel is observational; it must never be able to fail the pipeline."""
+        _, _, answer = _setup_mocks(
+            mock_decompose, mock_extract, mock_build, mock_reason, mock_answer
+        )
+
+        def boom(_message: str) -> None:
+            raise RuntimeError("UI callback blew up")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("What is the creatinine?", progress_callback=boom)
+
+        assert isinstance(result, AnswerResult)
+        assert result.text_summary == answer.text_summary
+        assert "An error occurred" not in result.text_summary
+
+    @_patch_all
+    def test_cohort_path_emits_the_scoring_label(
+        self, mock_decompose, mock_extract, mock_build, mock_reason, mock_answer,
+    ):
+        """The slow step is BigQuery cohort scoring. Its label must be emitted
+        around the ``run_cohort`` call so the UI can show "scoring the candidate
+        cohort…" while that step blocks — the whole motivation for the feature.
+        """
+        from src.conversational.models import DecompositionResult
+        from src.conversational.orchestrator import (
+            PROGRESS_INTERPRETING,
+            PROGRESS_SCORING_COHORT,
+        )
+        from src.similarity.models import (
+            CohortDefinition,
+            CohortMember,
+            CohortResult,
+            SimilaritySpec,
+            TraitSpec,
+        )
+
+        defn = CohortDefinition(
+            traits=[
+                TraitSpec(
+                    name="age", source="sql", kind="quantitative",
+                    reference_value=68, range_=(18.0, 90.0),
+                ),
+            ],
+            distance_threshold=0.35,
+            top_k=30,
+        )
+        spec = SimilaritySpec(cohort_definition=defn)
+        cq = CompetencyQuestion(
+            original_question="Find ICU patients like a 68-year-old with sepsis.",
+            scope="patient_similarity",
+            similarity_spec=spec,
+        )
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        for mock in (mock_extract, mock_build, mock_reason, mock_answer):
+            mock.side_effect = AssertionError(
+                "reasoning path must not run on cohort scope"
+            )
+
+        sentinel = CohortResult(
+            definition=defn,
+            members=[CohortMember(hadm_id=101, subject_id=1, distance=0.06)],
+            n_pool=6,
+            n_returned=1,
+        )
+
+        labels: list[str] = []
+        with patch("src.similarity.run.run_cohort", return_value=sentinel):
+            pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+            pipeline.ask(cq.original_question, progress_callback=labels.append)
+
+        assert labels[0] == PROGRESS_INTERPRETING
+        assert PROGRESS_SCORING_COHORT in labels
+
+
 # ---------------------------------------------------------------------------
 # TestCriticIntegration — end-to-end critic wiring (Phase 6)
 #
