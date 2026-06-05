@@ -169,6 +169,12 @@ class TraitSpec(BaseModel):
         symmetric one, presence for a binary one). In anchor mode the runner
         fills this from the anchor admission, so it is optional here.
 
+    For a ``graph_temporal`` trait, ``template`` / ``concept`` / ``concept_type``
+    / ``graph_params`` tell the cohort runner how to turn the trait into a
+    :class:`src.similarity.graph_features.GraphFeatureRequest` (which feature
+    extractor, on which clinical concept, with which options). They are ignored
+    for ``sql`` traits, so an ``sql`` trait omits them entirely.
+
     ``to_column_spec`` builds the pygower :class:`ColumnSpec` the cohort runner
     feeds to ``gower_distances``; kernel selection (symmetric vs one-sided vs
     asymmetric-binary) follows from ``kind`` + ``direction`` + ``asymmetric``.
@@ -189,6 +195,20 @@ class TraitSpec(BaseModel):
     asymmetric: bool = False
     present_value: bool | int | str = True
     missing: Missing = Missing.EXCLUDE
+
+    # Graph-derived trait wiring (only consulted when source="graph_temporal";
+    # plan III-A). ``template`` keys into the graph feature-extractor registry;
+    # ``concept`` / ``concept_type`` name the clinical concept it pulls (so the
+    # cohort runner extracts the right events into the per-question graph);
+    # ``graph_params`` carries template options (``agg``, ``window_hours``,
+    # ``concept_b``, ``relation``, ``as_bool``, …). Optional so ``sql`` traits
+    # and the (mocked-LLM) II-D builder tests, which never set them, stay valid.
+    template: str | None = None
+    concept: str | None = None
+    concept_type: (
+        Literal["biomarker", "vital", "drug", "diagnosis", "microbiology"] | None
+    ) = None
+    graph_params: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_trait(self) -> "TraitSpec":

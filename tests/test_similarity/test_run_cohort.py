@@ -32,6 +32,8 @@ Synthetic cohort (``synthetic_duckdb_with_events``), one row per admission::
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -45,6 +47,8 @@ from src.similarity.models import (
     TraitSpec,
 )
 from src.similarity.run import run_cohort
+
+ONTOLOGY_DIR = Path(__file__).parent.parent.parent / "ontology" / "definition"
 
 
 # ---------------------------------------------------------------------------
@@ -265,20 +269,143 @@ class TestPrefilters:
 
 
 # ---------------------------------------------------------------------------
-# graph_temporal traits are deferred (plan task III-A)
+# graph_temporal traits build the per-question RDF graph over the pool (III-A)
 # ---------------------------------------------------------------------------
 
 
-class TestGraphTemporalDeferred:
-    def test_graph_temporal_trait_raises(self, rich_backend):
+def _install_graph_spy(monkeypatch):
+    """Replace ``build_query_graph`` with a spy that records its call kwargs.
+
+    Returns the call-record list. The spy returns an empty graph, so the graph
+    feature columns come back all-NaN — fine for routing assertions (we only
+    care THAT the graph was built and with which ``skip_allen_relations``).
+    """
+    from rdflib import Graph
+
+    calls: list[dict] = []
+
+    def _spy(ontology_dir, extraction, *, skip_allen_relations=False,
+             max_workers=1, drug_category_resolver=None):
+        calls.append({
+            "skip_allen_relations": skip_allen_relations,
+            "ontology_dir": ontology_dir,
+            "max_workers": max_workers,
+            "n_patients": len(extraction.patients),
+        })
+        return Graph(), {}
+
+    monkeypatch.setattr(
+        "src.conversational.graph_builder.build_query_graph", _spy,
+    )
+    return calls
+
+
+def _lactate_slope_trait():
+    return TraitSpec(
+        name="lactate_slope_48h", source="graph_temporal", kind="quantitative",
+        direction="higher_more_similar", template="sim_series_by_admission",
+        concept="lactate", reference_value=1.5, range_=(0.0, 5.0),
+        graph_params={"agg": "slope", "window_hours": 48},
+    )
+
+
+class TestGraphTemporalWiring:
+    def test_missing_ontology_dir_raises_valueerror(self, rich_backend):
+        # The old contract raised NotImplementedError; now a graph_temporal trait
+        # without an ontology_dir is a clear ValueError (the graph path is real,
+        # it just needs the ontology to build the per-question graph).
+        defn = CohortDefinition(traits=[_age_trait(), _lactate_slope_trait()])
+        with pytest.raises(ValueError, match="ontology_dir|graph_temporal"):
+            run_cohort(defn, rich_backend)  # no ontology_dir supplied
+
+    def test_graph_temporal_without_template_raises(self, rich_backend, tmp_path):
         defn = CohortDefinition(traits=[
-            _age_trait(),
             TraitSpec(name="lactate_slope_48h", source="graph_temporal",
-                      kind="quantitative", direction="higher_more_similar",
-                      reference_value=1.5, range_=(0.0, 5.0)),
+                      kind="quantitative", reference_value=1.5, range_=(0.0, 5.0)),
         ])
-        with pytest.raises(NotImplementedError, match="graph_temporal|III-A"):
-            run_cohort(defn, rich_backend)
+        with pytest.raises(ValueError, match="template"):
+            run_cohort(defn, rich_backend, ontology_dir=tmp_path)
+
+    def test_builds_graph_for_temporal_trait(self, rich_backend, tmp_path, monkeypatch):
+        calls = _install_graph_spy(monkeypatch)
+        defn = CohortDefinition(
+            traits=[_lactate_slope_trait()], distance_threshold=1.0,
+        )
+        result = run_cohort(defn, rich_backend, ontology_dir=tmp_path)
+        assert isinstance(result, CohortResult)
+        assert len(calls) == 1
+        # No precedence trait ⇒ the (expensive) Allen pass is skipped.
+        assert calls[0]["skip_allen_relations"] is True
+        assert result.provenance["graph_built"] is True
+        assert "lactate_slope_48h" in result.provenance["graph_traits"]
+
+    def test_precedence_trait_requests_allen(self, rich_backend, tmp_path, monkeypatch):
+        # A precedence trait needs Allen relations, so skip_allen_relations=False
+        # (locked decision I-D: only pay for Allen when precedence is asked for).
+        calls = _install_graph_spy(monkeypatch)
+        defn = CohortDefinition(
+            traits=[TraitSpec(
+                name="lactate_before_pressor", source="graph_temporal",
+                kind="binary", template="sim_precedence_count", concept="lactate",
+                reference_value=True,
+                graph_params={"concept_b": "norepinephrine", "concept_b_type": "drug",
+                              "relation": "meets", "as_bool": True},
+            )],
+            distance_threshold=1.0,
+        )
+        run_cohort(defn, rich_backend, ontology_dir=tmp_path)
+        assert len(calls) == 1
+        assert calls[0]["skip_allen_relations"] is False
+
+    def test_sql_only_skips_graph_build(self, rich_backend, tmp_path, monkeypatch):
+        calls = _install_graph_spy(monkeypatch)
+        run_cohort(
+            CohortDefinition(traits=[_age_trait()], distance_threshold=1.0),
+            rich_backend, ontology_dir=tmp_path,
+        )
+        assert calls == []  # contextual-only ⇒ no graph build
+
+
+class TestGraphTemporalEndToEnd:
+    """Real graph build over the synthetic DB (no mocking) — proves the full
+    extract → build_query_graph → extract_graph_features → merge → score path.
+
+    Uses ``sim_icu_los`` (a concept-free duration template) because the synthetic
+    labs are single-reading, so a slope is undefined; ICU LOS is real data:
+    stay 1001 spans 70h (101), 1002 148h (103), 1003 174h (106); 102/104/105 have
+    no ICU stay so their graph LOS is NaN.
+    """
+
+    def _icu_los_defn(self, reference_value=70.0, threshold=1.0):
+        return CohortDefinition(
+            traits=[TraitSpec(
+                name="icu_stay_hours", source="graph_temporal", kind="quantitative",
+                template="sim_icu_los", reference_value=reference_value,
+            )],
+            distance_threshold=threshold,
+        )
+
+    def test_icu_los_graph_trait_scored(self, rich_backend):
+        result = run_cohort(
+            self._icu_los_defn(), rich_backend, ontology_dir=ONTOLOGY_DIR,
+            reference_ranges={"icu_stay_hours": (0.0, 240.0)},
+        )
+        by_hadm = {m.hadm_id: m.distance for m in result.members}
+        # Only admissions with an ICU stay get a graph-derived LOS.
+        assert set(by_hadm) <= {101, 103, 106}
+        assert 101 in by_hadm
+        assert by_hadm[101] == pytest.approx(0.0)  # ref 70h == stay 1001's LOS
+        # 102/104/105 have no ICU stay ⇒ NaN LOS ⇒ excluded.
+        assert {102, 104, 105}.isdisjoint(by_hadm)
+
+    def test_graph_provenance_recorded(self, rich_backend):
+        result = run_cohort(
+            self._icu_los_defn(), rich_backend, ontology_dir=ONTOLOGY_DIR,
+            reference_ranges={"icu_stay_hours": (0.0, 240.0)},
+        )
+        assert result.provenance["graph_built"] is True
+        assert result.provenance["graph_skip_allen_relations"] is True
+        assert result.provenance["graph_traits"] == ["icu_stay_hours"]
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -424,8 +425,10 @@ def run_similarity(spec: SimilaritySpec, backend: Any) -> SimilarityResult:
 
 # ---------------------------------------------------------------------------
 # Anchorless cohort runner (plan III-B) — one-vs-many distance to a synthesized
-# reference profile, thresholded. Contextual-only here: ``graph_temporal`` traits
-# are deferred to III-A.
+# reference profile, thresholded. ``sql`` traits are pulled by the contextual
+# extractor; ``graph_temporal`` traits (plan III-A) are pulled from a per-question
+# RDF graph built over the prefiltered pool (the graph IS the temporal feature
+# extractor: slopes, dose trajectories, durations, precedence become columns).
 # ---------------------------------------------------------------------------
 
 
@@ -497,18 +500,124 @@ def _cohort_provenance(definition: CohortDefinition, n_pool: int) -> dict:
     }
 
 
+def _trait_concepts(trait: Any) -> list[tuple[str, str]]:
+    """The ``(concept_name, concept_type)`` pairs a graph trait needs extracted.
+
+    The primary ``concept`` (defaulting to a biomarker type) plus, for a
+    precedence trait, the ``concept_b`` partner (defaulting to a drug). Concept-
+    free templates (ICU LOS, distinct-drug count) contribute no pairs — the
+    extractor always pulls the structural rows (patients / admissions / stays)
+    those templates read.
+    """
+    pairs: list[tuple[str, str]] = []
+    if trait.concept:
+        pairs.append((trait.concept, trait.concept_type or "biomarker"))
+    cb = trait.graph_params.get("concept_b")
+    if cb:
+        pairs.append((cb, trait.graph_params.get("concept_b_type", "drug")))
+    return pairs
+
+
+def _merge_graph_traits(
+    candidate_df: pd.DataFrame,
+    definition: CohortDefinition,
+    graph_traits: list,
+    *,
+    backend: Any,
+    ontology_dir: Path,
+    resolver: Any,
+    extraction_config: Any,
+    drug_category_resolver: Any,
+    max_workers: int,
+) -> dict:
+    """Build the per-question RDF graph over the pool and merge graph columns.
+
+    The graph IS the temporal feature extractor (plan III-A): each ``graph_temporal``
+    trait names a feature-extractor ``template`` keyed on a clinical ``concept``.
+    We synthesize a ``CompetencyQuestion`` from the definition's prefilters + those
+    concepts, run the shared extractor, build the graph, and pull a hadm-indexed
+    feature frame — then write each trait's value back onto ``candidate_df`` as a
+    column (NaN where the admission has no value, so the column set stays stable
+    and the trait's missing policy decides). A precedence trait needs Allen
+    relations, so we only pay the (expensive) Allen pass when one is present
+    (locked decision I-D). Mutates ``candidate_df`` in place; returns the graph
+    provenance to fold into the logged criteria.
+    """
+    from src.conversational.extractor import _extract
+    from src.conversational.graph_builder import build_query_graph
+    from src.conversational.models import ClinicalConcept, CompetencyQuestion
+    from src.similarity.graph_features import (
+        GraphFeatureRequest,
+        extract_graph_features,
+    )
+
+    concepts: list[ClinicalConcept] = []
+    seen: set[tuple[str, str]] = set()
+    for t in graph_traits:
+        for name, ctype in _trait_concepts(t):
+            if (name, ctype) not in seen:
+                seen.add((name, ctype))
+                concepts.append(ClinicalConcept(name=name, concept_type=ctype))
+
+    cq = CompetencyQuestion(
+        original_question="cohort graph-feature extraction",
+        patient_filters=list(definition.prefilters),
+        clinical_concepts=concepts,
+        scope="cohort",
+    )
+    extraction = _extract(backend, cq, config=extraction_config, resolver=resolver)
+
+    has_precedence = any(t.template == "sim_precedence_count" for t in graph_traits)
+    graph, _stats = build_query_graph(
+        ontology_dir, extraction,
+        skip_allen_relations=not has_precedence,
+        max_workers=max_workers,
+        drug_category_resolver=drug_category_resolver,
+    )
+
+    requests = [
+        GraphFeatureRequest(
+            column=t.name, template=t.template, concept=t.concept,
+            params=dict(t.graph_params or {}),
+        )
+        for t in graph_traits
+    ]
+    gdf = extract_graph_features(graph, requests)
+
+    # Explicit per-hadm lookup (robust to an empty / 0-row feature frame): every
+    # candidate gets the column, NaN where the graph yielded no value.
+    for t in graph_traits:
+        mapping = gdf[t.name].to_dict() if t.name in gdf.columns else {}
+        candidate_df[t.name] = [
+            mapping.get(int(h), np.nan) for h in candidate_df["hadm_id"]
+        ]
+
+    return {
+        "graph_built": True,
+        "graph_skip_allen_relations": not has_precedence,
+        "graph_traits": [t.name for t in graph_traits],
+    }
+
+
 def run_cohort(
     definition: CohortDefinition,
     backend: Any,
     *,
     reference_ranges: dict[str, tuple[float, float]] | None = None,
+    ontology_dir: Path | None = None,
+    resolver: Any = None,
+    extraction_config: Any = None,
+    drug_category_resolver: Any = None,
+    max_workers: int = 1,
 ) -> CohortResult:
     """Compute an anchorless cohort by Gower distance to a synthesized profile.
 
-    Contextual-only path (plan III-B). Steps:
+    Steps:
 
     1. Narrow the candidate pool with the definition's Boolean prefilters.
-    2. Pull the typed contextual feature matrix for the pool.
+    2. Pull the typed feature matrix for the pool — ``sql`` traits via the
+       contextual extractor; ``graph_temporal`` traits (plan III-A) from a
+       per-question RDF graph built over the pool (requires ``ontology_dir``).
     3. Synthesize the reference *profile* vector from each trait's
        ``reference_value`` (the X side of the one-vs-many distance).
     4. Score every candidate's Gower distance to the profile, with FROZEN ranges
@@ -517,16 +626,25 @@ def run_cohort(
     5. Cohort = ``distance <= distance_threshold`` ranked nearest-first, capped
        at ``top_k``; each member carries per-trait signed contributions.
 
-    ``graph_temporal`` traits are deferred to III-A and raise ``NotImplementedError``.
+    A definition with ≥1 ``graph_temporal`` trait requires ``ontology_dir`` (so
+    the graph can be built); without it a clear ``ValueError`` is raised.
     """
-    graph_traits = [
-        t.name for t in definition.traits if t.source == "graph_temporal"
-    ]
+    graph_traits = [t for t in definition.traits if t.source == "graph_temporal"]
     if graph_traits:
-        raise NotImplementedError(
-            "run_cohort does not yet score graph_temporal traits "
-            f"(deferred to plan task III-A): {graph_traits}"
-        )
+        no_template = [t.name for t in graph_traits if not t.template]
+        if no_template:
+            raise ValueError(
+                "graph_temporal trait(s) carry no feature-extractor `template`: "
+                f"{no_template}; set TraitSpec.template (e.g. "
+                "'sim_series_by_admission')"
+            )
+        if ontology_dir is None:
+            raise ValueError(
+                "cohort definition has graph_temporal trait(s) "
+                f"{[t.name for t in graph_traits]} but no ontology_dir was "
+                "supplied; the graph feature path needs the ontology to build "
+                "the per-question RDF graph over the candidate pool"
+            )
 
     pool = _cohort_candidate_pool(definition, backend)
     candidate_df = _fetch_admission_features(backend, pool)
@@ -539,12 +657,23 @@ def run_cohort(
             provenance={**provenance, "note": "no candidates after prefilters"},
         )
 
+    if graph_traits:
+        provenance.update(
+            _merge_graph_traits(
+                candidate_df, definition, graph_traits,
+                backend=backend, ontology_dir=ontology_dir, resolver=resolver,
+                extraction_config=extraction_config,
+                drug_category_resolver=drug_category_resolver,
+                max_workers=max_workers,
+            )
+        )
+
     trait_names = [t.name for t in definition.traits]
     missing_cols = [n for n in trait_names if n not in candidate_df.columns]
     if missing_cols:
         raise ValueError(
             "cohort traits reference feature columns not produced by the "
-            f"contextual extractor: {missing_cols}"
+            f"contextual / graph extractors: {missing_cols}"
         )
 
     spec = _build_column_specs(definition, reference_ranges)

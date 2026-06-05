@@ -1249,10 +1249,12 @@ class ConversationalPipeline:
         """Format a ``run_cohort`` result into an ``AnswerResult`` (plan I-E).
 
         The anchorless cohort path: distances to a synthesized profile,
-        thresholded. ``graph_temporal`` traits are not yet wired (plan III-A) —
-        ``run_cohort`` raises ``NotImplementedError`` for them, which we surface
-        as a plain message rather than crashing the turn. A missing frozen range
-        (``ValueError``) is surfaced the same way.
+        thresholded. ``graph_temporal`` traits (plan III-A) are scored from a
+        per-question RDF graph built over the pool — we thread the live
+        ontology / resolver / extraction config / drug-category resolver through
+        so the graph path is the same one the reasoning branch uses. A failure
+        to assemble the cohort (e.g. a missing frozen range) surfaces as a plain
+        message rather than crashing the turn.
 
         The chat summary describes the cohort in clinical terms; the database
         keys (hadm_id / subject_id) appear only in the result table, never as
@@ -1265,17 +1267,19 @@ class ConversationalPipeline:
         # quantitative traits are normalized against a fixed, pre-fit scale, not
         # a range learned from the candidate batch. Traits that carry their own
         # ``range_`` override this; traits with neither raise a clear error.
+        # The graph kwargs make graph_temporal traits live (no dead code): the
+        # cohort path builds the RDF graph over the pool exactly as the
+        # reasoning path does, only paying the Allen pass when a precedence
+        # trait needs it.
         try:
             result = run_cohort(
-                definition, backend, reference_ranges=load_reference_ranges()
-            )
-        except NotImplementedError as exc:
-            return AnswerResult(
-                text_summary=(
-                    "This cohort description relies on temporal-trend traits "
-                    "(e.g. a worsening lab slope), which aren't wired into the "
-                    f"cohort engine yet. Details: {exc}"
-                ),
+                definition, backend,
+                reference_ranges=load_reference_ranges(),
+                ontology_dir=self._ontology_dir,
+                resolver=self._resolver,
+                extraction_config=self._extraction_config,
+                drug_category_resolver=self._drug_category_resolver,
+                max_workers=self._max_workers,
             )
         except ValueError as exc:
             return AnswerResult(
