@@ -1,5 +1,9 @@
 """SNOMED-CT terminology mapping for clinical event graphs."""
 
+from src.graph_construction.terminology.drug_category import (
+    DrugCategory,
+    DrugCategoryResolver,
+)
 from src.graph_construction.terminology.mapping_chain import MappingChain
 from src.graph_construction.terminology.mapping_sources import (
     MappingSource,
@@ -12,6 +16,8 @@ from src.graph_construction.terminology.snomed_mapper import (
 )
 
 __all__ = [
+    "DrugCategory",
+    "DrugCategoryResolver",
     "MappingChain",
     "MappingSource",
     "SnomedConcept",

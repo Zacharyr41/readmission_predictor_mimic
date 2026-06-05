@@ -43,6 +43,7 @@ def build_query_graph(
     *,
     skip_allen_relations: bool = False,
     max_workers: int = 1,
+    drug_category_resolver=None,
 ) -> tuple[Graph, dict]:
     """Build an RDF graph from a conversational extraction result.
 
@@ -53,6 +54,11 @@ def build_query_graph(
         ``extended_ontology.rdf``.
     extraction:
         Structured extraction result from the conversational extractor.
+    drug_category_resolver:
+        Optional ``DrugCategoryResolver``; when supplied, prescription events
+        are tagged with canonical drug categories (``mimic:hasDrugCategory``)
+        so dose-trend traits can select a drug class. ``None`` (default)
+        leaves categories off — keeping unit-test builds deterministic.
 
     Returns
     -------
@@ -82,6 +88,7 @@ def build_query_graph(
             graph, stats, ontology_dir, extraction,
             skip_allen_relations=skip_allen_relations,
             max_workers=max_workers,
+            drug_category_resolver=drug_category_resolver,
         )
 
     # -- Lookup indices -------------------------------------------------------
@@ -158,7 +165,10 @@ def build_query_graph(
         if resolved is None:
             continue
         _, icu_stay_uri, icu_day_meta = resolved
-        write_prescription_event(graph, event, icu_stay_uri, icu_day_meta)
+        write_prescription_event(
+            graph, event, icu_stay_uri, icu_day_meta,
+            drug_category_resolver=drug_category_resolver,
+        )
         stats["prescriptions"] += 1
 
     diagnoses_by_subject: dict[int, list[dict]] = defaultdict(list)
@@ -313,16 +323,17 @@ def _build_patient_subgraph_worker(
 ) -> tuple[bytes, dict]:
     """Worker function for parallel graph build.
 
-    Takes a tuple of (ontology_dir, extraction, skip_allen_relations).
-    Returns (ntriples_bytes, stats_dict).
+    Takes a tuple of (ontology_dir, extraction, skip_allen_relations,
+    drug_category_resolver). Returns (ntriples_bytes, stats_dict).
     """
-    ontology_dir, extraction, skip_allen = args
+    ontology_dir, extraction, skip_allen, drug_category_resolver = args
     from src.conversational.graph_builder import build_query_graph
 
     graph, stats = build_query_graph(
         ontology_dir, extraction,
         skip_allen_relations=skip_allen,
         max_workers=1,
+        drug_category_resolver=drug_category_resolver,
     )
     return graph.serialize(format="nt"), stats
 
@@ -335,12 +346,13 @@ def _build_parallel(
     *,
     skip_allen_relations: bool,
     max_workers: int,
+    drug_category_resolver=None,
 ) -> tuple[Graph, dict]:
     """Build patient subgraphs in parallel and merge."""
     partitions = _partition_by_patient(extraction)
 
     worker_args = [
-        (ontology_dir, partition, skip_allen_relations)
+        (ontology_dir, partition, skip_allen_relations, drug_category_resolver)
         for partition in partitions
     ]
 

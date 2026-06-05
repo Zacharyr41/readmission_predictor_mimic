@@ -6,6 +6,7 @@ Tests cover ICU stays, ICU days, biomarkers, vitals, prescriptions, diagnoses, a
 
 import pytest
 from datetime import datetime
+from pathlib import Path
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, XSD
 
@@ -21,6 +22,9 @@ from src.graph_construction.event_writers import (
     write_diagnosis_event,
     write_comorbidity,
 )
+from src.graph_construction.terminology.drug_category import DrugCategoryResolver
+
+_MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "data" / "mappings"
 
 
 class TestAssignEventToICUDay:
@@ -404,6 +408,56 @@ class TestWritePrescriptionEvent:
             assert doses == [expected_dose]
             begins = list(graph_with_ontology.objects(uri, TIME_NS.hasBeginning))
             assert len(begins) == 1
+
+    def test_drug_category_emitted_when_resolver_supplied(
+        self,
+        graph_with_ontology: Graph,
+        sample_patient_data: dict,
+        sample_admission_data: dict,
+        sample_icu_stay_data: dict,
+        sample_prescription_data: dict,
+    ) -> None:
+        """When a resolver is injected, the event carries mimic:hasDrugCategory
+        for each canonical category (plan I-A). The sample drug is Vancomycin,
+        an antibiotic.
+        """
+        patient_uri = write_patient(graph_with_ontology, sample_patient_data)
+        admission_uri = write_admission(graph_with_ontology, sample_admission_data, patient_uri)
+        icu_stay_uri = write_icu_stay(graph_with_ontology, sample_icu_stay_data, admission_uri)
+        icu_day_metadata = write_icu_days(graph_with_ontology, sample_icu_stay_data, icu_stay_uri)
+
+        event_uri = write_prescription_event(
+            graph_with_ontology, sample_prescription_data, icu_stay_uri, icu_day_metadata,
+            drug_category_resolver=DrugCategoryResolver(_MAPPINGS_DIR),
+        )
+
+        assert (
+            event_uri,
+            MIMIC_NS.hasDrugCategory,
+            Literal("antibiotics", datatype=XSD.string),
+        ) in graph_with_ontology
+
+    def test_no_drug_category_without_resolver(
+        self,
+        graph_with_ontology: Graph,
+        sample_patient_data: dict,
+        sample_admission_data: dict,
+        sample_icu_stay_data: dict,
+        sample_prescription_data: dict,
+    ) -> None:
+        """Default (no resolver) emits no category — preserves prior behavior
+        and keeps unit tests offline/deterministic.
+        """
+        patient_uri = write_patient(graph_with_ontology, sample_patient_data)
+        admission_uri = write_admission(graph_with_ontology, sample_admission_data, patient_uri)
+        icu_stay_uri = write_icu_stay(graph_with_ontology, sample_icu_stay_data, admission_uri)
+        icu_day_metadata = write_icu_days(graph_with_ontology, sample_icu_stay_data, icu_stay_uri)
+
+        event_uri = write_prescription_event(
+            graph_with_ontology, sample_prescription_data, icu_stay_uri, icu_day_metadata,
+        )
+
+        assert (event_uri, MIMIC_NS.hasDrugCategory, None) not in graph_with_ontology
 
 
 class TestWriteDiagnosisEvent:

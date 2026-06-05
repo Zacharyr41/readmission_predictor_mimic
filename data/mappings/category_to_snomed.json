@@ -5,6 +5,7 @@
   },
   "antibiotics": {
     "snomed_code": "372532007",
+    "kind": "drug",
     "members": ["vancomycin", "ceftriaxone", "meropenem", "piperacillin", "ampicillin",
                  "amoxicillin", "ciprofloxacin", "levofloxacin", "metronidazole",
                  "cefepime", "cefazolin", "azithromycin", "doxycycline",
@@ -14,38 +15,45 @@
   },
   "vasopressors": {
     "snomed_code": "372881000",
+    "kind": "drug",
     "members": ["norepinephrine", "vasopressin", "phenylephrine", "epinephrine",
                  "dopamine", "dobutamine", "milrinone"]
   },
   "sedatives": {
     "snomed_code": "372614000",
+    "kind": "drug",
     "members": ["propofol", "midazolam", "dexmedetomidine", "lorazepam",
                  "diazepam", "ketamine", "fentanyl"]
   },
   "anticoagulants": {
     "snomed_code": "372862008",
+    "kind": "drug",
     "members": ["heparin", "warfarin", "enoxaparin", "rivaroxaban",
                  "apixaban", "fondaparinux", "argatroban", "bivalirudin"]
   },
   "opioids": {
     "snomed_code": "373265006",
+    "kind": "drug",
     "members": ["morphine", "fentanyl", "hydromorphone", "oxycodone",
                  "methadone", "remifentanil", "codeine", "tramadol"]
   },
   "antihypertensives": {
     "snomed_code": "372586001",
+    "kind": "drug",
     "members": ["amlodipine", "lisinopril", "metoprolol", "atenolol",
                  "losartan", "valsartan", "hydralazine", "labetalol",
                  "nicardipine", "nitroprusside", "esmolol", "diltiazem"]
   },
   "diuretics": {
     "snomed_code": "372695000",
+    "kind": "drug",
     "members": ["furosemide", "bumetanide", "spironolactone",
                  "hydrochlorothiazide", "acetazolamide", "mannitol",
                  "chlorthalidone", "torsemide", "metolazone"]
   },
   "insulin": {
     "snomed_code": "67866001",
+    "kind": "drug",
     "members": ["insulin", "insulin glargine", "insulin lispro",
                  "insulin aspart", "insulin regular"]
   },

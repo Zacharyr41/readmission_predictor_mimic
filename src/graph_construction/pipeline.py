@@ -36,7 +36,7 @@ from src.graph_construction.event_writers import (
 )
 from src.graph_construction.comorbidity_builder import write_patient_comorbidities
 from src.graph_construction.temporal.allen_relations import compute_allen_relations_for_patient
-from src.graph_construction.terminology import SnomedMapper
+from src.graph_construction.terminology import DrugCategoryResolver, SnomedMapper
 from src.ingestion.derived_tables import (
     create_age_table,
     create_readmission_labels,
@@ -137,6 +137,12 @@ def build_graph(
     elif snomed_mappings_dir is not None:
         logger.warning(f"SNOMED mappings directory not found: {snomed_mappings_dir}")
 
+    # Drug-category resolver (I-A): tags prescriptions with canonical categories
+    # (e.g. "vasopressors") so dose-trend traits can select a drug class. Curated
+    # + offline by default (deterministic, no network); same instance reused for
+    # the whole serial build, fresh per worker in the parallel path.
+    drug_category_resolver = DrugCategoryResolver()
+
     # Statistics
     stats = {
         "patients": 0,
@@ -224,6 +230,7 @@ def build_graph(
                 diagnoses_limit=diagnoses_limit,
                 skip_allen_relations=skip_allen_relations,
                 snomed_mapper=snomed_mapper,
+                drug_category_resolver=drug_category_resolver,
             )
 
             for key, value in patient_stats.items():
@@ -304,16 +311,18 @@ def _collect_loinc_codes(conn: duckdb.DuckDBPyConnection) -> list[str]:
 
 _worker_conn = None
 _worker_mapper = None
+_worker_drug_resolver = None
 
 
 def _worker_init(db_path, snomed_mappings_dir, umls_api_key):
     """Pool initializer: open DuckDB + SnomedMapper once per worker process."""
-    global _worker_conn, _worker_mapper  # noqa: PLW0603
+    global _worker_conn, _worker_mapper, _worker_drug_resolver  # noqa: PLW0603
     _worker_conn = duckdb.connect(str(db_path), read_only=True)
     if snomed_mappings_dir is not None and Path(snomed_mappings_dir).exists():
         _worker_mapper = SnomedMapper(
             Path(snomed_mappings_dir), umls_api_key=umls_api_key
         )
+    _worker_drug_resolver = DrugCategoryResolver()
 
 
 def _process_single_patient(args: tuple) -> tuple[str, dict[str, int]]:
@@ -346,6 +355,7 @@ def _process_single_patient(args: tuple) -> tuple[str, dict[str, int]]:
         diagnoses_limit=diagnoses_limit,
         skip_allen_relations=skip_allen_relations,
         snomed_mapper=_worker_mapper,
+        drug_category_resolver=_worker_drug_resolver,
     )
 
     fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix="patient_")
@@ -367,6 +377,7 @@ def _process_patient(
     diagnoses_limit: int,
     skip_allen_relations: bool = False,
     snomed_mapper=None,
+    drug_category_resolver=None,
 ) -> dict[str, int]:
     """Process a single patient and their associated data.
 
@@ -463,7 +474,11 @@ def _process_patient(
             # Write prescriptions
             prescriptions = _query_prescriptions(conn, hadm_id, prescriptions_limit)
             for rx_data in prescriptions:
-                write_prescription_event(graph, rx_data, icu_stay_uri, icu_day_metadata, snomed_mapper=snomed_mapper)
+                write_prescription_event(
+                    graph, rx_data, icu_stay_uri, icu_day_metadata,
+                    snomed_mapper=snomed_mapper,
+                    drug_category_resolver=drug_category_resolver,
+                )
                 stats["prescriptions"] += 1
 
         # Write diagnoses for this admission

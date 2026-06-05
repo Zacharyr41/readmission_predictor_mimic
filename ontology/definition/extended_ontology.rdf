@@ -195,6 +195,14 @@
         <rdfs:comment>The name of the prescribed drug.</rdfs:comment>
     </owl:DatatypeProperty>
 
+    <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDrugCategory -->
+
+    <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDrugCategory">
+        <rdfs:domain rdf:resource="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#PrescriptionEvent"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>A canonical drug-class category the prescription belongs to (e.g., vasopressors, antibiotics), grounded to a SNOMED root in category_to_snomed.json.</rdfs:comment>
+    </owl:DatatypeProperty>
+
     <!-- http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseValue -->
 
     <owl:DatatypeProperty rdf:about="http://www.cnam.fr/MIMIC4-ICU-BSI/V1#hasDoseValue">

@@ -392,6 +392,7 @@ def write_prescription_event(
     icu_stay_uri: URIRef,
     icu_day_metadata: list[tuple[URIRef, datetime, datetime]],
     snomed_mapper=None,
+    drug_category_resolver=None,
 ) -> URIRef:
     """Create PrescriptionEvent as time:ProperInterval.
 
@@ -401,6 +402,12 @@ def write_prescription_event(
                  dose_val_rx, dose_unit_rx, route.
         icu_stay_uri: URIRef for the ICU stay.
         icu_day_metadata: List of (day_uri, begin, end) tuples.
+        snomed_mapper: Optional SNOMED mapper for grounding the drug itself.
+        drug_category_resolver: Optional resolver with a ``resolve(drug) ->
+            list[DrugCategory]`` method. When supplied, emits one
+            ``mimic:hasDrugCategory`` per canonical category the drug belongs
+            to (e.g. "vasopressors"), so a class-scoped dose trend is
+            queryable. Injectable + default off keeps unit tests deterministic.
 
     Returns:
         URIRef for the created event.
@@ -440,6 +447,11 @@ def write_prescription_event(
     # SNOMED-CT mapping
     if snomed_mapper is not None:
         _add_snomed_triples(graph, event_uri, snomed_mapper.get_snomed_for_drug(drug))
+
+    # Canonical drug categories (e.g. "vasopressors"), multi-valued.
+    if drug_category_resolver is not None:
+        for category in drug_category_resolver.resolve(drug):
+            graph.add((event_uri, MIMIC_NS.hasDrugCategory, Literal(category.name, datatype=XSD.string)))
 
     if rx_data.get("dose_val_rx") is not None:
         graph.add((event_uri, MIMIC_NS.hasDoseValue, Literal(rx_data["dose_val_rx"], datatype=XSD.decimal)))

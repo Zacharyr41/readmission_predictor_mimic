@@ -9,6 +9,9 @@ from rdflib.namespace import RDF, XSD
 from src.conversational.models import ExtractionResult
 from src.conversational.graph_builder import build_query_graph
 from src.graph_construction.ontology import MIMIC_NS, TIME_NS
+from src.graph_construction.terminology.drug_category import DrugCategoryResolver
+
+_MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "data" / "mappings"
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +504,42 @@ class TestComorbidityWiring:
 
         assert stats["comorbidities"] == 0
         assert (None, RDF.type, MIMIC_NS.Comorbidity) not in graph
+
+
+# ---------------------------------------------------------------------------
+# Drug-category enrichment on the cohort path (plan I-A)
+# ---------------------------------------------------------------------------
+
+
+class TestDrugCategoryWiring:
+    """I-A: when a resolver is injected, prescription events carry
+    ``mimic:hasDrugCategory`` so the temporal feature extractor (III-A) can
+    select a drug class (e.g. all vasopressors) and compute a dose trend.
+    Default (no resolver) emits nothing, keeping unit builds offline.
+    """
+
+    def test_category_emitted_when_resolver_injected(
+        self, ontology_dir, minimal_extraction,
+    ):
+        graph, _ = build_query_graph(
+            ontology_dir, minimal_extraction,
+            drug_category_resolver=DrugCategoryResolver(_MAPPINGS_DIR),
+        )
+        # minimal_extraction prescribes Vancomycin -> antibiotics.
+        result = graph.query(
+            """ASK {
+                ?rx rdf:type mimic:PrescriptionEvent ;
+                    mimic:hasDrugName ?d ;
+                    mimic:hasDrugCategory ?c .
+                FILTER(STR(?d) = "Vancomycin" && STR(?c) = "antibiotics")
+            }""",
+            initNs={"mimic": MIMIC_NS},
+        )
+        assert bool(result)
+
+    def test_no_category_without_resolver(self, ontology_dir, minimal_extraction):
+        graph, _ = build_query_graph(ontology_dir, minimal_extraction)
+        assert (None, MIMIC_NS.hasDrugCategory, None) not in graph
 
 
 # ---------------------------------------------------------------------------

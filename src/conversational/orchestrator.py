@@ -30,6 +30,7 @@ from src.conversational.extractor import (
     merge_extractions,
 )
 from src.conversational.graph_builder import build_query_graph
+from src.graph_construction.terminology import DrugCategoryResolver
 from src.conversational.models import (
     AnswerResult,
     CompetencyQuestion,
@@ -96,6 +97,10 @@ class ConversationalPipeline:
         self._bigquery_project = bigquery_project
         self._extraction_config = extraction_config
         self._max_workers = max_workers
+        # Drug-category resolver (I-A): tags prescription events with canonical
+        # categories ("vasopressors") so dose-trend traits can select a drug
+        # class. Curated + offline (deterministic, no network).
+        self._drug_category_resolver = DrugCategoryResolver()
         # Second-pass plausibility critic. ON by default in production;
         # tests opt out via ``enable_critic=False`` to avoid extending
         # every mock LLM response list.
@@ -355,6 +360,7 @@ class ConversationalPipeline:
                         self._ontology_dir, merged,
                         skip_allen_relations=not any_temporal,
                         max_workers=self._max_workers,
+                        drug_category_resolver=self._drug_category_resolver,
                     )
                     for idx, cq in graph_cqs:
                         reasoning = reason(graph, cq)
