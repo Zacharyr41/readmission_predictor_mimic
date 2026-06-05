@@ -715,12 +715,17 @@ def _get_filtered_hadm_ids(
     order = "admittime DESC" if cfg.cohort_strategy == "recent" else backend.random_fn()
     # Use a subquery so ORDER BY references a column visible after SELECT DISTINCT
     # (BigQuery rejects ORDER BY on columns not in the DISTINCT select list).
-    # Phase 2: no LIMIT — downstream fetchers batch via cfg.batch_size.
+    # Phase 2: no LIMIT for real queries — downstream fetchers batch via
+    # cfg.batch_size. ``max_admissions`` (default None) is the one exception: the
+    # reference-range build caps the cohort to a bounded, fixed sample.
+    limit_sql = (
+        f" LIMIT {int(cfg.max_admissions)}" if cfg.max_admissions is not None else ""
+    )
     inner = (
         f"SELECT DISTINCT a.hadm_id, a.admittime"
         f" FROM {t('admissions')} a {join_sql}{where_clause}"
     )
-    sql = f"SELECT hadm_id FROM ({inner}) sub ORDER BY {order}"
+    sql = f"SELECT hadm_id FROM ({inner}) sub ORDER BY {order}{limit_sql}"
     return [r[0] for r in backend.execute_tolerant(sql, frag.params)]
 
 

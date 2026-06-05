@@ -46,7 +46,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.pygower import ColumnSpec, Kind, gower_distances
+from src.pygower import ColumnSpec, Direction, Kind, gower_distances
 from src.similarity.bucketing import assign_buckets
 from src.similarity.combined import combine_scores
 from src.similarity.contextual import (
@@ -549,6 +549,38 @@ def _trait_concepts(trait: Any) -> list[tuple[str, str]]:
     return pairs
 
 
+def _graph_concepts(graph_traits: list) -> list:
+    """The deduped ``ClinicalConcept`` set the graph traits need extracted.
+
+    One concept per distinct ``(name, type)`` pair across the traits, so a graph
+    with two lactate-slope traits (different windows) pulls lactate once. Lazily
+    imports the model so this module stays free of the conversational deps.
+    """
+    from src.conversational.models import ClinicalConcept
+
+    concepts: list = []
+    seen: set[tuple[str, str]] = set()
+    for t in graph_traits:
+        for name, ctype in _trait_concepts(t):
+            if (name, ctype) not in seen:
+                seen.add((name, ctype))
+                concepts.append(ClinicalConcept(name=name, concept_type=ctype))
+    return concepts
+
+
+def _graph_requests(graph_traits: list) -> list:
+    """One ``GraphFeatureRequest`` per graph trait (output column == trait name)."""
+    from src.similarity.graph_features import GraphFeatureRequest
+
+    return [
+        GraphFeatureRequest(
+            column=t.name, template=t.template, concept=t.concept,
+            params=dict(t.graph_params or {}),
+        )
+        for t in graph_traits
+    ]
+
+
 def _merge_graph_traits(
     candidate_df: pd.DataFrame,
     definition: CohortDefinition,
@@ -565,55 +597,29 @@ def _merge_graph_traits(
 
     The graph IS the temporal feature extractor (plan III-A): each ``graph_temporal``
     trait names a feature-extractor ``template`` keyed on a clinical ``concept``.
-    We synthesize a ``CompetencyQuestion`` from the definition's prefilters + those
-    concepts, run the shared extractor, build the graph, and pull a hadm-indexed
-    feature frame — then write each trait's value back onto ``candidate_df`` as a
-    column (NaN where the admission has no value, so the column set stays stable
-    and the trait's missing policy decides). A precedence trait needs Allen
-    relations, so we only pay the (expensive) Allen pass when one is present
-    (locked decision I-D). Mutates ``candidate_df`` in place; returns the graph
-    provenance to fold into the logged criteria.
+    The shared :func:`build_graph_feature_frame` synthesizes a ``CompetencyQuestion``
+    from the definition's prefilters + those concepts, runs the extractor, builds
+    the graph, and returns a hadm-indexed feature frame — we write each trait's
+    value back onto ``candidate_df`` as a column (NaN where the admission has no
+    value, so the column set stays stable and the trait's missing policy decides).
+    Routing through the shared builder is what guarantees the column a frozen range
+    normalizes is produced by the exact code that fit the range (no build-path
+    divergence). Mutates ``candidate_df`` in place; returns the graph provenance.
     """
-    from src.conversational.extractor import _extract
-    from src.conversational.graph_builder import build_query_graph
-    from src.conversational.models import ClinicalConcept, CompetencyQuestion
-    from src.similarity.graph_features import (
-        GraphFeatureRequest,
-        extract_graph_features,
-    )
-
-    concepts: list[ClinicalConcept] = []
-    seen: set[tuple[str, str]] = set()
-    for t in graph_traits:
-        for name, ctype in _trait_concepts(t):
-            if (name, ctype) not in seen:
-                seen.add((name, ctype))
-                concepts.append(ClinicalConcept(name=name, concept_type=ctype))
-
-    cq = CompetencyQuestion(
-        original_question="cohort graph-feature extraction",
-        patient_filters=list(definition.prefilters),
-        clinical_concepts=concepts,
-        scope="cohort",
-    )
-    extraction = _extract(backend, cq, config=extraction_config, resolver=resolver)
+    from src.similarity.graph_features import build_graph_feature_frame
 
     has_precedence = any(t.template == "sim_precedence_count" for t in graph_traits)
-    graph, _stats = build_query_graph(
-        ontology_dir, extraction,
-        skip_allen_relations=not has_precedence,
-        max_workers=max_workers,
+    gdf = build_graph_feature_frame(
+        backend,
+        prefilters=list(definition.prefilters),
+        concepts=_graph_concepts(graph_traits),
+        requests=_graph_requests(graph_traits),
+        ontology_dir=ontology_dir,
+        resolver=resolver,
+        extraction_config=extraction_config,
         drug_category_resolver=drug_category_resolver,
+        max_workers=max_workers,
     )
-
-    requests = [
-        GraphFeatureRequest(
-            column=t.name, template=t.template, concept=t.concept,
-            params=dict(t.graph_params or {}),
-        )
-        for t in graph_traits
-    ]
-    gdf = extract_graph_features(graph, requests)
 
     # Explicit per-hadm lookup (robust to an empty / 0-row feature frame): every
     # candidate gets the column, NaN where the graph yielded no value.
@@ -630,11 +636,166 @@ def _merge_graph_traits(
     }
 
 
+# ---------------------------------------------------------------------------
+# Graph-feature scale resolution — a graph_temporal trait carries a per-query,
+# LLM-chosen name (``lactate_slope_48h``) that never matches a name-keyed frozen
+# range. We resolve its normalization scale by *semantic signature* instead:
+# frozen artifact → process cache → on-demand fit over a fixed reference cohort
+# (the escape hatch). Locked decision #6 holds throughout — the range is never
+# learned from the query batch.
+# ---------------------------------------------------------------------------
+
+
+# Process-local cache of graph ranges fit on-demand. Keyed by semantic signature;
+# a signature missing from the frozen artifact is fit ONCE per process (over a
+# bounded fixed reference cohort) and reused for every later query.
+_RUNTIME_GRAPH_RANGES: dict[str, tuple[float, float]] = {}
+
+# How many admissions the on-demand reference build samples — a bounded, fixed
+# slice of the population, never the query batch (locked decision #6).
+_REFERENCE_COHORT_CAP = 4000
+
+
+def clear_runtime_graph_ranges() -> None:
+    """Drop the process-local fitted-range cache (test-isolation hook)."""
+    _RUNTIME_GRAPH_RANGES.clear()
+
+
+def _fit_reference_graph_ranges(
+    graph_traits: list,
+    *,
+    backend: Any,
+    ontology_dir: Path,
+    resolver: Any,
+    extraction_config: Any,
+    drug_category_resolver: Any,
+    max_workers: int,
+) -> dict[str, tuple[float, float]]:
+    """Fit signature-keyed graph ranges on a bounded FIXED reference cohort.
+
+    The escape hatch (user preference: a general fallback, never a hard registry
+    limit) for a signature with no frozen range in the artifact: fit one on-demand
+    — but over a fixed, capped, *random* sample of the whole population, NOT the
+    query pool, so the scale stays independent of which candidates the prefilter
+    selected (locked decision #6). Returns ``{signature: (low, high)}``.
+    """
+    from src.conversational.models import ExtractionConfig
+    from src.similarity.reference_ranges import compute_graph_reference_ranges
+
+    ref_cfg = (extraction_config or ExtractionConfig()).model_copy(
+        update={"max_admissions": _REFERENCE_COHORT_CAP, "cohort_strategy": "random"}
+    )
+    raw = compute_graph_reference_ranges(
+        backend,
+        concepts=_graph_concepts(graph_traits),
+        requests=_graph_requests(graph_traits),
+        ontology_dir=ontology_dir,
+        prefilters=None,
+        resolver=resolver,
+        extraction_config=ref_cfg,
+        drug_category_resolver=drug_category_resolver,
+        max_workers=max_workers,
+    )
+    return {sig: (d["low"], d["high"]) for sig, d in raw.items()}
+
+
+def _resolve_graph_trait_scales(
+    definition: CohortDefinition,
+    graph_traits: list,
+    *,
+    graph_reference_ranges: dict[str, tuple[float, float]],
+    name_ranges_supplied: dict[str, tuple[float, float]],
+    backend: Any,
+    ontology_dir: Path,
+    resolver: Any,
+    extraction_config: Any,
+    drug_category_resolver: Any,
+    max_workers: int,
+) -> tuple[CohortDefinition, dict[str, tuple[float, float]]]:
+    """Resolve each graph trait's frozen scale by signature → name-keyed range.
+
+    For every quantitative graph trait that carries no ``range_`` and whose name
+    is not already covered by an explicitly-supplied name-keyed range, look up its
+    semantic signature against the frozen artifact, then the process cache, then
+    (escape hatch) fit it on-demand over a fixed reference cohort. The trait keeps
+    its per-query name, so the resolved range is returned name-keyed for
+    :func:`_build_column_specs`; a directional trait whose ``reference_value`` is
+    still null is pinned to the population extreme in its direction (p99 high for
+    ``higher_more_similar``, p1 low for ``lower_more_similar``), mirroring
+    :func:`definition_builder._resolve_reference_values` but resolved by signature.
+
+    Returns ``(definition, name_keyed_ranges)`` — the definition with any
+    directional ``reference_value`` filled, and the ranges to fold into the
+    name-keyed map the column-spec builder consumes. Traits already covered by a
+    supplied name-keyed range are left untouched (the caller's explicit range
+    wins, and re-fitting would build a needless second graph).
+    """
+    needing = [
+        t for t in graph_traits
+        if t.kind == Kind.QUANTITATIVE
+        and t.range_ is None
+        and t.name not in name_ranges_supplied
+    ]
+    if not needing:
+        return definition, {}
+
+    # Fit the escape hatch once for every still-unresolved signature, not per
+    # trait — one reference graph build covers all of them.
+    fitted_pending = [
+        t for t in needing
+        if request_signature_for_trait(t) not in graph_reference_ranges
+        and request_signature_for_trait(t) not in _RUNTIME_GRAPH_RANGES
+    ]
+    if fitted_pending:
+        fitted = _fit_reference_graph_ranges(
+            fitted_pending,
+            backend=backend, ontology_dir=ontology_dir, resolver=resolver,
+            extraction_config=extraction_config,
+            drug_category_resolver=drug_category_resolver, max_workers=max_workers,
+        )
+        _RUNTIME_GRAPH_RANGES.update(fitted)
+
+    name_ranges: dict[str, tuple[float, float]] = {}
+    for t in needing:
+        sig = request_signature_for_trait(t)
+        rr = graph_reference_ranges.get(sig) or _RUNTIME_GRAPH_RANGES.get(sig)
+        if rr is None:
+            # Even the reference cohort produced no usable spread for this scale.
+            raise ValueError(
+                f"graph_temporal trait {t.name!r} (signature {sig!r}) has no "
+                "frozen range_ and none could be fit on the reference cohort; "
+                "the feature was constant or absent across the reference sample"
+            )
+        name_ranges[t.name] = (float(rr[0]), float(rr[1]))
+
+    new_traits = []
+    for t in definition.traits:
+        rr = name_ranges.get(t.name)
+        if (
+            rr is not None
+            and t.reference_value is None
+            and t.direction != Direction.SYMMETRIC
+        ):
+            low, high = rr
+            value = high if t.direction == Direction.HIGHER_MORE_SIMILAR else low
+            t = t.model_copy(update={"reference_value": float(value)})
+        new_traits.append(t)
+    return definition.model_copy(update={"traits": new_traits}), name_ranges
+
+
+def request_signature_for_trait(trait: Any) -> str:
+    """The semantic signature of a ``graph_temporal`` ``TraitSpec``."""
+    from src.similarity.graph_features import graph_feature_signature
+
+    return graph_feature_signature(trait.template, trait.concept, trait.graph_params)
+
+
 def run_cohort(
     definition: CohortDefinition,
     backend: Any,
     *,
     reference_ranges: dict[str, tuple[float, float]] | None = None,
+    graph_reference_ranges: dict[str, tuple[float, float]] | None = None,
     ontology_dir: Path | None = None,
     resolver: Any = None,
     extraction_config: Any = None,
@@ -659,6 +820,11 @@ def run_cohort(
 
     A definition with ≥1 ``graph_temporal`` trait requires ``ontology_dir`` (so
     the graph can be built); without it a clear ``ValueError`` is raised.
+
+    ``graph_reference_ranges`` carries frozen ``{signature: (low, high)}`` scales
+    for graph traits (whose per-query names never match the name-keyed
+    ``reference_ranges``); when ``None`` it auto-loads from the frozen artifact,
+    and any signature still missing is fit on-demand over a fixed reference cohort.
     """
     graph_traits = [t for t in definition.traits if t.source == "graph_temporal"]
     if graph_traits:
@@ -676,6 +842,10 @@ def run_cohort(
                 "supplied; the graph feature path needs the ontology to build "
                 "the per-question RDF graph over the candidate pool"
             )
+        if graph_reference_ranges is None:
+            from src.similarity.reference_ranges import load_graph_reference_ranges
+
+            graph_reference_ranges = load_graph_reference_ranges()
 
     pool = _cohort_candidate_pool(definition, backend)
     candidate_df = _fetch_admission_features(backend, pool)
@@ -699,6 +869,21 @@ def run_cohort(
             )
         )
 
+    effective_ranges = dict(reference_ranges or {})
+    if graph_traits:
+        definition, graph_name_ranges = _resolve_graph_trait_scales(
+            definition, graph_traits,
+            graph_reference_ranges=graph_reference_ranges or {},
+            name_ranges_supplied=effective_ranges,
+            backend=backend, ontology_dir=ontology_dir, resolver=resolver,
+            extraction_config=extraction_config,
+            drug_category_resolver=drug_category_resolver, max_workers=max_workers,
+        )
+        effective_ranges.update(graph_name_ranges)
+        # The resolved definition may have filled directional reference_values;
+        # keep the logged criteria in sync with what is actually scored.
+        provenance["traits"] = _cohort_provenance(definition, n_pool)["traits"]
+
     trait_names = [t.name for t in definition.traits]
     missing_cols = [n for n in trait_names if n not in candidate_df.columns]
     if missing_cols:
@@ -707,7 +892,7 @@ def run_cohort(
             f"contextual / graph extractors: {missing_cols}"
         )
 
-    spec = _build_column_specs(definition, reference_ranges)
+    spec = _build_column_specs(definition, effective_ranges)
     profile = pd.DataFrame(
         [{t.name: t.reference_value for t in definition.traits}],
         columns=trait_names,

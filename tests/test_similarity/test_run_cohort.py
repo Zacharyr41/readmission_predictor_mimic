@@ -425,6 +425,152 @@ class TestGraphTemporalEndToEnd:
         assert result.provenance["graph_traits"] == ["icu_stay_hours"]
 
 
+class TestGraphTemporalFrozenRangeGap:
+    """Reproduces the production failure behind the demo's second error.
+
+    ``build_definition`` emits a directional graph_temporal trend trait with
+    ``reference_value=None`` and **no** ``range_`` (see definition_builder.py:
+    the ``lactate_slope_48h`` example). The frozen-ranges artifact
+    (``similarity_reference_ranges.json``) only covers SQL aggregates (age,
+    creatinine_max, ...) — never a graph slope under its dynamic, LLM-chosen
+    name. So in production every graph_temporal quantitative trait reaches
+    ``_build_column_specs`` with no frozen scale and the whole cohort aborts:
+
+        Could not assemble the cohort: quantitative trait 'lactate_slope_48h'
+        has no frozen range_ and none was supplied via reference_ranges ...
+
+    The existing graph-temporal tests dodge this by hand-feeding ``range_`` /
+    ``reference_ranges``; this test uses the *production* shape (neither), so the
+    graph_temporal cohort path must assemble a cohort on its own.
+    """
+
+    def _slope_defn(self):
+        # Production shape: directional trend, reference_value=None, range_=None.
+        return CohortDefinition(
+            traits=[TraitSpec(
+                name="icu_stay_hours", source="graph_temporal", kind="quantitative",
+                direction="higher_more_similar", template="sim_icu_los",
+                reference_value=None, range_=None,
+            )],
+            distance_threshold=1.0,
+        )
+
+    def test_graph_temporal_trait_without_frozen_range_assembles(self, rich_backend):
+        # No range_ on the trait, no reference_ranges supplied — exactly what the
+        # orchestrator passes in production. The runner must still assemble a
+        # cohort (derive a scale for the graph feature), not abort.
+        result = run_cohort(
+            self._slope_defn(), rich_backend, ontology_dir=ONTOLOGY_DIR,
+        )
+        assert isinstance(result, CohortResult)
+        assert result.n_pool > 0
+
+
+class TestGraphTemporalSignatureResolution:
+    """A graph_temporal trait resolves its frozen scale by *signature*, not by its
+    per-query name — frozen artifact first, then an on-demand fit over a fixed
+    reference cohort (the escape hatch), with the result cached per process."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_cache(self):
+        # The on-demand fit cache is process-global; isolate each test.
+        from src.similarity.run import clear_runtime_graph_ranges
+
+        clear_runtime_graph_ranges()
+        yield
+        clear_runtime_graph_ranges()
+
+    def _slope_defn(self):
+        return CohortDefinition(
+            traits=[TraitSpec(
+                name="icu_stay_hours", source="graph_temporal", kind="quantitative",
+                direction="higher_more_similar", template="sim_icu_los",
+                reference_value=None, range_=None,
+            )],
+            distance_threshold=1.0,
+        )
+
+    def test_frozen_signature_resolves_dynamic_name_without_escape_hatch(
+        self, rich_backend, tmp_path, monkeypatch
+    ):
+        from src.similarity.run import (
+            _RUNTIME_GRAPH_RANGES,
+            request_signature_for_trait,
+        )
+
+        calls = _install_graph_spy(monkeypatch)
+        defn = self._slope_defn()
+        sig = request_signature_for_trait(defn.traits[0])
+        # Supply the frozen scale keyed by signature (not by the trait name).
+        result = run_cohort(
+            defn, rich_backend, ontology_dir=tmp_path,
+            graph_reference_ranges={sig: (0.0, 240.0)},
+        )
+        assert isinstance(result, CohortResult)
+        # Exactly ONE graph build (the pool merge); the escape hatch — which would
+        # build a SECOND reference graph — must not fire when the signature is frozen.
+        assert len(calls) == 1
+        assert _RUNTIME_GRAPH_RANGES == {}  # nothing fit on-demand
+
+    def test_frozen_signature_fills_directional_reference_value(
+        self, rich_backend, tmp_path, monkeypatch
+    ):
+        from src.similarity.run import request_signature_for_trait
+
+        _install_graph_spy(monkeypatch)
+        defn = self._slope_defn()
+        sig = request_signature_for_trait(defn.traits[0])
+        result = run_cohort(
+            defn, rich_backend, ontology_dir=tmp_path,
+            graph_reference_ranges={sig: (0.0, 240.0)},
+        )
+        # higher_more_similar with a null reference_value ⇒ pinned to the p99 high
+        # end of the frozen range (240), mirroring _resolve_reference_values.
+        ref = result.provenance["traits"][0]["reference_value"]
+        assert ref == pytest.approx(240.0)
+
+    def test_escape_hatch_fits_and_caches_signature(self, rich_backend):
+        # No frozen range anywhere ⇒ the runner fits one over a fixed reference
+        # cohort and caches it under the signature for reuse.
+        from src.similarity.run import (
+            _RUNTIME_GRAPH_RANGES,
+            request_signature_for_trait,
+        )
+
+        defn = self._slope_defn()
+        sig = request_signature_for_trait(defn.traits[0])
+        run_cohort(defn, rich_backend, ontology_dir=ONTOLOGY_DIR)
+        assert sig in _RUNTIME_GRAPH_RANGES
+        low, high = _RUNTIME_GRAPH_RANGES[sig]
+        assert low < high  # a real, non-degenerate fitted scale
+
+    def test_clear_runtime_graph_ranges_empties_cache(self, rich_backend):
+        from src.similarity.run import (
+            _RUNTIME_GRAPH_RANGES,
+            clear_runtime_graph_ranges,
+        )
+
+        run_cohort(self._slope_defn(), rich_backend, ontology_dir=ONTOLOGY_DIR)
+        assert _RUNTIME_GRAPH_RANGES  # populated by the escape hatch
+        clear_runtime_graph_ranges()
+        assert _RUNTIME_GRAPH_RANGES == {}
+
+    def test_supplied_name_range_skips_resolution(
+        self, rich_backend, tmp_path, monkeypatch
+    ):
+        # When the caller hands an explicit name-keyed range for the trait, the
+        # signature resolver must NOT override it (and must not fit anything).
+        from src.similarity.run import _RUNTIME_GRAPH_RANGES
+
+        calls = _install_graph_spy(monkeypatch)
+        run_cohort(
+            self._slope_defn(), rich_backend, ontology_dir=tmp_path,
+            reference_ranges={"icu_stay_hours": (0.0, 240.0)},
+        )
+        assert len(calls) == 1  # only the pool merge; no reference build
+        assert _RUNTIME_GRAPH_RANGES == {}
+
+
 # ---------------------------------------------------------------------------
 # Provenance carries the criteria (for the orchestrator to log — II-D / I-E)
 # ---------------------------------------------------------------------------

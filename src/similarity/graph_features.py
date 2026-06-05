@@ -404,3 +404,122 @@ def extract_graph_features(
 def feature_kinds(requests: list[GraphFeatureRequest]) -> dict[str, Kind]:
     """Map each requested column to its pygower :class:`Kind`."""
     return {req.column: TEMPLATES[req.template].kind(req) for req in requests}
+
+
+# ---------------------------------------------------------------------------
+# Semantic signature — a name-independent key for a graph feature's scale.
+# ---------------------------------------------------------------------------
+
+
+# The params that change a template's numeric *scale* (and so must select a
+# different frozen normalization range), in canonical order. Anything not listed
+# does not move the scale and is excluded so cosmetic param differences don't
+# fragment the key. Templates absent from this map are scale-determined by their
+# (template, concept) alone (ICU LOS, distinct-drug count, time-to-first-event).
+_SIGNATURE_PARAM_KEYS: dict[str, tuple[str, ...]] = {
+    "sim_series_by_admission": ("agg", "window_hours"),
+    "sim_dose_series": ("agg", "window_hours"),
+    "sim_precedence_count": ("relation", "concept_b"),
+}
+
+# Effective defaults the templates apply when a param is omitted, so a trait that
+# states ``agg="slope"`` and one that relies on the default hash identically.
+_SIGNATURE_PARAM_DEFAULTS: dict[str, Any] = {"agg": "slope", "relation": "before"}
+
+
+def _norm_param(value: Any) -> str:
+    """Canonical token for a param value (so ``48`` and ``48.0`` and ``"48"`` agree)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, str):
+        return value.strip().lower()
+    return str(value)
+
+
+def graph_feature_signature(
+    template: str, concept: str | None, params: Mapping[str, Any] | None
+) -> str:
+    """A name-independent key for a graph feature's *normalization scale*.
+
+    Two traits that pull the same ``template`` on the same ``concept`` with the
+    same scale-relevant aggregation (slope vs delta, window, precedence partner)
+    share a signature regardless of the LLM-chosen column ``name``. That is what
+    lets a frozen population range — fit once on a fixed reference cohort (locked
+    decision #6) — be looked up for a trait whose name was invented per query
+    (``lactate_slope_48h``, ``vasopressor_dose_slope``, …). The concept match in
+    the SPARQL templates is case-insensitive, so the concept token is lower-cased
+    here to match; absent scale params fall back to the template's effective
+    default so an explicit and an implicit value collide on the same key.
+    """
+    params = params or {}
+    parts = [template, f"concept={(concept or '').strip().lower()}"]
+    for key in _SIGNATURE_PARAM_KEYS.get(template, ()):
+        if key in params:
+            value = params[key]
+        elif key in _SIGNATURE_PARAM_DEFAULTS:
+            value = _SIGNATURE_PARAM_DEFAULTS[key]
+        else:
+            continue  # absent and no default (e.g. window_hours) → omit
+        if value is None:
+            continue
+        parts.append(f"{key}={_norm_param(value)}")
+    return "|".join(parts)
+
+
+def request_signature(req: GraphFeatureRequest) -> str:
+    """The :func:`graph_feature_signature` of a :class:`GraphFeatureRequest`."""
+    return graph_feature_signature(req.template, req.concept, req.params)
+
+
+# ---------------------------------------------------------------------------
+# Shared per-question graph build — the one place that turns a backend + a
+# concept set + a request set into a hadm-indexed feature frame. The cohort
+# runner (scoring the query pool) and the reference-range builder (fitting the
+# frozen scale on a fixed cohort) both go through here, so the column a range
+# normalizes is produced by exactly the same code that produces the column it
+# is later compared against (no SQL/graph or build-path divergence).
+# ---------------------------------------------------------------------------
+
+
+def build_graph_feature_frame(
+    backend: Any,
+    *,
+    prefilters: list,
+    concepts: list,
+    requests: list[GraphFeatureRequest],
+    ontology_dir,
+    resolver: Any = None,
+    extraction_config: Any = None,
+    drug_category_resolver: Any = None,
+    max_workers: int = 1,
+) -> pd.DataFrame:
+    """Extract → build the RDF graph over the cohort → pull the feature frame.
+
+    ``prefilters`` gates the cohort (the query's pool, or a fixed reference
+    population); ``concepts`` are the clinical concepts to pull into the graph;
+    ``requests`` name the columns to compute. The (expensive) Allen-relation
+    pass runs only when a precedence request needs it (locked decision I-D).
+    Imports the conversational extractor / graph builder lazily so importing
+    this module never drags those (or rdflib's heavier deps) in at load time.
+    """
+    from src.conversational.extractor import _extract
+    from src.conversational.graph_builder import build_query_graph
+    from src.conversational.models import CompetencyQuestion
+
+    cq = CompetencyQuestion(
+        original_question="cohort graph-feature extraction",
+        patient_filters=list(prefilters),
+        clinical_concepts=list(concepts),
+        scope="cohort",
+    )
+    extraction = _extract(backend, cq, config=extraction_config, resolver=resolver)
+    has_precedence = any(r.template == "sim_precedence_count" for r in requests)
+    graph, _stats = build_query_graph(
+        ontology_dir, extraction,
+        skip_allen_relations=not has_precedence,
+        max_workers=max_workers,
+        drug_category_resolver=drug_category_resolver,
+    )
+    return extract_graph_features(graph, requests)

@@ -284,12 +284,19 @@ class ExtractionConfig(BaseModel):
     each batch fires 3-N independent queries so 8 workers overlap ~30-40
     queries at once. Drop to 1 to run sequentially (legacy behaviour);
     raise to 16 if the database isn't your bottleneck.
+
+    ``max_admissions`` caps the cohort query with a ``LIMIT`` — ``None`` (the
+    default) keeps the Phase-2 "every matching admission" behaviour for real
+    queries. It exists for the *reference* build that fits frozen graph-feature
+    ranges on a bounded, fixed sample of the population, so building the RDF
+    graph over the whole 500k-admission population is never required.
     """
 
     model_config = {"extra": "forbid"}
     batch_size: int = 2000
     cohort_strategy: Literal["recent", "random"] = "recent"
     max_concurrent_batches: int = 8
+    max_admissions: int | None = None
 
     @field_validator("max_concurrent_batches")
     @classmethod
@@ -299,6 +306,13 @@ class ExtractionConfig(BaseModel):
                 f"max_concurrent_batches must be >= 1 (got {v}); use 1 for "
                 "sequential execution"
             )
+        return v
+
+    @field_validator("max_admissions")
+    @classmethod
+    def _positive_cap(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError(f"max_admissions must be >= 1 or None (got {v})")
         return v
 
 

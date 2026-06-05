@@ -185,12 +185,14 @@ def write_artifact(artifact: dict[str, Any], path: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def load_reference_ranges(path: Path | None = None) -> dict[str, tuple[float, float]]:
-    """Load the frozen ranges into ``{feature: (low, high)}``.
+def _load_ranges_section(
+    section: str, path: Path | None = None
+) -> dict[str, tuple[float, float]]:
+    """Read one ``{key: {low, high}}`` section of the artifact into ``{key: (low, high)}``.
 
-    Never raises: a missing / unreadable / malformed artifact yields ``{}`` so
-    the caller degrades gracefully (a quantitative trait with no frozen range
-    then raises a clear error in the cohort runner, rather than crashing here).
+    Never raises: a missing / unreadable / malformed artifact (or a missing
+    section) yields ``{}`` so the caller degrades gracefully. Shared by the SQL
+    (``ranges``) and graph (``graph_ranges``) loaders.
     """
     target = Path(path) if path is not None else REFERENCE_RANGES_PATH
     if not target.exists():
@@ -203,7 +205,7 @@ def load_reference_ranges(path: Path | None = None) -> dict[str, tuple[float, fl
         return {}
     if not isinstance(doc, dict):
         return {}
-    ranges = doc.get("ranges")
+    ranges = doc.get(section)
     if not isinstance(ranges, dict):
         return {}
     out: dict[str, tuple[float, float]] = {}
@@ -218,3 +220,103 @@ def load_reference_ranges(path: Path | None = None) -> dict[str, tuple[float, fl
         except (TypeError, ValueError):
             continue
     return out
+
+
+def load_reference_ranges(path: Path | None = None) -> dict[str, tuple[float, float]]:
+    """Load the frozen SQL-feature ranges into ``{feature: (low, high)}``.
+
+    Never raises: a missing / unreadable / malformed artifact yields ``{}`` so
+    the caller degrades gracefully (a quantitative trait with no frozen range
+    then raises a clear error in the cohort runner, rather than crashing here).
+    """
+    return _load_ranges_section("ranges", path)
+
+
+def load_graph_reference_ranges(
+    path: Path | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Load the frozen graph-feature ranges into ``{signature: (low, high)}``.
+
+    Reads the ``graph_ranges`` section (sibling to ``ranges``); keys are
+    :func:`~src.similarity.graph_features.graph_feature_signature` strings, so the
+    cohort runner can resolve a dynamically-named ``graph_temporal`` trait by its
+    scale instead of its (per-query) name. Never raises, like its SQL sibling.
+    """
+    return _load_ranges_section("graph_ranges", path)
+
+
+# ---------------------------------------------------------------------------
+# Graph-feature builder — fits the frozen scale for graph_temporal columns on a
+# FIXED reference cohort, keyed by semantic signature so the LLM-chosen trait
+# name is irrelevant. The graph IS the feature extractor, so unlike the SQL
+# features there is no static query: we build the per-question RDF graph over the
+# reference cohort and read the same columns the cohort runner reads.
+# ---------------------------------------------------------------------------
+
+
+def compute_graph_reference_ranges(
+    backend: Any,
+    *,
+    concepts: list,
+    requests: list,
+    ontology_dir: Any,
+    percentiles: tuple[float, float] = _DEFAULT_PERCENTILES,
+    prefilters: list | None = None,
+    resolver: Any = None,
+    extraction_config: Any = None,
+    drug_category_resolver: Any = None,
+    max_workers: int = 1,
+) -> dict[str, dict[str, float]]:
+    """Fit frozen ``[low, high]`` graph-feature ranges on a FIXED reference cohort.
+
+    The graph counterpart to :func:`compute_reference_ranges`: build the
+    per-question RDF graph over the reference cohort, pull each request's feature
+    column, and take robust ``(p_low, p_high)`` percentiles — but keyed by the
+    feature's :func:`~src.similarity.graph_features.request_signature`, not the
+    (dynamic) column name, so the frozen range survives the LLM renaming the
+    trait. Columns with fewer than two finite reference values, or no spread, are
+    dropped (a zero-width range is a divide-by-zero trap for the Gower kernel).
+
+    The reference cohort is whatever ``prefilters`` + ``extraction_config`` select
+    — typically no prefilters with an ``extraction_config.max_admissions`` cap, so
+    the build is a bounded, fixed sample of the population. This is fit on a fixed
+    reference, never on the query batch (locked decision #6).
+    """
+    import numpy as np
+
+    from src.similarity.graph_features import (
+        build_graph_feature_frame,
+        request_signature,
+    )
+
+    if not requests:
+        return {}
+    p_low, p_high = float(percentiles[0]) * 100.0, float(percentiles[1]) * 100.0
+    frame = build_graph_feature_frame(
+        backend,
+        prefilters=list(prefilters or []),
+        concepts=list(concepts),
+        requests=list(requests),
+        ontology_dir=ontology_dir,
+        resolver=resolver,
+        extraction_config=extraction_config,
+        drug_category_resolver=drug_category_resolver,
+        max_workers=max_workers,
+    )
+    ranges: dict[str, dict[str, float]] = {}
+    for req in requests:
+        sig = request_signature(req)
+        if sig in ranges or req.column not in frame.columns:
+            continue
+        values = frame[req.column].to_numpy(dtype="float64")
+        values = values[np.isfinite(values)]
+        if values.size < 2:
+            logger.debug("graph feature %r has <2 reference values; skipping", sig)
+            continue
+        low = float(np.percentile(values, p_low))
+        high = float(np.percentile(values, p_high))
+        if high <= low:
+            logger.debug("graph feature %r has zero-width range; skipping", sig)
+            continue
+        ranges[sig] = {"low": low, "high": high, "n": int(values.size)}
+    return ranges

@@ -1328,13 +1328,20 @@ class ConversationalPipeline:
         keys (hadm_id / subject_id) appear only in the result table, never as
         something the clinician must read or type.
         """
-        from src.similarity.reference_ranges import load_reference_ranges
+        from src.similarity.reference_ranges import (
+            load_graph_reference_ranges,
+            load_reference_ranges,
+        )
         from src.similarity.run import run_cohort
 
         # Inject the frozen reference-population ranges (locked decision #6):
         # quantitative traits are normalized against a fixed, pre-fit scale, not
         # a range learned from the candidate batch. Traits that carry their own
         # ``range_`` override this; traits with neither raise a clear error.
+        # ``graph_reference_ranges`` is the graph counterpart keyed by semantic
+        # signature, so a graph_temporal trait's per-query name (lactate_slope_48h)
+        # resolves to a frozen scale; a signature absent from the artifact is fit
+        # on-demand over a fixed reference cohort (never the query batch).
         # The graph kwargs make graph_temporal traits live (no dead code): the
         # cohort path builds the RDF graph over the pool exactly as the
         # reasoning path does, only paying the Allen pass when a precedence
@@ -1344,6 +1351,7 @@ class ConversationalPipeline:
             result = run_cohort(
                 definition, backend,
                 reference_ranges=load_reference_ranges(),
+                graph_reference_ranges=load_graph_reference_ranges(),
                 ontology_dir=self._ontology_dir,
                 resolver=self._resolver,
                 extraction_config=self._extraction_config,

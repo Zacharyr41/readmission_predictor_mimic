@@ -28,10 +28,15 @@ import json
 
 import pytest
 
+from pathlib import Path
+
 from src.similarity.reference_ranges import (
     compute_reference_ranges,
+    load_graph_reference_ranges,
     load_reference_ranges,
 )
+
+ONTOLOGY_DIR = Path(__file__).parent.parent.parent / "ontology" / "definition"
 
 
 # ---------------------------------------------------------------------------
@@ -165,3 +170,101 @@ class TestArtifactRoundTrip:
         assert "age" in loaded
         low, high = loaded["age"]
         assert low < high
+
+
+# ---------------------------------------------------------------------------
+# Graph-feature ranges — fit on a FIXED reference cohort, keyed by signature
+# ---------------------------------------------------------------------------
+
+
+class TestGraphReferenceRangesLoader:
+    """The graph loader reads a sibling ``graph_ranges`` section keyed by
+    semantic signature (not feature name), and degrades to ``{}`` like the SQL
+    loader when the section is missing."""
+
+    def test_loader_parses_graph_ranges_section(self, tmp_path, monkeypatch):
+        import src.similarity.reference_ranges as rr
+
+        artifact = {
+            "version": "1",
+            "cohort": "all_admissions",
+            "percentiles": {"low": 0.01, "high": 0.99},
+            "ranges": {"age": {"low": 18.0, "high": 91.0, "n": 1000}},
+            "graph_ranges": {
+                "sim_series_by_admission|concept=lactate|agg=slope|window_hours=48": {
+                    "low": -0.05, "high": 0.12, "n": 800,
+                },
+            },
+        }
+        path = tmp_path / "ranges.json"
+        path.write_text(json.dumps(artifact))
+        monkeypatch.setattr(rr, "REFERENCE_RANGES_PATH", path)
+
+        loaded = load_graph_reference_ranges()
+        assert loaded == {
+            "sim_series_by_admission|concept=lactate|agg=slope|window_hours=48": (
+                -0.05, 0.12,
+            )
+        }
+        # The SQL loader on the same artifact still only sees the name-keyed section.
+        assert set(load_reference_ranges()) == {"age"}
+
+    def test_loader_missing_graph_section_returns_empty(self, tmp_path, monkeypatch):
+        import src.similarity.reference_ranges as rr
+
+        # An artifact with only the SQL ``ranges`` section → graph loader is empty.
+        artifact = {"version": "1", "ranges": {"age": {"low": 1.0, "high": 2.0}}}
+        path = tmp_path / "ranges.json"
+        path.write_text(json.dumps(artifact))
+        monkeypatch.setattr(rr, "REFERENCE_RANGES_PATH", path)
+        assert load_graph_reference_ranges() == {}
+
+    def test_loader_missing_file_returns_empty(self, tmp_path, monkeypatch):
+        import src.similarity.reference_ranges as rr
+
+        monkeypatch.setattr(rr, "REFERENCE_RANGES_PATH", tmp_path / "nope.json")
+        assert load_graph_reference_ranges() == {}
+
+
+class TestComputeGraphReferenceRanges:
+    """Fit graph-feature ranges over a real RDF graph built on the synthetic DB,
+    keyed by the request's signature (so the dynamic column name is irrelevant)."""
+
+    def test_icu_los_range_keyed_by_signature(self, rich_backend):
+        from src.similarity.graph_features import (
+            GraphFeatureRequest,
+            request_signature,
+        )
+        from src.similarity.reference_ranges import compute_graph_reference_ranges
+
+        # Dynamic, LLM-style column name — the artifact must NOT key on it.
+        req = GraphFeatureRequest(
+            column="icu_stay_hours_xyz", template="sim_icu_los", concept=None,
+        )
+        ranges = compute_graph_reference_ranges(
+            rich_backend, concepts=[], requests=[req], ontology_dir=ONTOLOGY_DIR,
+        )
+        sig = request_signature(req)
+        assert sig == "sim_icu_los|concept="
+        assert sig in ranges
+        # The dynamic column name is never a key.
+        assert "icu_stay_hours_xyz" not in ranges
+        rec = ranges[sig]
+        # ICU LOS over the synthetic stays {70, 148, 174}h → a real spread.
+        assert rec["low"] < rec["high"]
+        assert rec["n"] == 3
+
+    def test_degenerate_graph_feature_is_skipped(self, rich_backend):
+        from src.similarity.graph_features import GraphFeatureRequest
+        from src.similarity.reference_ranges import compute_graph_reference_ranges
+
+        # Single-reading synthetic labs ⇒ slope undefined ⇒ <2 finite values ⇒
+        # dropped (a zero-width range is a divide-by-zero trap for Gower).
+        req = GraphFeatureRequest(
+            column="lactate_slope", template="sim_series_by_admission",
+            concept="lactate", params={"agg": "slope", "window_hours": 48},
+        )
+        ranges = compute_graph_reference_ranges(
+            rich_backend, concepts=[], requests=[req], ontology_dir=ONTOLOGY_DIR,
+        )
+        assert ranges == {}

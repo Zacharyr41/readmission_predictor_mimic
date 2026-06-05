@@ -459,3 +459,95 @@ def test_extract_graph_features_survives_dirty_value(dirty_value_graph):
     ]
     df = extract_graph_features(dirty_value_graph, reqs)
     assert df.loc[200, "lactate_slope"] == pytest.approx(4.0 / 48.0, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Semantic signature — name-independent scale key (plan: frozen graph ranges)
+# ---------------------------------------------------------------------------
+
+
+class TestGraphFeatureSignature:
+    """The signature collapses the LLM-chosen column *name* but preserves every
+    knob that moves a feature's numeric *scale*, so a frozen population range can
+    be looked up for a dynamically-named graph trait (``lactate_slope_48h``)."""
+
+    def test_signature_is_independent_of_column_name(self):
+        from src.similarity.graph_features import request_signature
+
+        a = GraphFeatureRequest(
+            "lactate_slope_48h", "sim_series_by_admission", "lactate",
+            {"agg": "slope", "window_hours": 48},
+        )
+        b = GraphFeatureRequest(
+            "whatever_the_model_named_it", "sim_series_by_admission", "lactate",
+            {"agg": "slope", "window_hours": 48},
+        )
+        assert request_signature(a) == request_signature(b)
+
+    def test_concept_match_is_case_insensitive(self):
+        from src.similarity.graph_features import graph_feature_signature
+
+        assert (
+            graph_feature_signature("sim_series_by_admission", "Lactate", {})
+            == graph_feature_signature("sim_series_by_admission", "lactate", {})
+        )
+
+    def test_omitted_scale_param_collides_with_its_default(self):
+        from src.similarity.graph_features import graph_feature_signature
+
+        # ``agg`` defaults to "slope"; an explicit slope and an omitted agg must
+        # hash to the same scale (otherwise a frozen range built one way misses
+        # a trait specified the other way).
+        explicit = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {"agg": "slope"}
+        )
+        implicit = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {}
+        )
+        assert explicit == implicit
+
+    def test_scale_relevant_params_distinguish(self):
+        from src.similarity.graph_features import graph_feature_signature
+
+        slope = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {"agg": "slope"}
+        )
+        delta = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {"agg": "delta"}
+        )
+        win48 = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {"window_hours": 48}
+        )
+        win24 = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {"window_hours": 24}
+        )
+        assert slope != delta
+        assert win48 != win24
+
+    def test_window_hours_int_float_str_collide(self):
+        from src.similarity.graph_features import graph_feature_signature
+
+        sigs = {
+            graph_feature_signature("sim_series_by_admission", "lactate", {"window_hours": v})
+            for v in (48, 48.0, "48")
+        }
+        assert len(sigs) == 1
+
+    def test_cosmetic_param_does_not_fragment_signature(self):
+        from src.similarity.graph_features import graph_feature_signature
+
+        # A param not in the template's scale set must not change the key.
+        base = graph_feature_signature("sim_series_by_admission", "lactate", {"agg": "slope"})
+        noisy = graph_feature_signature(
+            "sim_series_by_admission", "lactate", {"agg": "slope", "label": "x"}
+        )
+        assert base == noisy
+
+    def test_concept_free_template_ignores_concept(self):
+        from src.similarity.graph_features import graph_feature_signature
+
+        # sim_icu_los is concept-free; concept is empty in the key regardless.
+        assert (
+            graph_feature_signature("sim_icu_los", None, {})
+            == "sim_icu_los|concept="
+        )
