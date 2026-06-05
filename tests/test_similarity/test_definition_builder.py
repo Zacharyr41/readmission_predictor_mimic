@@ -73,6 +73,26 @@ def _defn_json(**overrides) -> str:
     return json.dumps(base)
 
 
+def _graph_defn_json(**overrides) -> str:
+    """A definition whose single trait is a scored graph_temporal trait."""
+    base = {
+        "traits": [
+            {
+                "name": "lactate_slope_48h", "source": "graph_temporal",
+                "kind": "quantitative", "reference_value": 1.5,
+                "direction": "higher_more_similar", "weight": 2.0,
+                "template": "sim_series_by_admission", "concept": "lactate",
+                "concept_type": "biomarker",
+                "graph_params": {"agg": "slope", "window_hours": 48},
+            },
+        ],
+        "distance_threshold": 0.35,
+        "top_k": 30,
+    }
+    base.update(overrides)
+    return json.dumps(base)
+
+
 # ---------------------------------------------------------------------------
 # Feature catalog — the SQL-extractable trait vocabulary the builder may emit.
 # ---------------------------------------------------------------------------
@@ -173,19 +193,23 @@ class TestBuildDefinition:
 
     def test_graph_temporal_trait_preserved_and_not_catalog_checked(self):
         # graph_temporal trait names are graph-derived, NOT extractor columns,
-        # so they must be exempt from the catalog guard (III-A wires them).
+        # so they are exempt from the SQL catalog guard. Post-III-A they carry a
+        # feature-extractor template (validated by the graph guard instead).
         j = json.dumps({
             "traits": [{
                 "name": "lactate_slope_48h", "source": "graph_temporal",
                 "kind": "quantitative", "reference_value": 1.0,
                 "direction": "higher_more_similar", "weight": 2.0,
+                "template": "sim_series_by_admission", "concept": "lactate",
+                "graph_params": {"agg": "slope", "window_hours": 48},
             }],
         })
         client = _mock_client([j])
         defn = build_definition(client, "…worsening lactate…")
         assert defn.traits[0].source == "graph_temporal"
+        assert defn.traits[0].template == "sim_series_by_admission"
         assert defn.traits[0].direction == Direction.HIGHER_MORE_SIMILAR
-        # Only one LLM call: a graph_temporal name is not an "offender".
+        # Only one LLM call: a valid graph_temporal trait is not an "offender".
         assert client.messages.create.call_count == 1
 
 
@@ -254,3 +278,93 @@ class TestSystemPrompt:
             assert name in p
         # prefilter vocabulary (the PatientFilter fields) is surfaced too.
         assert "diagnosis" in p
+
+
+# ---------------------------------------------------------------------------
+# III-D: graph_temporal guardrails — the prompt teaches the feature-extractor
+# template vocabulary, and the builder validates/self-repairs against the live
+# registry so the non-deterministic layer stays inside the template rails.
+# ---------------------------------------------------------------------------
+
+
+class TestGraphTemporalGuardrails:
+    def test_prompt_teaches_graph_temporal_templates(self):
+        p = build_definition_system_prompt()
+        # Real template names are surfaced so the model picks an extractable one.
+        for name in ("sim_series_by_admission", "sim_dose_series",
+                     "sim_precedence_count"):
+            assert name in p
+        # The graph-trait fields are part of the structured-output contract.
+        for key in ("graph_temporal", "template", "concept", "graph_params"):
+            assert key in p
+
+    def test_graph_template_guidance_matches_registry(self):
+        # The prompt guidance must not drift from the live extractor registry:
+        # every documented template exists, and every registered template is
+        # documented.
+        from src.similarity.definition_builder import _GRAPH_TEMPLATE_GUIDANCE
+        from src.similarity.graph_features import TEMPLATES
+
+        assert set(_GRAPH_TEMPLATE_GUIDANCE) == set(TEMPLATES)
+
+    def test_valid_graph_temporal_trait_passes_in_one_call(self):
+        client = _mock_client([_graph_defn_json()])
+        defn = build_definition(client, "…worsening lactate over the first 48h…")
+        assert client.messages.create.call_count == 1
+        t = defn.traits[0]
+        assert t.source == "graph_temporal"
+        assert t.template == "sim_series_by_admission"
+        assert t.concept == "lactate"
+        assert t.direction == Direction.HIGHER_MORE_SIMILAR
+
+    def test_missing_template_triggers_corrective_retry(self):
+        bad = json.dumps({
+            "traits": [{
+                "name": "lactate_slope_48h", "source": "graph_temporal",
+                "kind": "quantitative", "reference_value": 1.5,
+                "direction": "higher_more_similar", "weight": 2.0,
+            }],
+        })
+        client = _mock_client([bad, _graph_defn_json()])
+        defn = build_definition(client, "…")
+        assert client.messages.create.call_count == 2
+        # The corrective turn names the offender + echoes the legal templates.
+        convo = json.dumps(client.messages.create.call_args_list[1].kwargs["messages"])
+        assert "lactate_slope_48h" in convo
+        assert "sim_series_by_admission" in convo
+        assert defn.traits[0].template == "sim_series_by_admission"
+
+    def test_unknown_template_triggers_corrective_retry(self):
+        bad = json.dumps({
+            "traits": [{
+                "name": "lactate_slope_48h", "source": "graph_temporal",
+                "kind": "quantitative", "reference_value": 1.5,
+                "direction": "higher_more_similar", "weight": 2.0,
+                "template": "sim_made_up", "concept": "lactate",
+            }],
+        })
+        client = _mock_client([bad, _graph_defn_json()])
+        defn = build_definition(client, "…")
+        assert client.messages.create.call_count == 2
+        assert defn.traits[0].template == "sim_series_by_admission"
+
+    def test_persistent_invalid_template_raises(self):
+        bad = json.dumps({
+            "traits": [{
+                "name": "lactate_slope_48h", "source": "graph_temporal",
+                "kind": "quantitative", "reference_value": 1.5,
+                "direction": "higher_more_similar", "template": "sim_made_up",
+            }],
+        })
+        client = _mock_client([bad, bad])
+        with pytest.raises(ValueError, match="template"):
+            build_definition(client, "…")
+
+    def test_extract_json_tolerates_backticks_in_payload(self):
+        # Same fence-anchoring fix as the decomposer: a payload value that
+        # itself contains a triple-backtick must not truncate extraction.
+        from src.similarity.definition_builder import _extract_json
+
+        payload = '{"x": "```", "y": 1}'
+        wrapped = f"```json\n{payload}\n```"
+        assert json.loads(_extract_json(wrapped)) == {"x": "```", "y": 1}
