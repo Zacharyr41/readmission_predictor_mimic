@@ -99,6 +99,15 @@ Map clinical entities to one of these concept_type values:
                      acute kidney injury, heart failure, cerebral infarction
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
                      wound culture, organism names (MRSA, E. coli, Klebsiella)
+                     IMPORTANT — culture_status: a culture is "positive" when an
+                     organism grew and "negative" / "no growth" when none did.
+                     When the user qualifies a culture this way ("positive blood
+                     culture", "negative urine culture", "blood cultures that
+                     grew an organism", "no-growth cultures"), set
+                     culture_status="positive" or "negative" on the microbiology
+                     concept. Omit it (null) when the user asks about cultures
+                     drawn/ordered regardless of result. A "positive culture" is
+                     NOT the same as "a culture was performed".
 - "outcome"       → Patient outcomes: mortality, death, hospital expire, survival
                      NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
                      and use aggregation (e.g. aggregation="mean") for LOS queries
@@ -114,7 +123,7 @@ Use this when the user's question can be answered by one structured query.
 {
   "original_question": "<verbatim user question>",
   "clinical_concepts": [
-    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>"}
+    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>", "culture_status": "<positive|negative or null; microbiology concepts only>"}
   ],
   "temporal_constraints": [
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}
@@ -370,13 +379,14 @@ Question: "How many patients had a positive blood culture?"
   "clinical_concepts": [
     {
       "name": "blood culture",
-      "concept_type": "microbiology"
+      "concept_type": "microbiology",
+      "culture_status": "positive"
     }
   ],
   "aggregation": "count",
   "return_type": "text",
   "scope": "cohort",
-  "interpretation_summary": "Count of admissions with at least one blood culture event."
+  "interpretation_summary": "Count of admissions with a positive blood culture (an organism was isolated)."
 }
 ```
 

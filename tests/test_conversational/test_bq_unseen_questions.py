@@ -1048,3 +1048,105 @@ def test_mean_lactate_during_icu_is_not_ldh_polluted(bq_pipeline_graph):
         min_groups=1,
         value_predicate=lambda v: 0.5 <= v <= 25.0,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 9 — "positive" culture status is dropped (counts cultures ordered,
+# not cultures that grew an organism) → ~4x over-count
+# --------------------------------------------------------------------------- #
+
+
+def test_positive_blood_culture_counts_only_growth(bq_pipeline):
+    """Q: "How many patients with sepsis had a positive blood culture?".
+
+    Validity: blood-culture positivity is *the* microbiology question in sepsis.
+    In MIMIC-IV ``microbiologyevents`` a culture is **positive** iff an organism
+    was isolated — ``org_name IS NOT NULL`` (a negative / no-growth culture has
+    the specimen row but a NULL ``org_name``). Over the sepsis cohort ~16.9k
+    admissions had a blood culture *drawn* but only ~3.9k *grew* something
+    (positivity ≈ 23%), so "positive" carries a real ~4.3x narrowing. Both the
+    count and the cohort are unambiguous and computable as one scalar.
+
+    Expected path: single ``microbiology`` concept + ``count`` aggregation, no
+    temporal constraint → SQL fast-path ``_compile_microbiology_aggregate``
+    (``COUNT(DISTINCT hadm_id)``).
+
+    BUG (iteration 9 — the *result-status* qualifier "positive" is silently
+    dropped, so the count is cultures **ordered**, not cultures that **grew**):
+    the decomposer collapses "positive blood culture" to a bare ``microbiology``
+    concept ``{name:"blood culture"}`` — its own few-shot example
+    (``prompt_examples/single_cq/02_blood_culture_count.json``) literally taught
+    "Count of admissions with at least one blood culture **event**". The
+    compiler then emits only ``spec_type_desc ILIKE '%blood culture%'`` with **no
+    ``org_name IS NOT NULL``** clause, so every *drawn* culture counts. Observed:
+    the pipeline answers ~16,690 ("...had a positive blood culture") when the
+    truth is ~3.9k — a confident ~4.3x over-statement, exactly the kind of wrong
+    number a clinician would catch in a demo.
+
+    Why MIMIC data can't be blamed: the positive cohort is large and real; the
+    query just never applied the positivity predicate the schema makes trivial
+    (organism isolated ⇔ positive).
+
+    FIX (general, schema-grounded, no curation): give ``ClinicalConcept`` an
+    optional ``culture_status`` ∈ {positive, negative}; teach the decomposer
+    (corrected example + prompt rule) to set it from "positive"/"negative"/"grew"
+    /"no growth" wording; and have ``_compile_microbiology_aggregate`` ground it
+    to ``m.org_name IS NOT NULL`` (positive) / ``IS NULL`` (negative). This is the
+    MIMIC definition of culture positivity, not a per-specimen synonym table, so
+    it fixes "positive urine culture", "negative sputum culture", etc. at once.
+
+    Oracle: the answer must track the **positive** ground truth (~3.9k), not the
+    **ordered** count (~16.9k). The band [0.5x .. 2.0x] of the direct positive
+    ground truth admits the true value under cohort-definition wobble while
+    unambiguously rejecting the ~4.3x ordered over-count.
+    """
+    # Ground truth, direct from BigQuery: distinct sepsis admissions with a
+    # POSITIVE blood culture (organism isolated) vs ANY blood culture drawn.
+    _SEPSIS_CTE = """
+        WITH sepsis AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^038')
+               OR d.icd_code IN ('99591','99592','78552','R652')
+        )
+    """
+    gt_positive = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT COUNT(DISTINCT m.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents` m
+        JOIN sepsis s ON m.hadm_id = s.hadm_id
+        WHERE LOWER(m.spec_type_desc) LIKE '%blood cult%'
+          AND m.org_name IS NOT NULL
+        """
+    )
+    gt_ordered = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT COUNT(DISTINCT m.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents` m
+        JOIN sepsis s ON m.hadm_id = s.hadm_id
+        WHERE LOWER(m.spec_type_desc) LIKE '%blood cult%'
+        """
+    )
+    assert gt_positive and gt_ordered, "ground-truth microbiology counts missing"
+    # The question is only discriminating if "positive" really narrows the cohort.
+    assert gt_ordered >= 3 * gt_positive, (
+        f"expected a large positive-vs-ordered gap; got positive={gt_positive} "
+        f"ordered={gt_ordered}"
+    )
+
+    answer = bq_pipeline.ask(
+        "How many patients with sepsis had a positive blood culture?"
+    )
+
+    # The count must land near the POSITIVE ground truth, NOT the ~4.3x larger
+    # ordered count. assert_valid_answer also rejects a spurious "no rows" and
+    # confirms a query executed.
+    lo, hi = 0.5 * gt_positive, 2.0 * gt_positive
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: lo <= v <= hi,
+    )

@@ -684,6 +684,16 @@ def _compile_microbiology_aggregate(
         per_name_params.extend([f"%{n}%", f"%{n}%"])
     where_clauses: list[str] = ["(" + " OR ".join(per_name_clauses) + ")"]
     params: list[Any] = list(per_name_params)
+
+    # Result-status qualifier: a culture is *positive* iff an organism was
+    # isolated (org_name IS NOT NULL); *negative* / no-growth is org_name IS
+    # NULL. Grounded in the MIMIC schema, so "positive blood culture" counts
+    # cultures that grew, not cultures merely drawn (a ~4x narrowing in sepsis).
+    if concept.culture_status == "positive":
+        where_clauses.append("m.org_name IS NOT NULL")
+    elif concept.culture_status == "negative":
+        where_clauses.append("m.org_name IS NULL")
+
     where_clauses.extend(filter_where)
     params.extend(filter_params)
 

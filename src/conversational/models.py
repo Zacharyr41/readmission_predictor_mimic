@@ -20,6 +20,14 @@ class ClinicalConcept(BaseModel):
     resolved_from_category: bool = False
     loinc_code: str | None = None
     icd_codes: list[str] | None = None
+    # Microbiology result-status qualifier. In MIMIC ``microbiologyevents`` a
+    # culture is *positive* iff an organism was isolated (``org_name IS NOT
+    # NULL``) and *negative* / no-growth otherwise (``org_name IS NULL``). The
+    # compiler grounds this to that schema predicate, so "positive blood
+    # culture" counts cultures that grew, not cultures merely drawn. ``None`` =
+    # no positivity constraint (count every matching specimen). Only meaningful
+    # for ``concept_type == "microbiology"``; ignored for other types.
+    culture_status: Literal["positive", "negative"] | None = None
 
     @field_validator("icd_codes")
     @classmethod

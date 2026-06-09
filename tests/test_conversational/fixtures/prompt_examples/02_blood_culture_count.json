@@ -1,10 +1,10 @@
 {
   "original_question": "How many patients had a positive blood culture?",
   "clinical_concepts": [
-    {"name": "blood culture", "concept_type": "microbiology"}
+    {"name": "blood culture", "concept_type": "microbiology", "culture_status": "positive"}
   ],
   "aggregation": "count",
   "return_type": "text",
   "scope": "cohort",
-  "interpretation_summary": "Count of admissions with at least one blood culture event."
+  "interpretation_summary": "Count of admissions with a positive blood culture (an organism was isolated)."
 }
