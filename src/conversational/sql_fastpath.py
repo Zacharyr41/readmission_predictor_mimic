@@ -865,10 +865,15 @@ def _compile_outcome_mortality(
     *,
     enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
-    """Mortality count — matches the SPARQL ``mortality_count`` template's
-    (``expired``, ``count``) shape. We ignore the caller's aggregation keyword
-    and always emit COUNT DISTINCT per expired flag, because that's the
-    clinically meaningful answer."""
+    """Mortality breakdown — the SPARQL ``mortality_count`` template's
+    (``expired``, ``count``) shape, enriched with each bucket's ``fraction`` of
+    the cohort. We ignore the caller's aggregation keyword and always emit
+    COUNT DISTINCT per expired flag (the clinically meaningful split), PLUS an
+    in-query proportion so a "mortality / survival RATE" question is answered
+    with an actual rate — the ``expired = 1`` row's ``fraction`` — rather than
+    leaving the division to the answerer LLM. The window ``SUM`` over the grouped
+    counts is the cohort total; ``NULLIF`` guards the (unreachable-when-any-row-
+    exists) empty-cohort divide."""
     t = backend.table
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
@@ -890,12 +895,14 @@ def _compile_outcome_mortality(
 
     sql = (
         f"SELECT a.hospital_expire_flag AS expired, "
-        f"COUNT(DISTINCT a.hadm_id) AS count "
+        f"COUNT(DISTINCT a.hadm_id) AS count, "
+        f"COUNT(DISTINCT a.hadm_id) / "
+        f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (), 0) AS fraction "
         f"FROM {t('admissions')} a {' '.join(joins)} "
         f"{where_part} "
         f"GROUP BY a.hospital_expire_flag"
     ).strip()
 
     return SqlFastpathQuery(
-        sql=sql, params=params, columns=["expired", "count"],
+        sql=sql, params=params, columns=["expired", "count", "fraction"],
     )

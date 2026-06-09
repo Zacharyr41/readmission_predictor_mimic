@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 
 pytestmark = [pytest.mark.bigquery, pytest.mark.live_llm]
 
@@ -52,10 +53,29 @@ _AGG_COLUMNS = (
 )
 
 
+def _load_demo_env() -> None:
+    """Load the repo ``.env`` so the live MCP tools (OMOPHub: ``rxnorm_lookup``,
+    ``icd_autocode``, ...) and BigQuery see their keys in ``os.environ`` —
+    exactly as the Streamlit demo does via ``app.py``'s ``load_dotenv()``.
+    Without it the production-config resolver silently degrades to LIKE-only
+    fallbacks, masking the very grounding these tests exercise.
+
+    Called from the credentials gate (i.e. only when a BigQuery test actually
+    runs), **not** at module import: pytest imports every collected module —
+    including this one when it is marker-deselected — so an import-time
+    ``load_dotenv`` would leak ``.env`` (BIGQUERY_PROJECT, ADC creds, ...) into
+    ``os.environ`` for the whole offline suite and flip env-sensitive code paths
+    in unrelated tests. Explicit repo-root path avoids ``find_dotenv`` cwd
+    ambiguity. ``override=False`` (the default) keeps a real shell env winning.
+    """
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+
 def _require_bigquery_credentials() -> None:
     """Skip cleanly when the keys / ADC needed for a live BigQuery + LLM run
     are absent, so a teammate without credentials gets a diagnostic, not a
     crash."""
+    _load_demo_env()
     if not os.environ.get("ANTHROPIC_API_KEY"):
         pytest.skip("ANTHROPIC_API_KEY not set")
     try:
@@ -219,9 +239,11 @@ def _reset_pipeline_state():
 
     cr._cached_icd_autocode.cache_clear()
     cr._cached_mimic_itemid_search.cache_clear()
+    cr._cached_rxnorm_generics.cache_clear()
     yield
     cr._cached_icd_autocode.cache_clear()
     cr._cached_mimic_itemid_search.cache_clear()
+    cr._cached_rxnorm_generics.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -521,11 +543,16 @@ def test_lasix_prescription_count_distinct_grain(bq_pipeline):
     Expected path: ``concept_type: "drug"`` + ``aggregation: "count"`` →
     SQL_FAST → ``_compile_drug_aggregate``.
 
-    What we EXPECTED to fail (brand grounding) but didn't: the decomposer LLM
-    self-substitutes the generic — it emits ``furosemide`` for "Lasix", so the
-    compiled ``pr.drug ILIKE '%furosemide%'`` finds the full cohort, not the
-    5 literal-"lasix" rows. Brand→generic is handled upstream; no fix needed
-    there.
+    Brand→generic grounding (cross-cutting with iteration 6): the decomposer
+    emits the brand or the generic *non-deterministically* (a 6-run probe gave
+    "Lasix" 5× and "furosemide" 1×). When it emits the literal brand, a naive
+    ``pr.drug ILIKE '%lasix%'`` matches only the 5 brand-labelled rows and the
+    count collapses. The iteration-6 fix grounds the brand to its RxNorm generic
+    ingredient (``ConceptResolver.resolve_drug`` → ``%lasix% OR %furosemide%``),
+    so this count is now stable on the full furosemide cohort regardless of which
+    surface form the decomposer chose. (An earlier note here that "brand→generic
+    is handled upstream; no fix needed" was wrong — it held only on the lucky run
+    where the LLM volunteered the generic.)
 
     BUG (iteration 4 — confirmed via direct pipeline probe): the drug COUNT
     branch emitted ``SELECT COUNT(*) ... FROM prescriptions pr JOIN admissions``
@@ -575,4 +602,193 @@ def test_lasix_prescription_count_distinct_grain(bq_pipeline):
         answer,
         min_groups=1,
         value_predicate=lambda v: 30_000 <= v <= 150_000,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 5 — outcome path answers a COUNT when the user asked for a RATE
+# --------------------------------------------------------------------------- #
+
+
+def _is_proportion_key(key: str) -> bool:
+    """A rendered column that holds a proportion/rate (vs. a raw count)."""
+    k = key.lower()
+    return "proportion" in k or "fraction" in k or "rate" in k
+
+
+def test_sepsis_in_hospital_mortality_rate(bq_pipeline):
+    """Q: "What is the in-hospital mortality rate for patients with sepsis".
+
+    Validity: in-hospital mortality is ``admissions.hospital_expire_flag``;
+    sepsis is codeable in ``diagnoses_icd`` (ICD-10 A40/A41, R65.2; ICD-9 038.x,
+    995.91/.92, 785.52). A cohort RATE = deaths / admissions is computable and
+    answerable as text/table. Ground truth ≈ 0.195-0.20 and robust to the exact
+    code set: narrow (A41 / 99591 / 99592) = 4,237 / 21,219 = 0.1997; broad
+    (+ A40 / 038.x / R65.2 / 785.52) = 4,316 / 22,184 = 0.1946. → ``concept_type:
+    "outcome"`` + a sepsis diagnosis filter → SQL_FAST → ``_compile_outcome_
+    mortality``.
+
+    BUG (iteration 5 — *the outcome compiler answers a COUNT when the user asked
+    for a RATE*):
+      ``_compile_outcome_mortality`` deliberately ignores ``cq.aggregation`` and
+      always emits the grouped ``(expired, COUNT(DISTINCT hadm_id))`` shape —
+      survivors and deaths as two raw counts. For "how many sepsis patients died"
+      that is correct; for "what is the mortality RATE" it is the wrong
+      *aggregate*. The structured ``data_table`` came back as
+      ``[{Expired:0, Count:17641}, {Expired:1, Count:4363}]`` — no rate anywhere.
+      The ≈0.198 the user asked for survived ONLY because the answerer LLM
+      happened to divide 4363 / 22004 in prose. That is fragile (model- and
+      phrasing-dependent, not deterministic) and invisible to every structured
+      consumer: the critic's "mortality rate ∈ [0,1]" plausibility check
+      (prompts.py:588) has no rate to range-check, and a table/visualization sees
+      counts, not a proportion. Same class as iteration 4 (a COUNT compiler
+      emitting the wrong unit) one level up — here the wrong *aggregate* (count
+      instead of rate), not merely the wrong grain.
+
+      Why MIMIC data can't be blamed: the sepsis cohort is real and large and the
+      counts are correct; the pipeline simply never computes the ratio the
+      question names.
+
+    FIX (general, deterministic, no curation): ``_compile_outcome_mortality`` now
+      also computes each outcome bucket's share of the cohort in-query —
+      ``COUNT(DISTINCT hadm_id) / NULLIF(SUM(COUNT(DISTINCT hadm_id)) OVER (), 0)
+      AS fraction`` — so the grouped shape becomes ``(expired, count, fraction)``.
+      The ``expired = 1`` row's fraction IS the mortality rate; the ``expired = 0``
+      row's is the survival rate. General across every outcome-rate question and
+      cohort (no sepsis/mortality special-case), ontology-neutral, and free (a
+      window over counts already computed — no second scan). The answerer now
+      reports a rate it is *given* rather than one it must re-derive, and the
+      critic can range-check a real proportion.
+
+    Oracle: structural, not prose. The ``data_table`` must carry a proportion
+      cell within 0.05 of the ground-truth sepsis mortality rate — NOT merely two
+      counts. This FAILS on the pre-fix counts-only shape and PASSES once the rate
+      is surfaced.
+    """
+    answer = bq_pipeline.ask(
+        "What is the in-hospital mortality rate for patients with sepsis"
+    )
+
+    # Ground-truth mortality rate over a broad sepsis cohort. Loose anchor: the
+    # pipeline's ICD grounding may differ slightly in the code set, so the
+    # assertion below allows a 0.05 band rather than exact equality.
+    gt_rate = bq_scalar(
+        """
+        SELECT SAFE_DIVIDE(
+                 COUNT(DISTINCT IF(a.hospital_expire_flag = 1, a.hadm_id, NULL)),
+                 COUNT(DISTINCT a.hadm_id))
+        FROM `physionet-data.mimiciv_3_1_hosp.admissions` a
+        JOIN `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d ON a.hadm_id = d.hadm_id
+        WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+           OR REGEXP_CONTAINS(d.icd_code, r'^038')
+           OR d.icd_code IN ('99591', '99592', '78552', 'R652')
+        """
+    )
+    assert gt_rate is not None and 0.15 <= float(gt_rate) <= 0.25, (
+        f"ground-truth sepsis mortality rate should be ~0.20, got {gt_rate!r}"
+    )
+
+    # Hard validity: real rows, a query executed, no spurious error/clarify.
+    assert_valid_answer(answer, min_groups=1)
+
+    # The crux — a STRUCTURED rate, not counts-only. Scan every leaf's table for
+    # a proportion-keyed cell in [0,1]; the survival share (≈0.80) is far from
+    # the ground-truth mortality rate (≈0.20), so the 0.05 band selects exactly
+    # the mortality proportion. Pre-fix the table has only {Expired, Count} and
+    # this assertion fails — exposing the missing-rate bug.
+    tables = [
+        leaf.data_table or [] for leaf in (answer.sub_answers or [answer])
+    ]
+    prop_cells = [
+        float(v)
+        for table in tables
+        for row in table
+        for k, v in row.items()
+        if _is_proportion_key(k)
+        and isinstance(v, (int, float))
+        and not isinstance(v, bool)
+        and 0.0 <= float(v) <= 1.0
+    ]
+    assert prop_cells, (
+        "no structured proportion/rate cell — the outcome answer carried only "
+        f"counts, leaving the rate to LLM prose: tables={tables!r}"
+    )
+    assert any(abs(p - float(gt_rate)) <= 0.05 for p in prop_cells), (
+        f"no structured proportion within 0.05 of the ground-truth sepsis "
+        f"mortality rate {gt_rate}; got {prop_cells}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 6 — brand drug name never reaches its generic in MIMIC
+# --------------------------------------------------------------------------- #
+
+
+def test_coumadin_brand_resolves_to_generic_cohort(bq_pipeline):
+    """Q: "How many patients were prescribed Coumadin".
+
+    Validity: Coumadin is the brand name for warfarin. MIMIC-IV
+    ``prescriptions`` stores the *generic*: ``warfarin`` spans 45,062 distinct
+    admissions / 20,746 distinct patients (179,937 rows), while the literal
+    brand ``coumadin`` appears on only 10 admissions. A clinician asking about
+    "Coumadin" means warfarin; the count is computable and answerable as text.
+
+    Expected path: ``concept_type: "drug"`` + ``aggregation: "count"`` →
+    SQL_FAST → ``_compile_drug_aggregate`` (``COUNT(DISTINCT a.hadm_id)``).
+
+    BUG (iteration 6 — *brand drug name never reaches its generic*): the
+    decomposer emits the surface drug term non-deterministically — sometimes the
+    brand ("Coumadin"), sometimes the generic. Concept resolution had no
+    brand→generic step: ``ConceptResolver.resolve`` falls straight through to
+    ``[concept.name]`` for a specific drug, so a "Coumadin" turn compiled
+    ``pr.drug ILIKE '%coumadin%'`` and matched **10 admissions** — a ~4,500x
+    undercount of the real 45,062 — while a "warfarin" turn answered correctly.
+    The same defect zeroes out ``Tylenol`` (0 ``%tylenol%`` rows vs 778k
+    ``%acetaminophen%``). It is a *general* brand-vs-generic mismatch: MIMIC's
+    prescription vocabulary is generic-dominant, but users (and the LLM) speak
+    in brands.
+
+    Why MIMIC data can't be blamed: the warfarin cohort is real and large; the
+    query just searched the brand string MIMIC almost never stores.
+
+    FIX (general, ontology-grounded, no curation): add
+    ``ConceptResolver.resolve_drug`` (wired in ``orchestrator`` beside the
+    existing per-concept ``resolve``), which grounds a specific drug name to its
+    RxNorm ingredient via the OMOPHub ``rxnorm_lookup`` MCP tool and *appends*
+    the generic to the OR-match name list (``%coumadin% OR %warfarin%``). The
+    ingredient is extracted from OMOPHub's SPL product records by stripping a
+    uniform set of pharmaceutical salt counter-ions and dose-form tokens (a
+    general chemistry/formulation normalization — "warfarin sodium" → "warfarin"
+    — NOT a per-drug synonym table). Result is cached + frequency-ranked for
+    determinism, and degrades to the literal name (with a visible fallback note)
+    when OMOPHub has no coverage. General across every brand whose generic
+    OMOPHub knows; the decomposer's brand-vs-generic coin flip no longer changes
+    the answer.
+
+    Oracle: the count must be the real warfarin cohort — tens of thousands
+    (20,746 patients .. 45,062 admissions) — NOT the ~10-admission brand-literal
+    collapse and NOT the 179,937-row fan-out. The band 12k..60k admits either
+    distinct grain and rejects both failure modes.
+    """
+    answer = bq_pipeline.ask("How many patients were prescribed Coumadin")
+
+    # Ground truth: the warfarin (= Coumadin generic) cohort, distinct grain.
+    gt_adm = bq_scalar(
+        """
+        SELECT COUNT(DISTINCT hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.prescriptions`
+        WHERE LOWER(drug) LIKE '%warfarin%' OR LOWER(drug) LIKE '%coumadin%'
+        """
+    )
+    assert gt_adm is not None and 35_000 < float(gt_adm) < 55_000, (
+        f"ground-truth warfarin admission count should be ~45k, got {gt_adm!r}"
+    )
+
+    # Valid answer: a distinct-cohort count on the *generic* warfarin rows, not
+    # the ~10-admission brand-literal miss and not the row fan-out. The brand
+    # must have been grounded to its generic before SQL emission.
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: 12_000 <= v <= 60_000,
     )

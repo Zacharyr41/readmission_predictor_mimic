@@ -60,6 +60,7 @@ _COLUMN_MAP: dict[str, str] = {
     "gender": "Gender",
     "type": "Event Type",
     "count": "Count",
+    "fraction": "Proportion",
     "eventType": "Event Type",
     "eventLabel": "Event",
     "label": "Label",

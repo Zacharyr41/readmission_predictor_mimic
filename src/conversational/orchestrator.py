@@ -350,6 +350,14 @@ class ConversationalPipeline:
                 per_concept: list[list[str]] = []
                 for concept in cq.clinical_concepts:
                     resolved = self._resolver.resolve(concept)
+                    # Drugs: ground brand→generic so MIMIC's generic-stored
+                    # prescription rows are matched. The decomposer emits the
+                    # brand or generic non-deterministically; appending the
+                    # RxNorm ingredient makes the fast-path count deterministic.
+                    if concept.concept_type == "drug":
+                        resolved = self._resolver.resolve_drug(
+                            concept, resolved,
+                        ).names
                     if len(resolved) > 1 or (
                         len(resolved) == 1 and resolved[0] != concept.name
                     ):

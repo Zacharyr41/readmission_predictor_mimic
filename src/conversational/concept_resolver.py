@@ -19,6 +19,7 @@ from pathlib import Path
 from src.conversational.health_evidence.tools import (
     icd_autocode,
     mimic_itemid_search,
+    rxnorm_lookup,
 )
 from src.conversational.models import ClinicalConcept
 
@@ -94,6 +95,115 @@ def _cached_icd_autocode(
     )
 
 
+# General pharmaceutical salt counter-ions and dose-form / route tokens. These
+# are *uniform chemistry / formulation vocabularies* applied to every drug —
+# NOT a per-drug synonym table. Stripping them off an SPL product name yields
+# the bare active ingredient that MIMIC's ``prescriptions.drug`` column stores:
+# MIMIC records "warfarin", not "warfarin sodium"; "furosemide", not
+# "furosemide ... tablet". (Electrolyte salts like "potassium chloride" are an
+# accepted edge case — stripping to "potassium" over-broadens — but the target
+# bug class is brand-name drugs whose generic is salt-suffixed.)
+_DRUG_SALT_TOKENS = frozenset({
+    "sodium", "disodium", "potassium", "calcium", "magnesium", "hydrochloride",
+    "hcl", "sulfate", "sulphate", "phosphate", "tartrate", "bitartrate",
+    "succinate", "maleate", "mesylate", "besylate", "fumarate", "acetate",
+    "citrate", "gluconate", "bromide", "chloride", "nitrate", "hydrobromide",
+    "dihydrochloride", "hemihydrate", "monohydrate", "hydroxide", "carbonate",
+    "bicarbonate", "oxide", "lactate", "tannate", "pamoate", "valerate",
+    "propionate", "dipropionate", "furoate", "xinafoate", "embonate",
+})
+
+_DRUG_FORM_TOKENS = frozenset({
+    "tablet", "tablets", "capsule", "capsules", "caplet", "oral", "injection",
+    "injectable", "solution", "suspension", "granule", "granules", "film",
+    "coated", "delayed", "release", "extended", "intravenous", "iv", "im",
+    "subcutaneous", "topical", "cream", "ointment", "syrup", "elixir",
+    "powder", "for", "drops", "ophthalmic", "inhalation", "spray", "patch",
+    "suppository", "sublingual", "chewable", "orally", "disintegrating",
+    "lyophilized", "concentrate", "emulsion", "lotion", "gel", "kit",
+})
+
+
+def _extract_generic_from_spl(spl_name: str) -> str | None:
+    """Extract the bare active ingredient from an OMOPHub/SPL product name.
+
+    OMOPHub's ``search_concepts`` for a drug name returns SPL (Structured
+    Product Labeling) records, not bare RxNorm Ingredient concepts — those are
+    reachable only by exact rxcui, which a name search doesn't yield. The
+    active ingredient is embedded in the product ``concept_name`` in two
+    regular FDA SPL formats::
+
+        "LASIX - furosemide tablet"                  (<brand> - <ingredient> <form>)
+        "furosemide 20mg/1 ... ORAL TABLET [lasix]"  (<ingredient> <strength> <FORM> [brand])
+
+    Both expose the ingredient as the leading alphabetic run before the first
+    strength (digit-bearing) or dose-form token. Stripping a trailing salt
+    counter-ion ("warfarin sodium" → "warfarin") yields the bare ingredient
+    MIMIC stores. Returns ``None`` when no ingredient can be isolated (e.g. a
+    bare brand record like "COUMADIN").
+    """
+    text = spl_name.strip().lower()
+    if not text:
+        return None
+    # A real SPL product record is one of the two structured formats: format A
+    # has a space-dash-space brand/ingredient separator; format B has a numeric
+    # strength. A record with NEITHER is a bare brand ("COUMADIN") carrying no
+    # extractable ingredient — bail so we don't mistake the brand for a generic.
+    if " - " not in text and not any(ch.isdigit() for ch in text):
+        return None
+    # Format A: "<brand> - <ingredient> <form>". Brand/ingredient split is a
+    # space-dash-space; take the right side. A hyphen *inside* a brand token
+    # ("delayed-release") has no surrounding spaces, so it isn't split here.
+    if " - " in text:
+        text = text.split(" - ", 1)[1]
+    # Drop a trailing bracketed brand list: "... [lasix]" / "... [zofran, ...]".
+    bracket = text.find("[")
+    if bracket != -1:
+        text = text[:bracket]
+    # Leading run of pure-alpha tokens, stopping at the first strength
+    # (digit-bearing) or dose-form / route token.
+    ingredient_tokens: list[str] = []
+    for raw in text.replace("/", " ").split():
+        tok = raw.strip(",.;()").strip()
+        if not tok:
+            continue
+        if any(ch.isdigit() for ch in tok) or tok in _DRUG_FORM_TOKENS:
+            break
+        if not tok.isalpha():
+            break
+        ingredient_tokens.append(tok)
+    # Strip trailing salt counter-ions ("warfarin sodium" → "warfarin").
+    while ingredient_tokens and ingredient_tokens[-1] in _DRUG_SALT_TOKENS:
+        ingredient_tokens.pop()
+    if not ingredient_tokens:
+        return None
+    return " ".join(ingredient_tokens)
+
+
+@lru_cache(maxsize=256)
+def _cached_rxnorm_generics(name_lower: str) -> tuple[str, ...]:
+    """Process-wide cache of generic ingredient(s) for a drug name via RxNorm.
+
+    Calls ``rxnorm_lookup`` (OMOPHub) and extracts the bare active ingredient
+    from each returned SPL product name (see ``_extract_generic_from_spl``).
+    Returns distinct ingredients ordered by frequency (consensus first) so a
+    single odd record can't dominate; ties broken alphabetically for
+    determinism. Raises ``LookupError`` on ``unavailable`` so the cache never
+    stores a transient MCP failure (mirrors ``_cached_icd_autocode``). An empty
+    tuple means the lookup succeeded but yielded no extractable ingredient
+    (OMOPHub coverage gap — observed for some brands).
+    """
+    envelope = rxnorm_lookup(name_lower, max_results=10)
+    if envelope.get("status") != "ok":
+        raise LookupError(envelope.get("error") or "rxnorm_lookup unavailable")
+    counts: dict[str, int] = {}
+    for r in envelope.get("results") or []:
+        generic = _extract_generic_from_spl(str(r.get("name") or ""))
+        if generic:
+            counts[generic] = counts.get(generic, 0) + 1
+    return tuple(sorted(counts, key=lambda g: (-counts[g], g)))
+
+
 @dataclass(frozen=True)
 class DiagnosisResolution:
     """Result of resolving a diagnosis concept to ICD codes for SQL emission.
@@ -157,6 +267,36 @@ class BiomarkerResolution:
     names: list[str]
     loinc_code: str | None
     snomed_code: str | None
+    fallback_reason: str | None
+
+
+@dataclass(frozen=True)
+class DrugResolution:
+    """Result of resolving a drug concept to MIMIC-matching name(s).
+
+    The decomposer non-deterministically emits a brand ("Lasix") or generic
+    ("furosemide") for the same drug, but MIMIC's ``prescriptions.drug`` column
+    stores the generic ingredient overwhelmingly — "furosemide" has ~447k rows
+    while "lasix" has 5. A brand-only ``ILIKE '%lasix%'`` therefore
+    catastrophically undercounts (and "tylenol" → zero rows). This resolution
+    appends the RxNorm/OMOPHub-grounded generic ingredient to ``names`` so the
+    drug compiler's OR-of-ILIKEs (``_ilike_any``) matches the populated generic
+    rows regardless of which surface form the decomposer chose — making the
+    count deterministic.
+
+    Terminal shapes mirror :class:`DiagnosisResolution`:
+
+    * **Grounded:** ``generic_names`` non-empty; ``names`` = original +
+      generics (deduped, original first). ``fallback_reason`` is ``None``.
+    * **Silent fallback:** grounding disabled, or the concept was already
+      category-expanded to concrete generic members → ``names`` unchanged,
+      ``generic_names`` ``None``, ``fallback_reason`` ``None``.
+    * **Loud fallback:** MCP unavailable, or no ingredient extractable (OMOPHub
+      coverage gap) → ``names`` unchanged, ``fallback_reason`` set.
+    """
+
+    names: list[str]
+    generic_names: list[str] | None
     fallback_reason: str | None
 
 
@@ -659,4 +799,98 @@ class ConceptResolver:
             names=names,
             fallback_reason=None,
             confidence_floor=floor,
+        )
+
+    # -- RxNorm-grounded drug brand→generic resolution ---------------------
+
+    def resolve_drug(
+        self, concept: ClinicalConcept, base_names: list[str],
+    ) -> DrugResolution:
+        """Resolve a drug concept's brand name to its generic ingredient.
+
+        ``base_names`` is the output of ``resolve(concept)`` — already
+        category-expanded when the concept was a drug *class* (e.g.
+        "antibiotics" → curated members, all generic). In that case pass
+        through unchanged: members are already generic and per-member RxNorm
+        calls would be wasteful.
+
+        For a *specific* drug (``base_names == [concept.name]``), call RxNorm
+        via OMOPHub to ground brand → generic ingredient and append it, so the
+        fast-path OR-match (``_ilike_any`` over ``pr.drug``) picks up MIMIC's
+        populated generic rows regardless of whether the decomposer emitted the
+        brand or the generic. See :class:`DrugResolution`.
+        """
+        # Category-expanded (multi-name, or a single name the resolver rewrote)
+        # → already concrete generic members; nothing to ground.
+        if len(base_names) != 1 or base_names[0] != concept.name:
+            return DrugResolution(
+                names=base_names, generic_names=None, fallback_reason=None,
+            )
+
+        if not self._enable_mcp_grounding:
+            return DrugResolution(
+                names=base_names, generic_names=None, fallback_reason=None,
+            )
+
+        return self._ground_via_rxnorm(concept.name, base_names)
+
+    def _ground_via_rxnorm(
+        self, name: str, base_names: list[str],
+    ) -> DrugResolution:
+        """Ground a specific drug name to its generic ingredient via RxNorm.
+
+        Appends any RxNorm/OMOPHub-derived generic that *differs* from the
+        literal name. Three outcomes mirror :meth:`_ground_via_icd_autocode`:
+        grounded (generic appended), silent (generic equals the literal name,
+        nothing to add), and loud fallback (MCP unavailable or no coverage).
+        """
+        try:
+            generics = _cached_rxnorm_generics(name.lower())
+        except LookupError as exc:
+            logger.info(
+                "rxnorm_lookup unavailable for %r: %s — keeping literal name",
+                name, exc,
+            )
+            return DrugResolution(
+                names=base_names,
+                generic_names=None,
+                fallback_reason=(
+                    f"RxNorm grounding for {name!r} unavailable ({exc}); "
+                    "matching the literal drug name — a brand spelling may "
+                    "undercount its generic rows."
+                ),
+            )
+
+        # Keep only generics that add information (differ from the literal name).
+        new_generics = [g for g in generics if g and g.lower() != name.lower()]
+
+        if not new_generics:
+            if not generics:
+                # OMOPHub returned no extractable ingredient (coverage gap).
+                return DrugResolution(
+                    names=base_names,
+                    generic_names=None,
+                    fallback_reason=(
+                        f"RxNorm returned no ingredient for {name!r}; matching "
+                        "the literal name — if this is a brand, its generic "
+                        "rows may be missed."
+                    ),
+                )
+            # The term was already generic (RxNorm echoed it back). No change.
+            return DrugResolution(
+                names=base_names,
+                generic_names=list(generics),
+                fallback_reason=None,
+            )
+
+        merged = list(base_names)
+        for g in new_generics:
+            if g not in merged:
+                merged.append(g)
+        logger.info(
+            "Grounded drug %r via rxnorm_lookup → generics %s (names now %s)",
+            name, new_generics, merged,
+        )
+        return DrugResolution(
+            names=merged, generic_names=new_generics, fallback_reason=None,
         )
