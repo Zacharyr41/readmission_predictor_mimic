@@ -502,3 +502,77 @@ def test_average_length_of_stay_in_heart_failure(bq_pipeline):
         min_groups=1,
         value_predicate=lambda v: 0.5 < v < 30.0,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 4 — drug cohort COUNT inflates event rows into a "patient" count
+# --------------------------------------------------------------------------- #
+
+
+def test_lasix_prescription_count_distinct_grain(bq_pipeline):
+    """Q: "How many patients were prescribed Lasix".
+
+    Validity: Lasix is the brand name for furosemide, one of the most common
+    drugs in MIMIC-IV — ``furosemide`` appears on 447,330 prescription rows
+    spanning 104,250 admissions / 54,534 distinct patients (the literal brand
+    ``lasix`` is only 5 rows). A clinician asking about "Lasix" means
+    furosemide; the count is computable and answerable as text.
+
+    Expected path: ``concept_type: "drug"`` + ``aggregation: "count"`` →
+    SQL_FAST → ``_compile_drug_aggregate``.
+
+    What we EXPECTED to fail (brand grounding) but didn't: the decomposer LLM
+    self-substitutes the generic — it emits ``furosemide`` for "Lasix", so the
+    compiled ``pr.drug ILIKE '%furosemide%'`` finds the full cohort, not the
+    5 literal-"lasix" rows. Brand→generic is handled upstream; no fix needed
+    there.
+
+    BUG (iteration 4 — confirmed via direct pipeline probe): the drug COUNT
+    branch emitted ``SELECT COUNT(*) ... FROM prescriptions pr JOIN admissions``
+    and answered **"447,325 patients were prescribed Lasix"**. That is the
+    prescription-ROW count, not a patient or admission count — it exceeds the
+    entire MIMIC-IV patient population (~364k), so it is impossible on its face.
+    A patient on a furosemide drip accrues dozens of order rows; ``COUNT(*)``
+    multiplies the cohort by that per-patient row fan-out (~8x here). The drug
+    (and microbiology) branches were the only fast-path COUNT compilers using
+    raw ``COUNT(*)``; the diagnosis (sql_fastpath.py:738) and outcome
+    (sql_fastpath.py:886) branches already used ``COUNT(DISTINCT hadm_id)``.
+
+    Why MIMIC data can't be blamed: the cohort is real and large; the query
+    simply counts the wrong unit (rows, not admissions).
+
+    FIX (general, consistency-restoring, no curation): align the drug and
+    microbiology COUNT branches to the established distinct-admission grain
+    (``COUNT(DISTINCT a.hadm_id)``), so a cohort COUNT reports admissions, not
+    event rows. General across every drug/culture term, not a Lasix special-
+    case. (A finer patient-vs-admission grain — and the fact that the answerer
+    still labels an admission count "patients" — is a separate, system-wide
+    refinement noted in the report; both diagnosis and outcome share it.)
+
+    Oracle: the count must be a plausible distinct-cohort size — tens of
+    thousands (54,534 patients .. 104,250 admissions), NOT the 447k row
+    fan-out and NOT a single-digit ungrounded miss. The band 30k..150k admits
+    either distinct grain and rejects both failure modes.
+    """
+    answer = bq_pipeline.ask("How many patients were prescribed Lasix")
+
+    # Ground-truth anchors: the furosemide cohort at two distinct grains.
+    gt_adm = bq_scalar(
+        """
+        SELECT COUNT(DISTINCT hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.prescriptions`
+        WHERE LOWER(drug) LIKE '%furosemide%' OR LOWER(drug) LIKE '%lasix%'
+        """
+    )
+    assert gt_adm is not None and 80_000 < float(gt_adm) < 130_000, (
+        f"ground-truth furosemide admission count should be ~104k, got {gt_adm!r}"
+    )
+
+    # Valid answer: a distinct-cohort count (admissions ~104k or patients ~54k),
+    # NOT the ~447k prescription-row fan-out and NOT a single-digit ungrounded
+    # miss. The drug COUNT branch must de-duplicate to a clinical unit.
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: 30_000 <= v <= 150_000,
+    )

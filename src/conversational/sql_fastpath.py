@@ -585,15 +585,20 @@ def _compile_drug_aggregate(
         )
     joins.extend(filter_joins)
 
+    # Distinct admissions, not raw prescription rows: a single admission
+    # carries many orders for the same drug (often one per administration), so
+    # COUNT(*) inflates a "how many patients/admissions" count by an order of
+    # magnitude. Mirrors the diagnosis/outcome count grain (COUNT(DISTINCT
+    # hadm_id)).
     if group_by_col is None:
-        select_cols = f"COUNT(*) AS count_value"
+        select_cols = "COUNT(DISTINCT a.hadm_id) AS count_value"
         columns = ["count_value"]
         group_by_clause = ""
     else:
         select_cols = (
             f"{group_by_col} AS group_value, "
-            f"COUNT(*) AS avg_value, "
-            f"COUNT(*) AS count"
+            f"COUNT(DISTINCT a.hadm_id) AS avg_value, "
+            f"COUNT(DISTINCT a.hadm_id) AS count"
         )
         columns = ["group_value", "avg_value", "count"]
         group_by_clause = f"GROUP BY {group_by_col}"
@@ -653,15 +658,17 @@ def _compile_microbiology_aggregate(
         )
     joins.extend(filter_joins)
 
+    # Distinct admissions, not raw culture-event rows: one admission can have
+    # many cultures matching the term. Mirrors the diagnosis/outcome grain.
     if group_by_col is None:
-        select_cols = "COUNT(*) AS count_value"
+        select_cols = "COUNT(DISTINCT a.hadm_id) AS count_value"
         columns = ["count_value"]
         group_by_clause = ""
     else:
         select_cols = (
             f"{group_by_col} AS group_value, "
-            f"COUNT(*) AS avg_value, "
-            f"COUNT(*) AS count"
+            f"COUNT(DISTINCT a.hadm_id) AS avg_value, "
+            f"COUNT(DISTINCT a.hadm_id) AS count"
         )
         columns = ["group_value", "avg_value", "count"]
         group_by_clause = f"GROUP BY {group_by_col}"
