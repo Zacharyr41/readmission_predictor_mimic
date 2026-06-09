@@ -231,7 +231,10 @@ Infer return_type from the question's intent:
 
 When scope is "comparison", set comparison_field to the dimension being compared
 (see "Supported Operations / comparison_axis" below). If not clear, default to
-"readmitted_30d".
+"readmitted_30d". EXCEPTION: when the user names an explicit numeric cutoff on a
+continuous field ("above 70 and under 70", "over 65 vs 65 or below"), do NOT use
+a continuous comparison_field — return Shape B with one filtered cohort sub-CQ
+per side (see "Numeric-threshold split" under Big-Question Decomposition).
 
 **Similarity + causal combination**: a question like "compare tPA vs no-tPA
 among patients similar to hadm 101" is causal-with-narrowing — set
@@ -280,6 +283,29 @@ section. Keep the decomposition SMALL (usually 2-4 sub-CQs) and make sure:
   - ``narrative`` explains the rationale in one sentence — why these
     particular sub-CQs answer the user's big question.
 
+A second trigger for Shape B is a **numeric-threshold split**: the question
+asks for the SAME metric on both sides of an explicit cutoff on a *continuous*
+field (age, length of stay, a lab value, …). Examples:
+
+  - "average troponin in MI patients above 70 and, separately, at/under 70"
+  - "length of stay for patients over 65 vs 65 and below"
+
+Emit ONE sub-CQ per side. Each is a ``scope: "cohort"`` aggregate carrying the
+SAME concept(s) and shared filters, PLUS a ``patient_filters`` entry on the
+threshold field: operator ``">"`` for the "above" side and ``"<="`` for the
+"at-or-below" side (mirror the user's boundary — "under and including 70" is
+``<= 70``; a strict "under 70" is ``< 70``). For example, the troponin
+question becomes two cohort CQs, each with ``clinical_concepts: ["troponin"]``,
+``aggregation: "mean"``, a diagnosis filter for myocardial infarction, and an
+age filter — ``{"field": "age", "operator": ">", "value": "70"}`` for one,
+``{"field": "age", "operator": "<=", "value": "70"}`` for the other.
+
+Do NOT answer a threshold split with ``scope: "comparison"`` +
+``comparison_field: "age"``: the comparison axes GROUP BY the raw column value,
+so every distinct age becomes its own group and the cutoff the user named is
+lost. Two filtered cohorts are the faithful structure. (Vague "older vs
+younger" with no explicit number is still a single ``comparison`` CQ.)
+
 When NOT to use Shape B:
 
   - A single direct question with one answer ("average creatinine over 65")
@@ -289,6 +315,8 @@ When NOT to use Shape B:
     decomposition in lieu of asking.
   - A comparison that fits into one CQ via ``scope: "comparison"`` and a
     ``comparison_field`` — that's already a single CQ, not a big question.
+    (An explicit numeric-threshold split is the exception above — two
+    filtered cohort sub-CQs, not a continuous ``comparison_field``.)
 
 # Self-check Before Responding
 

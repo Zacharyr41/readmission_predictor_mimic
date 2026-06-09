@@ -2869,7 +2869,9 @@ class TestPreValidatorIntegration:
             enable_pre_validator=True,
         )
         from src.conversational.orchestrator import _BigQueryBackend
-        _BigQueryBackend.return_value.execute.return_value = []
+        # Non-empty (mean_value=1.44) so the empty-biomarker label-family
+        # broadening retry does NOT fire — this test asserts a single execute.
+        _BigQueryBackend.return_value.execute.return_value = [(1.44,)]
 
         pipeline.ask("avg creatinine over 65")
 
@@ -2901,7 +2903,9 @@ class TestPreValidatorIntegration:
             enable_pre_validator=True,
         )
         from src.conversational.orchestrator import _BigQueryBackend
-        _BigQueryBackend.return_value.execute.return_value = []
+        # Non-empty so the empty-biomarker label-family broadening retry does
+        # NOT fire — this test asserts a single execute.
+        _BigQueryBackend.return_value.execute.return_value = [(1.44,)]
 
         pipeline.ask("avg creatinine over 65")
 
@@ -2973,7 +2977,9 @@ class TestPreValidatorIntegration:
             enable_pre_validator=True,  # explicitly ON; should still skip
         )
         from src.conversational.orchestrator import _DuckDBBackend
-        _DuckDBBackend.return_value.execute.return_value = []
+        # Non-empty so the empty-biomarker label-family broadening retry does
+        # NOT fire — this test asserts a single execute.
+        _DuckDBBackend.return_value.execute.return_value = [(1.44,)]
 
         pipeline.ask("avg creatinine over 65")
 
@@ -3085,7 +3091,9 @@ class TestPreValidatorRetryWithMutation:
         pipeline._client = client
 
         from src.conversational.orchestrator import _BigQueryBackend
-        _BigQueryBackend.return_value.execute.return_value = []
+        # Non-empty (columns=["x"]) so the empty-biomarker broadening retry does
+        # NOT fire — it would recompile and exhaust the 2-element side_effect.
+        _BigQueryBackend.return_value.execute.return_value = [(1.0,)]
 
         pipeline.ask("average lactate for sepsis")
 

@@ -8,6 +8,7 @@ history management.
 from __future__ import annotations
 
 import logging
+import math
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -87,6 +88,27 @@ PROGRESS_RETRYING = "Retrying with a correction…"
 ERROR_MESSAGE = (
     "An error occurred while processing your question. Please try rephrasing."
 )
+
+
+def _aggregate_has_numeric(rows: list[dict], columns: list[str]) -> bool:
+    """True when any *aggregate* cell carries a finite number.
+
+    The comparison ``group_value`` column is excluded so a numeric group key
+    (e.g. an age bucket) can't masquerade as data. A biomarker AVG/MEAN over an
+    empty match set comes back as a single all-``NULL`` row — this returns
+    ``False`` for it, which is the signal the orchestrator uses to trigger a
+    label-family broadening retry. A COUNT over an empty cohort returns ``0``
+    (a finite, valid answer), so this returns ``True`` and no retry fires.
+    """
+    agg_cols = [c for c in columns if c != "group_value"]
+    for row in rows:
+        for col in agg_cols:
+            v = row.get(col)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                return True
+    return False
 
 
 class ConversationalPipeline:
@@ -989,6 +1011,68 @@ class ConversationalPipeline:
             )
             return None, None, None
 
+    def _broaden_empty_biomarker(
+        self,
+        cq: CompetencyQuestion,
+        backend,
+        concept,
+        *,
+        resolved_names: list[str],
+        outlier_screen: "OutlierScreen | None",
+    ) -> tuple[list, "object", str] | None:
+        """Retry an empty itemid-grounded biomarker aggregate via its label family.
+
+        The decomposer may ground a generic analyte to a precise LOINC subtype
+        whose MIMIC itemids are unpopulated — e.g. generic "troponin" grounds
+        to Troponin I (itemids 51002/52642, near-empty) while the populated
+        assay is Troponin T (51003) under a different LOINC. The itemid-IN query
+        then matches no rows and the answer is a spurious "no data found".
+
+        Recovery: recompile the SAME cohort WITHOUT ``resolved_itemids`` so the
+        fast-path's existing ``d.label ILIKE '%<analyte>%'`` fallback runs. That
+        matches every sibling assay of the analyte *by label* (Troponin I AND
+        Troponin T), recovering the populated sibling. It is unit-safer than the
+        analyte's raw SNOMED family, whose code can pool unrelated assays
+        (SNOMED 105000003 mixes troponin with CK-MB and myoglobin) — the label
+        token "troponin" matches only true troponin items.
+
+        General: fires for any analyte whose chosen subtype is empty but whose
+        label family has data. Returns ``(raw_rows, query, warning)`` when
+        broadening produced data, else ``None`` (keep the original empty answer).
+        """
+        if concept is None or concept.concept_type != "biomarker":
+            return None
+        if not concept.loinc_code:
+            return None  # already on the label-LIKE path — nothing to broaden
+        biom = self._resolver.resolve_biomarker(concept)
+        if not biom.itemids:
+            return None  # the original query wasn't itemid-grounded
+        query = compile_sql(
+            cq, backend, self._registry,
+            resolved_names=resolved_names,
+            resolved_itemids=None,  # force the label-family LIKE fallback
+            resolved_icd_codes=None,
+            enable_mcp_grounding=True,
+            outlier_screen=outlier_screen,
+        )
+        raw_rows = backend.execute(query.sql, query.params)
+        agg_columns = query.outlier_agg_columns or query.columns
+        rows = [dict(zip(agg_columns, r)) for r in raw_rows]
+        if not _aggregate_has_numeric(rows, query.columns):
+            return None  # label family had no data either — keep empty answer
+        label_hint = ", ".join(resolved_names) if resolved_names else concept.name
+        warning = (
+            f"the precise assay for LOINC {concept.loinc_code} had no values "
+            f"in this cohort; broadened to the '{label_hint}' label family "
+            "(sibling assays) to find data — the result may pool assay variants."
+        )
+        logger.info(
+            "biomarker broadening: LOINC %s itemids %s empty for cohort; "
+            "retried via label family %s and recovered data",
+            concept.loinc_code, biom.itemids, resolved_names,
+        )
+        return raw_rows, query, warning
+
     def _run_sql_fastpath(
         self,
         cq: CompetencyQuestion,
@@ -1064,6 +1148,25 @@ class ConversationalPipeline:
         # so ``generate_answer`` sees the same shape as the unscreened path.
         agg_columns = query.outlier_agg_columns or query.columns
         rows = [dict(zip(agg_columns, r)) for r in raw_rows]
+
+        # Coverage repair: an itemid-grounded biomarker aggregate that came back
+        # empty/all-NULL likely grounded to an unpopulated assay subtype. Retry
+        # once against the analyte's label family so a populated sibling assay
+        # can answer instead of returning a spurious "no data found".
+        if not _aggregate_has_numeric(rows, query.columns):
+            broadened = self._broaden_empty_biomarker(
+                cq, backend, concept,
+                resolved_names=resolved_names, outlier_screen=outlier_screen,
+            )
+            if broadened is not None:
+                raw_rows, query, broaden_warning = broadened
+                agg_columns = query.outlier_agg_columns or query.columns
+                rows = [dict(zip(agg_columns, r)) for r in raw_rows]
+                fallback_warning = (
+                    f"{fallback_warning} {broaden_warning}".strip()
+                    if fallback_warning else broaden_warning
+                )
+
         clean_rows = [
             {c: r[c] for c in query.columns if c in r} for r in rows
         ]
