@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -126,15 +127,29 @@ def _leaf_answers(answer) -> list:
     return list(answer.sub_answers) if answer.sub_answers else [answer]
 
 
+def _as_finite_float(v) -> float | None:
+    """Coerce a data_table cell to a finite float, or ``None`` if it is not a
+    real number. ``Decimal`` is included deliberately: BigQuery's NUMERIC AVG
+    arrives as ``Decimal`` on the graph path (the SQL fast-path returns float),
+    and an oracle that only accepted ``int``/``float`` would mis-read a perfectly
+    valid Decimal answer as 'no numeric data'. ``bool`` is excluded (it is an
+    ``int`` subclass but never a measurement)."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float, Decimal)):
+        fv = float(v)
+        return fv if math.isfinite(fv) else None
+    return None
+
+
 def _numeric_cells(leaf) -> list[float]:
     """Every finite numeric cell in a leaf's data_table (bools excluded)."""
     out: list[float] = []
     for row in (leaf.data_table or []):
         for v in row.values():
-            if isinstance(v, bool):
-                continue
-            if isinstance(v, (int, float)) and math.isfinite(v):
-                out.append(float(v))
+            fv = _as_finite_float(v)
+            if fv is not None:
+                out.append(fv)
     return out
 
 
@@ -144,11 +159,9 @@ def _aggregate_cells(leaf) -> list[float]:
     out: list[float] = []
     for row in (leaf.data_table or []):
         for col in _AGG_COLUMNS:
-            v = row.get(col)
-            if isinstance(v, bool):
-                continue
-            if isinstance(v, (int, float)) and math.isfinite(v):
-                out.append(float(v))
+            fv = _as_finite_float(row.get(col))
+            if fv is not None:
+                out.append(fv)
     return out
 
 
@@ -920,4 +933,118 @@ def test_median_lactate_in_sepsis(bq_pipeline_graph):
     assert any(0.4 * ref <= m <= 3.0 * ref for m in medians), (
         f"graph-path median {medians} strayed from the full-cohort reference "
         f"{ref:.2f} mmol/L by more than the bounded-sampling tolerance"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 8 — graph path resolves biomarkers by label-LIKE, not LOINC
+# --------------------------------------------------------------------------- #
+
+
+def test_mean_lactate_during_icu_is_not_ldh_polluted(bq_pipeline_graph):
+    """Q: "What is the average lactate level during the ICU stay in patients
+    with sepsis".
+
+    Validity: serum lactate (LOINC-grounded itemid 50813, mmol/L) is densely
+    recorded for septic ICU patients; an average over the ICU stay is a textbook
+    sepsis-resuscitation question, computable and answerable as a single scalar.
+    The clinically real cohort mean is low single digits of mmol/L (the robust
+    full-cohort during-ICU *median* is 1.9; see ground truth below).
+
+    Expected path: ``aggregation: "mean"`` would normally compile to the SQL
+    fast-path (``AVG``), but the ``during ICU stay`` temporal constraint forces
+    the **graph path** (``planner.classify`` routes any CQ with
+    ``temporal_constraints`` to ``GRAPH`` before the aggregation check). The
+    temporal reference contains "icu", so ``extractor._temporal_sql`` *does*
+    honor it — this test deliberately isolates the biomarker-resolution defect,
+    not the temporal one.
+
+    FINDING (iteration 8 — defense-in-depth holds; the live answer is correct):
+    in **full production config the pipeline answers this correctly** — the mean
+    comes back ~3.06 mmol/L, a textbook septic-ICU lactate. That is the result
+    under test and it is in-band. Getting there exercises two layers:
+
+    1. *Latent resolution defect (confirmed, not a live wrong answer).* The graph
+       extractor never got the LOINC grounding the SQL fast-path has:
+       ``extractor._extract_biomarkers`` resolves the analyte with a raw label
+       substring — ``d.label ILIKE '%lactate%'`` — not the LOINC→itemid index
+       ``concept_resolver.resolve_biomarker`` builds. ``%lactate%`` matches *five*
+       itemids in MIMIC-IV: serum **Lactate** (50813, mmol/L, ~2) **and four
+       Lactate Dehydrogenase assays** (50954 / 51054 / 50843 / 51795, all
+       **IU/L**, mean ~500). The extractor *does* over-pull all five (direct
+       BigQuery: recent-150 sepsis during-ICU raw pooled mean ≈ 154 with ~220 LDH
+       rows vs clean ≈ 3).
+    2. *Why the answer is still right.* The LDH values (~500 IU/L) sit far outside
+       serum lactate's biological limits, so the production **outlier-screening**
+       stage strips them before the mean is taken — neutralising the
+       unit-incompatible pooling and yielding the clean 3.06. This is genuine
+       defense-in-depth: a resolution miss is caught downstream. (It would *not*
+       save a same-unit, in-range cross-specimen pool; a glucose probe showed
+       serum so dominates ``%glucose%`` that the pooled mean is statistically
+       indistinguishable — i.e. no screening-proof live wrong answer was found
+       here.)
+
+    So this test pins the **end-to-end correctness** of a valid graph-path
+    biomarker average and guards the screening safety-net: if outlier screening
+    regressed, the pooled IU/L value (tens-to-hundreds) would breach the band and
+    fail. The label-LIKE/LOINC divergence is logged as a **hardening
+    recommendation** (align the graph extractor's biomarker resolution with the
+    SQL path's ``resolve_biomarker`` LOINC→itemid grounding) — defense-in-depth,
+    not a second screen — but is *not* a live defect to "fix" against a passing
+    production-config oracle, so no speculative graph-extractor refactor is made.
+
+    Harness bug this iteration actually surfaced & fixed: the live mean arrives as
+    a BigQuery ``Decimal`` (NUMERIC AVG on the graph path; the SQL path returns
+    float). The oracle's ``_numeric_cells`` / ``_aggregate_cells`` only accepted
+    ``int``/``float`` and mis-read the valid 3.06 Decimal as "no numeric data".
+    Fixed via ``_as_finite_float`` (``Decimal`` now coerced like any real number).
+
+    Oracle: a cohort-mean serum lactate during ICU stay must sit in the
+    clinically valid band 0.5 .. 25 mmol/L — above zero, and far below the
+    LDH-polluted value (tens to low hundreds) a screening regression would
+    produce. The wide upper bound (a true mean lactate is ~2-5; 25 is already
+    incompatible with survival) accepts any real answer while unambiguously
+    rejecting IU/L pollution.
+    """
+    # Ground truth: the clean serum-lactate during-ICU median (robust to the
+    # in-itemid garbage-outlier the cohort also carries), proving the question
+    # is valid and pinning the correct order of magnitude (~1.9 mmol/L).
+    gt_clean_median = bq_scalar(
+        """
+        WITH sepsis AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^038')
+               OR d.icd_code IN ('99591','99592','78552','R652')
+        )
+        SELECT APPROX_QUANTILES(le.valuenum, 2)[OFFSET(1)]
+        FROM `physionet-data.mimiciv_3_1_hosp.labevents` le
+        JOIN sepsis s ON le.hadm_id = s.hadm_id
+        WHERE le.itemid = 50813 AND le.valuenum IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM `physionet-data.mimiciv_3_1_icu.icustays` icu
+              WHERE icu.hadm_id = le.hadm_id
+                AND le.charttime >= icu.intime AND le.charttime <= icu.outtime
+          )
+        """
+    )
+    assert gt_clean_median is not None and 1.0 <= float(gt_clean_median) <= 3.0, (
+        f"ground-truth clean lactate median should be ~1.9 mmol/L, got "
+        f"{gt_clean_median!r}"
+    )
+
+    answer = bq_pipeline_graph.ask(
+        "What is the average lactate level during the ICU stay in patients "
+        "with sepsis"
+    )
+
+    # The mean must be a plausible serum-lactate value (production returns
+    # ~3.06), NOT the IU/L LDH pooling a screening regression would let through
+    # (tens-to-hundreds). assert_valid_answer also rejects a spurious "no rows" /
+    # graph crash, reads the BigQuery Decimal, and confirms a query executed.
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: 0.5 <= v <= 25.0,
     )
