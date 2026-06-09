@@ -45,6 +45,13 @@ _BQ_PROJECT = os.environ.get("BIGQUERY_PROJECT", "mimic-485500")
 _DB_PATH = Path("data/processed/mimiciv.duckdb")
 _ONTOLOGY_DIR = Path("ontology/definition")
 
+# Cohort cap for graph-path tests: the median/percentile/temporal questions
+# build an in-memory graph from every matched admission's events, so the cohort
+# is bounded to a fixed recent sample to keep BigQuery scan + extraction time
+# (and Anthropic spend) predictable. Large enough that a robust statistic (the
+# median) lands near the full-cohort reference; small enough to run in seconds.
+_GRAPH_COHORT_CAP = 150
+
 # Aggregate columns the answerer emits (see answerer._COLUMN_MAP). The oracle
 # pulls the scalar result from these rather than guessing.
 _AGG_COLUMNS = (
@@ -230,6 +237,36 @@ def bq_pipeline():
     )
 
 
+@pytest.fixture(scope="module")
+def bq_pipeline_graph():
+    """Live ``ConversationalPipeline`` against BigQuery in full production
+    config, but with a **bounded cohort** for the graph DB path.
+
+    Graph-path questions (median/percentile, temporal, raw time-series) build an
+    in-memory clinical graph from the matched cohort's events. On the full MIMIC
+    cohort that is unbounded scan + extraction time, so this variant injects an
+    ``ExtractionConfig(max_admissions=...)`` to cap the cohort to a fixed recent
+    sample (``cohort_strategy="recent"`` → ``ORDER BY admittime DESC LIMIT N``),
+    holding cost/latency down while still exercising the real extraction →
+    graph-build → SPARQL → answer path the demo runs."""
+    _require_bigquery_credentials()
+    from src.conversational.models import ExtractionConfig
+    from src.conversational.orchestrator import ConversationalPipeline
+
+    return ConversationalPipeline(
+        db_path=_DB_PATH,
+        ontology_dir=_ONTOLOGY_DIR,
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        data_source="bigquery",
+        bigquery_project=_BQ_PROJECT,
+        enable_critic=True,
+        enable_pre_validator=True,
+        enable_disambiguation=True,
+        enable_outlier_screening=True,
+        extraction_config=ExtractionConfig(max_admissions=_GRAPH_COHORT_CAP),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_pipeline_state():
     """Keep each turn independent: clear conversation history and the
@@ -248,11 +285,11 @@ def _reset_pipeline_state():
 
 @pytest.fixture(autouse=True)
 def _clear_history(request):
-    """Clear the module-scoped pipeline's history before each test that uses
-    it, so prior turns don't leak into decomposition."""
-    if "bq_pipeline" in request.fixturenames:
-        pipe = request.getfixturevalue("bq_pipeline")
-        pipe.conversation_history.clear()
+    """Clear the module-scoped pipelines' history before each test that uses
+    one, so prior turns don't leak into decomposition."""
+    for name in ("bq_pipeline", "bq_pipeline_graph"):
+        if name in request.fixturenames:
+            request.getfixturevalue(name).conversation_history.clear()
     yield
 
 
@@ -791,4 +828,96 @@ def test_coumadin_brand_resolves_to_generic_cohort(bq_pipeline):
         answer,
         min_groups=1,
         value_predicate=lambda v: 12_000 <= v <= 60_000,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 7 — graph DB path (median routes off the SQL fast-path)
+# --------------------------------------------------------------------------- #
+
+
+def test_median_lactate_in_sepsis(bq_pipeline_graph):
+    """Q: "What is the median lactate level in patients with sepsis".
+
+    First coverage of the **graph DB path** (iterations 1-6 all stayed on the
+    SQL fast-path). The planner routes any aggregate whose ``sql_fn is None`` to
+    the graph path, and ``median`` is exactly that case
+    (``operations_aggregates.py`` — there is no portable SQL median across
+    DuckDB/BigQuery, so the pipeline materializes the cohort's lactate readings
+    into an in-memory clinical graph and computes the quantile in Python via a
+    SPARQL extraction). This question therefore exercises the *entire* graph
+    stack the demo relies on — cohort extraction → graph build → SPARQL value
+    pull → percentile answer — which the SQL-path tests never touch.
+
+    Validity: sepsis is a large MIMIC-IV cohort (~22,184 admissions by the broad
+    ICD set ``^A4[01] | ^038 | {99591,99592,78552,R652}``), of which 16,661 carry
+    a serum lactate (itemid 50813, reported in mmol/L); the full-cohort median is
+    1.9 mmol/L. The quantity is computable and answerable as a single scalar, so
+    a spurious "no data" or a crash here would be a real graph-path bug.
+
+    Bounded cohort: ``bq_pipeline_graph`` injects
+    ``ExtractionConfig(max_admissions=150)`` so the graph is built from a fixed
+    recent slice rather than all 22k admissions — bounding scan/extraction
+    cost. The median is a robust statistic, so a recent 150-admission sample
+    still lands in the clinically valid band (observed 2.3 mmol/L) near the
+    full-cohort 1.9.
+
+    Oracle (hybrid):
+      - structural — ``assert_valid_answer`` (no error, real rows, a finite
+        number, and a query actually executed, i.e. the graph path produced a
+        SPARQL/extraction record), so a spurious "no rows" or graph crash fails;
+      - plausibility — the median lactate must sit in the clinically valid band
+        0.8 .. 6.0 mmol/L: above a near-zero (which would betray a units divide
+        or a mis-read count) and below a mean-vs-median or mg/dL-scale blowup;
+      - ground truth — the direct full-cohort median (~1.9 mmol/L, computed
+        below) must be real and in mmol/L range, and the pipeline's bounded
+        answer must fall within a generous multiplicative factor of it, catching
+        any scale error the absolute band might miss.
+
+    Status: PASSES on first authoring — the graph path handles this correctly.
+    Recorded as positive coverage that the median/graph route is robust for a
+    standard cohort-aggregate question (not every iteration must surface a bug;
+    the loop also banks validated paths).
+    """
+    # Ground truth: full-cohort sepsis lactate median, direct from BigQuery.
+    # Mirrors the validity probe's broad sepsis ICD set; itemid 50813 = lactate.
+    gt_median = bq_scalar(
+        """
+        WITH sepsis AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^038')
+               OR d.icd_code IN ('99591','99592','78552','R652')
+        )
+        SELECT APPROX_QUANTILES(le.valuenum, 2)[OFFSET(1)]
+        FROM `physionet-data.mimiciv_3_1_hosp.labevents` le
+        JOIN sepsis s ON le.hadm_id = s.hadm_id
+        WHERE le.itemid = 50813 AND le.valuenum IS NOT NULL
+        """
+    )
+    assert gt_median is not None and 1.0 <= float(gt_median) <= 3.0, (
+        f"ground-truth sepsis lactate median should be ~1.9 mmol/L, got "
+        f"{gt_median!r}"
+    )
+
+    answer = bq_pipeline_graph.ask(
+        "What is the median lactate level in patients with sepsis"
+    )
+
+    # Structural + absolute-plausibility band (clinically valid median lactate).
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: 0.8 <= v <= 6.0,
+    )
+
+    # Ground-truth cross-check: the bounded-cohort median must track the
+    # full-cohort reference within a generous factor (recent-slice sampling
+    # moves a robust statistic only a little; a scale bug would move it a lot).
+    ref = float(gt_median)
+    medians = _aggregate_cells(answer) or _numeric_cells(answer)
+    assert any(0.4 * ref <= m <= 3.0 * ref for m in medians), (
+        f"graph-path median {medians} strayed from the full-cohort reference "
+        f"{ref:.2f} mmol/L by more than the bounded-sampling tolerance"
     )
