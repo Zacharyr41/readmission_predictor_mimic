@@ -321,3 +321,97 @@ def test_troponin_in_mi_patients_by_age(bq_pipeline):
         min_groups=2,
         value_predicate=lambda v: 0 < v < max(upper, 50.0),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 2 — vital-sign aggregate pools mixed-unit chartevents items
+# --------------------------------------------------------------------------- #
+
+
+def _plausible_body_temp(v: float) -> bool:
+    """A coherent single-unit body temperature: plausible in Celsius
+    (35-42 °C) OR in Fahrenheit (95-108 °F). A Celsius/Fahrenheit *pooled*
+    average lands in the dead zone between the two bands (~43-94) and so fails
+    both — that is exactly the unit-pooling signature this test screens for."""
+    return (35.0 <= v <= 42.0) or (95.0 <= v <= 108.0)
+
+
+def test_average_body_temperature_in_pneumonia(bq_pipeline):
+    """Q: "What is the average body temperature of patients diagnosed with
+    pneumonia".
+
+    Validity: body temperature is charted in MIMIC-IV ``mimiciv_3_1_icu.
+    chartevents`` and pneumonia is codeable in ``diagnoses_icd`` (ICD-9 480-486,
+    ICD-10 J12-J18); a cohort average of a vital is computable and answerable as
+    text/table. → SQL fast-path, vital aggregate (``concept_type: "vital"`` →
+    ``chartevents`` JOIN ``d_items``).
+
+    BUG (iteration 2, as actually observed) — *a blocked supplementary
+    outlier-rows query aborts the whole vital answer*:
+      The decomposer correctly routes temperature to the vital fast-path
+      (``chartevents`` JOIN ``d_items``) and the MAIN screened aggregate runs
+      fine. But ``_build_outlier_report`` (orchestrator.py ~1249) then issues a
+      SECOND, companion query — ``outlier_rows_sql`` — to fetch the individual
+      rows the biological-possibility screen removed. Over the ~330M-row
+      ``chartevents`` table that companion query must full-scan ≈14.31 GiB,
+      which the per-query cost validator (``_BigQueryBackend.execute`` →
+      ``ValidatorBlockedQueryError``, extractor.py ~295) BLOCKS. That exception
+      propagated uncaught and the orchestrator replaced the (already-computed)
+      answer with the generic "please rephrase" error. General class: ANY vital
+      aggregate (heart rate, temperature, BP, …) over the large ``chartevents``
+      table trips this — the supplementary outlier-rows fetch is unbounded and a
+      block/failure in it sinks the entire answer, contradicting the backend's
+      own design intent (``blocked_queries`` is meant to surface a *warning*,
+      not crash; extractor.py ~279-281).
+
+      Secondary observation (a DISTINCT bug, deferred to a later iteration):
+      vitals are never itemid-grounded (no ``resolve_vital``; orchestrator
+      ~1127-1135), so the fast-path falls to ``d.label ILIKE '%temperature%'``
+      (sql_fastpath.py ~389), which pools ``Temperature Fahrenheit`` (223761,
+      n≈2.05M, 98.7 °F) with ``Temperature Celsius`` (223762, n≈395k, 37.1 °C).
+      Here the screen's derived [10,47] °C envelope incidentally de-pools by
+      discarding every °F reading as "impossible," so the recovered mean (≈37
+      °C) is plausible — but it is biased to the Celsius minority and mislabels
+      ~2M valid °F readings. That representativeness/unit-coherence bug is
+      screened-off here and pursued under its own oracle separately.
+
+    FIX (iteration 2 — graceful degradation, general to all vitals):
+      Wrap the ``outlier_rows`` fetch in ``_build_outlier_report`` so a cost
+      block (or any failure) of that supplementary query logs a warning and
+      returns the outlier report WITHOUT per-row samples instead of raising —
+      the main aggregate answer (which already carries n_removed / n_total /
+      bounds) survives. No bytes are billed: the validator blocks on the
+      dry-run estimate before execution. Verified: the question now returns a
+      plausible body temperature (≈37 °C after the screen) instead of an error.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average body temperature of patients diagnosed with "
+        "pneumonia"
+    )
+
+    # Ground-truth: the clean, single-unit Fahrenheit average (itemid 223761,
+    # the dominant temperature item) over the same pneumonia cohort. This is the
+    # valid answer's neighborhood; the buggy pooled value (≈85) is nowhere near
+    # it and fails the plausibility band below.
+    gt_f = bq_scalar(
+        """
+        SELECT AVG(c.valuenum)
+        FROM `physionet-data.mimiciv_3_1_icu.chartevents` c
+        JOIN `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d ON c.hadm_id = d.hadm_id
+        WHERE c.itemid = 223761 AND c.valuenum IS NOT NULL
+          AND (REGEXP_CONTAINS(d.icd_code, r'^J1[2-8]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^48[0-6]'))
+        """
+    )
+    assert gt_f is not None and 95.0 <= float(gt_f) <= 108.0, (
+        f"ground-truth Fahrenheit temp should be a plausible fever-ish "
+        f"body temp, got {gt_f!r}"
+    )
+
+    # Valid answer: a coherent single-unit body temperature (≈98-99 °F or
+    # ≈37 °C). A C/F-pooled ≈85 fails _plausible_body_temp → exposes the bug.
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=_plausible_body_temp,
+    )

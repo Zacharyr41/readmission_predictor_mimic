@@ -1246,10 +1246,26 @@ class ConversationalPipeline:
 
         removed_rows: list[dict] = []
         if query.outlier_rows_sql:
-            raw = backend.execute(query.outlier_rows_sql, query.outlier_rows_params)
-            removed_rows = [
-                dict(zip(query.outlier_rows_columns, r)) for r in raw
-            ]
+            try:
+                raw = backend.execute(
+                    query.outlier_rows_sql, query.outlier_rows_params
+                )
+                removed_rows = [
+                    dict(zip(query.outlier_rows_columns, r)) for r in raw
+                ]
+            except Exception as exc:  # noqa: BLE001
+                # The per-row outlier SAMPLES are a supplementary display
+                # detail; n_removed / n_total / bounds were already computed by
+                # the main aggregate that ran successfully. A failure here must
+                # not sink the whole answer — most notably the cost validator
+                # blocking the full-table scan this companion query needs over
+                # the very large chartevents table for a vital aggregate.
+                # Degrade to a report carrying counts + bounds but no samples.
+                logger.warning(
+                    "outlier-rows fetch failed (%s); returning the outlier "
+                    "report without per-row samples", exc,
+                )
+                removed_rows = []
 
         # Precompute the unscreened (with-outliers) view by swapping each
         # answerer-facing column for its ``*_with_outliers`` companion (and,
