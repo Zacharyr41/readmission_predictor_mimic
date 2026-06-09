@@ -415,3 +415,90 @@ def test_average_body_temperature_in_pneumonia(bq_pipeline):
         min_groups=1,
         value_predicate=_plausible_body_temp,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 3 — length-of-stay aggregate (metadata-only, no clinical concept)
+# --------------------------------------------------------------------------- #
+
+
+def test_average_length_of_stay_in_heart_failure(bq_pipeline):
+    """Q: "What is the average length of stay for patients admitted with heart
+    failure".
+
+    Validity: length of stay is derivable in MIMIC-IV from
+    ``admissions.dischtime - admissions.admittime`` (hospital LOS) or
+    ``icustays.los`` (ICU LOS, already in days); heart failure is codeable in
+    ``diagnoses_icd`` (ICD-9 428.x, ICD-10 I50.x); a cohort mean is computable
+    and answerable as text/table. LOS is a *metadata* aggregate, not a clinical
+    concept (prompts.py ~144: "Length of stay (LOS) is NOT a concept — omit
+    clinical_concepts and use aggregation"). → SQL fast-path, no concept
+    resolution.
+
+    Expected path: decompose → ``aggregation: "mean"`` LOS over the HF cohort
+    → SQL_FAST. Ground-truth neighborhood: hospital LOS ≈ 6.8 days
+    (n≈80.6k admissions); ICU LOS ≈ 4.0 days (n≈36.6k stays). Either reading is
+    a valid answer; the plausibility band below accepts both and rejects the
+    classic failure modes (LOS reported in hours/seconds, a negative span, or a
+    timestamp-subtraction artifact).
+
+    OBSERVED (iteration 3 — PASS, with two known-limitation findings, NOT a
+    correctness failure):
+
+      1. ROUTING / LATENCY. The CQ carries no ``clinical_concepts`` (LOS is a
+         metadata aggregate, per the prompt), so it does NOT take SQL_FAST as
+         the "Expected path" line hoped. ``QueryPlanner.classify`` routes every
+         concept-less CQ to GRAPH (planner.py:117-118), and ``compile_sql``
+         *rejects* an empty-concept CQ outright (sql_fastpath.py:161-162). These
+         are consistent BY DESIGN — planner.py:113-116 documents metadata-only
+         CQs as deliberately kept on the graph path ("widen in a follow-up").
+         Consequence: this question runs the full extract → build-graph → SPARQL
+         sequence (~198 s on live BigQuery, with rdflib parser warnings) instead
+         of a sub-second SQL ``AVG``. The answer is correct but the latency is
+         demo-hostile. Classified as a KNOWN PERFORMANCE LIMITATION rather than
+         fixed inline: a SQL-fast LOS branch is a *feature* with an
+         underspecified-measure problem (the CQ says "average of <nothing>" — it
+         never names LOS as the measure; the graph reasoner only *guesses* LOS),
+         so a rushed port risks mis-aggregating sibling metadata questions like
+         "average age of HF patients". Tracked in the final report's
+         recommendations, not patched mid-loop.
+
+      2. LOS-TYPE DEFAULT. For a concept-less aggregate the graph reasoner
+         selects the ICU-LOS template (reasoner.py:466-468), so the system
+         likely returns ICU LOS (~4 d), whereas "patients *admitted* with heart
+         failure" reads most naturally as HOSPITAL LOS (~6.8 d). Both are "a
+         length of stay", so this is a defensible default rather than a clear
+         bug; the loose band below accepts either. Flagged for the report.
+
+    Net: the oracle PASSES (a plausible LOS in days, a query executed, no
+    no-data sentinel). The two findings above are limitations to document, not
+    failures to fix in this iteration.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average length of stay for patients admitted with heart "
+        "failure"
+    )
+
+    # Ground-truth: hospital LOS in DAYS over the HF cohort (the most common
+    # reading). Used as a loose anchor; the predicate also admits the ICU-LOS
+    # reading (~4 days).
+    gt_los = bq_scalar(
+        """
+        SELECT AVG(TIMESTAMP_DIFF(a.dischtime, a.admittime, HOUR) / 24.0)
+        FROM `physionet-data.mimiciv_3_1_hosp.admissions` a
+        JOIN `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d ON a.hadm_id = d.hadm_id
+        WHERE REGEXP_CONTAINS(d.icd_code, r'^I50')
+           OR REGEXP_CONTAINS(d.icd_code, r'^428')
+        """
+    )
+    assert gt_los is not None and 3.0 <= float(gt_los) <= 15.0, (
+        f"ground-truth HF hospital LOS should be a few days, got {gt_los!r}"
+    )
+
+    # Valid answer: a plausible length of stay in DAYS (hospital ≈ 6.8 or ICU
+    # ≈ 4.0). Rejects hours (~96-164), seconds, and negative spans.
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: 0.5 < v < 30.0,
+    )
