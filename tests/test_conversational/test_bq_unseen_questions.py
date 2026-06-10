@@ -2237,3 +2237,142 @@ def test_guardrail_declines_calendar_date_filter(bq_pipeline):
     """
     answer = bq_pipeline.ask("How many patients were admitted in 2017?")
     assert_graceful_decline(answer)
+
+
+# --------------------------------------------------------------------------- #
+# Iterations 24–27 — NEURO + HEPATOLOGY coverage batch (UChicago demo audience:
+# neurocritical care — ICH/SAH; and liver failure). Untested shapes:
+# biomarker-MEAN-in-a-cohort (MELD components) and outcome-in-a-NON-registry
+# cohort. These exercise the iter18-21 diagnosis grounding through the *filter*
+# and *biomarker* paths, on cohorts the suite never used.
+# --------------------------------------------------------------------------- #
+
+
+def test_subarachnoid_hemorrhage_count(bq_pipeline):
+    """Q (battery/UChicago neuro): "How many patients were diagnosed with a
+    subarachnoid hemorrhage?".
+
+    Validity: SAH is a neurocritical-care headline cohort (Goldenberg/Mansour).
+    The decomposer grounds it precisely to ICD-10 ``I60`` (nontraumatic SAH,
+    1,576 admissions with ICD-9 430), but the question is *unqualified* —
+    "subarachnoid hemorrhage" without "nontraumatic" — and the title-LIKE
+    fallback (OR-ed with the I60 prefix) also catches *traumatic* SAH whose ICD
+    title likewise reads "… subarachnoid hemorrhage". So the pipeline reasonably
+    counts ALL documented SAH: ``I60`` prefix ∪ title "subarachnoid hemorrhage"
+    = 4,033 admissions. Both readings are clinically defensible; the test grounds
+    the broad cohort the pipeline actually scopes. → SQL fast-path diagnosis count.
+
+    Oracle: count near the all-documented-SAH ground truth (band [0.5x .. 1.8x]);
+    rejects a 0-row grounding miss while admitting the nontraumatic-vs-all
+    interpretation spread.
+    """
+    gt = bq_scalar(
+        """
+        SELECT COUNT(DISTINCT di.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` di
+        JOIN `physionet-data.mimiciv_3_1_hosp.d_icd_diagnoses` dd
+          ON di.icd_code = dd.icd_code AND di.icd_version = dd.icd_version
+        WHERE di.icd_code LIKE 'I60%'
+           OR LOWER(dd.long_title) LIKE '%subarachnoid hemorrhage%'
+        """
+    )
+    assert gt and gt > 1000, f"expected a real SAH cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many patients were diagnosed with a subarachnoid hemorrhage?"
+    )
+    lo, hi = 0.5 * gt, 1.8 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_mean_bilirubin_in_cirrhosis(bq_pipeline):
+    """Q (battery Q48): "What is the average bilirubin for patients with
+    cirrhosis?".
+
+    Validity: total bilirubin is a MELD component and is markedly elevated in
+    cirrhosis — over the cirrhosis cohort the serum total bilirubin (itemid
+    50885, LOINC 1975-2) mean is 6.17 mg/dL (normal < 1.2). Cirrhosis is NOT in
+    the curated cohort registry, so this also exercises the *diagnosis-filter*
+    grounding for a non-registry condition (icd_autocode → ``K74`` + title-LIKE),
+    which the iter18-21 prefix-match fix repaired. Expected path: biomarker mean
+    + a cirrhosis diagnosis filter → SQL fast-path.
+
+    Oracle: the mean must be a real, elevated-but-physiologic serum bilirubin in
+    [1.0 .. 20.0] mg/dL — above a near-zero "no data" and below an impossible
+    pooled/garbage value. A grounding miss would empty the cohort → "no rows".
+    """
+    answer = bq_pipeline.ask(
+        "What is the average bilirubin for patients with cirrhosis?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 1.0 <= v <= 20.0
+    )
+
+
+def test_mean_inr_in_cirrhosis(bq_pipeline):
+    """Q (battery Q48): "What is the average INR for patients with cirrhosis?".
+
+    Validity: INR is a MELD component, elevated in cirrhotic coagulopathy — the
+    cohort mean (itemid 51237, LOINC 6301-6) is 1.84 (normal ~1.0). Same
+    non-registry cirrhosis filter as the bilirubin test, different LOINC-grounded
+    biomarker. → SQL fast-path biomarker mean + cirrhosis filter.
+
+    Oracle: a real, mildly-elevated INR in [1.0 .. 6.0] — rejects a near-zero
+    "no data" and an impossible value.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average INR for patients with cirrhosis?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 1.0 <= v <= 6.0
+    )
+
+
+def test_intracerebral_hemorrhage_mortality(bq_pipeline):
+    """Q (battery Q8 / UChicago neuro): "What is the in-hospital mortality rate
+    for patients with an intracerebral hemorrhage?".
+
+    Validity: ICH (ICD-10 ``I61*``, ICD-9 ``431``) is a severe neurocritical-care
+    cohort with high in-hospital mortality — 0.2065 over 4,320 admissions. This
+    pins the outcome-rate path (iter5/iter17) on a NON-registry neuro cohort: the
+    ICH diagnosis filter grounds (title contains "intracerebral hemorrhage";
+    icd_autocode is empty for it, so title-LIKE + the decomposer carry it), and
+    ``_compile_outcome_rate`` returns the mortality fraction. Expected path:
+    outcome concept + ICH filter → SQL fast-path.
+
+    Oracle: a structured mortality proportion within 0.08 of the ground truth
+    (~0.21) — a real rate, not a count, and not the all-cohort ~0.10.
+    """
+    gt_rate = bq_scalar(
+        """
+        WITH ich AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^I61')
+               OR REGEXP_CONTAINS(d.icd_code, r'^431')
+        )
+        SELECT SAFE_DIVIDE(
+                 COUNT(DISTINCT IF(a.hospital_expire_flag = 1, a.hadm_id, NULL)),
+                 COUNT(DISTINCT a.hadm_id))
+        FROM `physionet-data.mimiciv_3_1_hosp.admissions` a
+        JOIN ich ON a.hadm_id = ich.hadm_id
+        """
+    )
+    assert gt_rate is not None and 0.10 <= float(gt_rate) <= 0.35, (
+        f"ground-truth ICH mortality should be ~0.21, got {gt_rate!r}"
+    )
+    answer = bq_pipeline.ask(
+        "What is the in-hospital mortality rate for patients with an "
+        "intracerebral hemorrhage?"
+    )
+    assert_valid_answer(answer, min_groups=1)
+    prop_cells = _proportion_cells_in_unit_interval(answer)
+    assert prop_cells, (
+        "no structured proportion cell — ICH mortality fell back to a count: "
+        f"table={answer.data_table!r} summary={answer.text_summary!r}"
+    )
+    assert any(abs(p - float(gt_rate)) <= 0.08 for p in prop_cells), (
+        f"no proportion within 0.08 of the ICH mortality ground truth "
+        f"{gt_rate}; got {prop_cells}"
+    )
