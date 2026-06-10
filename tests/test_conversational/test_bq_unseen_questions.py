@@ -2155,3 +2155,85 @@ def test_dka_count(bq_pipeline):
     assert_valid_answer(
         answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iterations 22–23 — GUARDRAILS (user demo battery Q54, Q55). The opposite of the
+# other tests: a question that MIMIC genuinely cannot answer as asked must yield
+# a graceful DECLINE (a clarifying question / explicit can't-answer), NOT a
+# confidently fabricated number. These lock in honest refusal so a future change
+# can't silently start answering the unanswerable.
+# --------------------------------------------------------------------------- #
+
+
+_DECLINE_MARKERS = (
+    "cannot", "can't", "could not", "couldn't", "unable", "don't support",
+    "doesn't support", "not support", "isn't supported", "not supported",
+    "de-identified", "deidentified", "shifted", "not available", "no way to",
+    "not possible", "can not",
+)
+
+
+def assert_graceful_decline(answer, *, expect_keyword: str | None = None) -> None:
+    """A guardrail question must DECLINE — a ``clarifying_question`` or an
+    explicit can't-answer summary — never a confident number with a data table.
+    ``expect_keyword`` optionally pins that the decline names the unanswerable
+    dimension (e.g. "physician", "year")."""
+    assert answer is not None and answer.error is False, (
+        f"guardrail should decline gracefully, not error: {answer!r}"
+    )
+    blob = ((answer.clarifying_question or "") + " "
+            + (answer.text_summary or "")).lower()
+    declined = (
+        answer.clarifying_question is not None
+        or any(m in blob for m in _DECLINE_MARKERS)
+    )
+    assert declined, (
+        "expected a graceful decline of an unanswerable question, got a "
+        f"confident answer: summary={answer.text_summary!r} "
+        f"table={answer.data_table!r}"
+    )
+    if expect_keyword is not None:
+        assert expect_keyword.lower() in blob, (
+            f"decline should name the unanswerable dimension {expect_keyword!r}: "
+            f"{blob!r}"
+        )
+
+
+def test_guardrail_declines_physician_ranking(bq_pipeline):
+    """Q (battery Q55): "Which individual attending physician had the lowest
+    sepsis mortality?".
+
+    Guardrail: MIMIC-IV de-identifies/hashes provider identifiers and the schema
+    exposes no attending-physician grouping axis, so ranking *individual*
+    physicians is genuinely unanswerable. The honest behavior — and the one the
+    demo wants to show — is to DECLINE and offer a supported alternative (overall
+    sepsis mortality, or a grouping like admission type / age / sex), NOT to
+    fabricate a per-physician leaderboard.
+
+    Status: PASSES — the decomposer recognizes the unsupported grouping and emits
+    a clarifying_question ("the system cannot group results by individual
+    attending physicians …"). This test pins that refusal so a regression can't
+    silently start inventing physician rankings.
+    """
+    answer = bq_pipeline.ask(
+        "Which individual attending physician had the lowest sepsis mortality?"
+    )
+    assert_graceful_decline(answer, expect_keyword="physician")
+
+
+def test_guardrail_declines_calendar_date_filter(bq_pipeline):
+    """Q (battery Q54 family): "How many patients were admitted in 2017?".
+
+    Guardrail: MIMIC-IV admission dates are de-identified and shifted *per
+    patient* into a 100+ year future window, so a specific calendar year/month is
+    meaningless — relative intervals are preserved, absolute dates are not. A
+    count "in 2017" therefore cannot be answered as asked; silently dropping the
+    year and returning the all-time total would be a confident wrong answer.
+
+    Status: PASSES — the decomposer declines ("the system doesn't currently
+    support filtering by admission year …") rather than fabricating a
+    year-specific count. This pins that honest refusal.
+    """
+    answer = bq_pipeline.ask("How many patients were admitted in 2017?")
+    assert_graceful_decline(answer)
