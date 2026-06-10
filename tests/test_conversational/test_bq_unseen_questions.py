@@ -1400,3 +1400,109 @@ def test_creatinine_gender_comparison_keeps_loinc_grounding(bq_pipeline):
         f"[0.7, 3.5] — urine/24-hr pooling (LOINC grounding dropped on the "
         f"comparison path?): {means!r}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 12 — a MAX aggregate on the SQL fast-path must apply biological-limit
+# outlier screening, or a single garbage data-entry value (lactate = 1,276,103)
+# is reported verbatim as "the highest lactate"
+# --------------------------------------------------------------------------- #
+
+
+def _max_value_cells(answer) -> list[float]:
+    """The ``Max Value`` cells of an answer (excludes the ``Count`` column a
+    screened aggregate also emits, which carries the row count, not the max)."""
+    out: list[float] = []
+    for leaf in _leaf_answers(answer):
+        for row in (leaf.data_table or []):
+            fv = _as_finite_float(row.get("Max Value"))
+            if fv is not None:
+                out.append(fv)
+    return out
+
+
+def test_max_lactate_in_sepsis_is_outlier_screened(bq_pipeline):
+    """Q: "What is the highest lactate level recorded in patients with sepsis?".
+
+    Validity: peak lactate is a standard severity read-out in sepsis, and a MAX
+    over ``labevents`` is directly computable. The catch that makes this a
+    discriminating probe: MIMIC's lactate column carries at least one gross
+    data-entry artifact — over the sepsis cohort the raw ``MAX(valuenum)`` is
+    **1,276,103 mmol/L**, a physically impossible value (lactate is incompatible
+    with life much above ~30). The real distribution is ordinary: median 1.9,
+    99th pct 15.0, 99.9th pct 21.7 mmol/L. So the *correct* "highest lactate" is
+    a few tens of mmol/L; the raw maximum is six orders of magnitude larger.
+
+    MAX is the aggregation most sensitive to a single outlier — a mean or median
+    barely moves, but MAX returns the artifact verbatim. The pipeline ships a
+    biological-limit outlier screen (``data/ontology_cache/biological_limits.json``
+    bounds lactate to 0..40 mmol/L) wired into ``_compile_event_aggregate`` as a
+    ``CASE WHEN`` guard that screens AVG/MAX/MIN/COUNT alike. This iteration pins
+    that the screen actually fires for a MAX on the SQL fast-path (and that it
+    resolves for lactate despite the prompt grounding lactate to LOINC 32693-4
+    while the limit entry is keyed to LOINC 2524-7 with a "lactate" alias).
+
+    Expected path: single biomarker concept + ``max`` aggregation + sepsis
+    filter, no temporal constraint → SQL fast-path ``_compile_event_aggregate``
+    with an ``OutlierScreen``.
+
+    Oracle: the reported maximum must be a physiologically possible lactate —
+    band [4 .. 60] mmol/L. A sepsis cohort's true peak lactate sits in the tens
+    (≥ the 99.9th pct of 21.7, comfortably > 4); 60 is already past the survivable
+    ceiling yet rejects the 1.27e6 artifact by five orders of magnitude. If the
+    screen fails to fire (or doesn't resolve for lactate), MAX returns ~1.27e6
+    and blows through the band.
+    """
+    _SEPSIS_CTE = """
+        WITH sepsis AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^038')
+               OR d.icd_code IN ('99591','99592','78552','R652')
+        )
+    """
+    gt_raw_max = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT MAX(l.valuenum)
+        FROM `physionet-data.mimiciv_3_1_hosp.labevents` l
+        JOIN sepsis s ON l.hadm_id = s.hadm_id
+        WHERE l.itemid = 50813 AND l.valuenum IS NOT NULL
+        """
+    )
+    gt_p999 = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT APPROX_QUANTILES(l.valuenum, 1000)[OFFSET(999)]
+        FROM `physionet-data.mimiciv_3_1_hosp.labevents` l
+        JOIN sepsis s ON l.hadm_id = s.hadm_id
+        WHERE l.itemid = 50813 AND l.valuenum IS NOT NULL
+        """
+    )
+    # The probe is only meaningful if (a) a gross artifact exists for MAX to
+    # latch onto, and (b) the real high-end is in the tens, well inside the band.
+    assert gt_raw_max and float(gt_raw_max) > 1000.0, (
+        f"expected a gross lactate artifact in the cohort; raw MAX={gt_raw_max}"
+    )
+    assert gt_p999 and 4.0 <= float(gt_p999) <= 60.0, (
+        f"expected the 99.9th-pct lactate in the valid band; got {gt_p999}"
+    )
+
+    answer = bq_pipeline.ask(
+        "What is the highest lactate level recorded in patients with sepsis?"
+    )
+
+    # Basic validity (no error / clarify, non-empty summary, a query ran).
+    assert_valid_answer(answer, min_groups=1)
+
+    # The discriminating check: the reported maximum is a possible lactate, not
+    # the 1.27e6 artifact an unscreened MAX would surface.
+    maxes = _max_value_cells(answer)
+    assert maxes, (
+        f"no Max Value cell found (spurious 'no rows'?): table={answer.data_table!r}"
+    )
+    assert all(4.0 <= v <= 60.0 for v in maxes), (
+        f"reported max lactate outside the physiologic band [4, 60] mmol/L — "
+        f"outlier screen did not fire on the SQL fast-path MAX? got {maxes!r}"
+    )
