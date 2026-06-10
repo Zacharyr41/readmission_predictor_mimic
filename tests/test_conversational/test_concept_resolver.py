@@ -517,6 +517,8 @@ class TestGroundViaIcdAutocode:
         from src.conversational import concept_resolver as cr
         # Clear the lru_cache so cross-test pollution doesn't bite.
         cr._cached_icd_autocode.cache_clear()
+        # No real backoff sleeps when the retry path fires in these tests.
+        monkeypatch.setattr(cr, "_ICD_AUTOCODE_RETRY_BACKOFF", 0.0, raising=False)
         return ConceptResolver(
             mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=True,
         )
@@ -619,20 +621,24 @@ class TestGroundViaIcdAutocode:
     def test_does_not_cache_unavailable(
         self, grounded_resolver, monkeypatch,
     ):
-        """Negative results (unavailable) must not be cached — transient
-        OMOPHub failures shouldn't poison the cache for the rest of the
-        process. Implemented via sentinel-raise pattern: cached function
-        raises LookupError on unavailable, outer wrapper catches and
-        returns None."""
+        """A *persistent* failure must not be cached — transient OMOPHub
+        failures shouldn't poison the cache for the rest of the process.
+        Implemented via sentinel-raise: the cached function raises LookupError
+        once its bounded retries are exhausted, so nothing is memoized and a
+        later call hits the MCP again. (A *single* transient miss is instead
+        absorbed by the retry — see ``TestIcdAutocodeRetryResilience``.)"""
         from src.conversational import concept_resolver as cr
 
+        # Exhaust the first resolve's whole retry budget so it falls back,
+        # then succeed — proving the failure was never cached.
+        max_attempts = cr._ICD_AUTOCODE_MAX_ATTEMPTS
         call_count = [0]
-        responses = [
-            {"status": "unavailable", "error": "transient"},
-            {"status": "ok", "results": [
+        responses = (
+            [{"status": "unavailable", "error": "transient"}] * max_attempts
+            + [{"status": "ok", "results": [
                 {"code": "A41.9", "title": "Sepsis", "confidence": 0.9},
-            ]},
-        ]
+            ]}]
+        )
         def fake_autocode(text, **kwargs):
             call_count[0] += 1
             return responses[min(call_count[0] - 1, len(responses) - 1)]
@@ -641,9 +647,10 @@ class TestGroundViaIcdAutocode:
         concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
         first = grounded_resolver.resolve_diagnosis(concept)
         second = grounded_resolver.resolve_diagnosis(concept)
-        assert first.icd_codes is None  # unavailable → fallback
-        assert second.icd_codes == ["A41.9"]  # second call hits MCP again
-        assert call_count[0] == 2
+        assert first.icd_codes is None  # retries exhausted → fallback
+        assert second.icd_codes == ["A41.9"]  # not cached → hits MCP again
+        # max_attempts failed tries on the first resolve + 1 success on the second.
+        assert call_count[0] == max_attempts + 1
 
     def test_caches_keyed_by_lowercased_name(
         self, grounded_resolver, monkeypatch,
@@ -666,6 +673,124 @@ class TestGroundViaIcdAutocode:
         grounded_resolver.resolve_diagnosis(a)
         grounded_resolver.resolve_diagnosis(b)
         assert call_count[0] == 1
+
+
+class TestIcdAutocodeRetryResilience:
+    """``icd_autocode`` grounding must survive a *transient* MCP hiccup.
+
+    Bug reproduced here: under cumulative full-suite load the OMOPHub
+    ``icd_autocode`` MCP intermittently returns ``unavailable`` (or a transient
+    empty result). The old code called the tool exactly once, so a single miss
+    fell straight through to the title-LIKE fallback — which is empty for
+    colloquial terms ("diabetic ketoacidosis" matches 0 MIMIC ``long_title``
+    rows, since they read "diabetes mellitus *with* ketoacidosis"). The result
+    was an empty cohort and a spurious "no data" answer for DKA / cirrhosis
+    biomarker questions, intermittently.
+
+    Fix: ``_cached_icd_autocode`` retries on a transient/empty result (bounded,
+    with backoff) and never caches a failed lookup — so a single hiccup is
+    absorbed and grounding still succeeds.
+
+    These tests inject the transient deterministically (mock ``icd_autocode``
+    to miss then succeed), so they fail RELIABLY without the retry and pass with
+    it — no dependence on real MCP load.
+    """
+
+    @pytest.fixture
+    def grounded_resolver(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        cr._cached_icd_autocode.cache_clear()
+        # No real backoff sleeps in tests (constant added by the fix; tolerate
+        # its absence so this also runs pre-fix to prove the failure).
+        monkeypatch.setattr(cr, "_ICD_AUTOCODE_RETRY_BACKOFF", 0.0, raising=False)
+        return ConceptResolver(mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=True)
+
+    @staticmethod
+    def _sequenced_autocode(responses, calls):
+        def fake_autocode(text, **kwargs):
+            calls[0] += 1
+            return responses[min(calls[0] - 1, len(responses) - 1)]
+        return fake_autocode
+
+    def test_retries_transient_unavailable_then_succeeds(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """One transient ``unavailable`` is retried; grounding still succeeds.
+
+        Pre-fix (single call, no retry): the lone ``unavailable`` falls back →
+        ``icd_codes is None`` → this assertion FAILS. That is the bug."""
+        from src.conversational import concept_resolver as cr
+        calls = [0]
+        responses = [
+            {"status": "unavailable", "error": "transient MCP timeout"},
+            {"status": "ok", "results": [
+                {"code": "E11.1", "title": "T2DM with ketoacidosis", "confidence": 0.9},
+            ]},
+        ]
+        monkeypatch.setattr(
+            cr, "icd_autocode", self._sequenced_autocode(responses, calls),
+            raising=False,
+        )
+        concept = ClinicalConcept(
+            name="diabetic ketoacidosis", concept_type="diagnosis",
+        )
+        result = grounded_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes == ["E11.1"], (
+            "transient MCP failure was not retried — grounding fell back "
+            f"(icd_codes={result.icd_codes!r})"
+        )
+        assert calls[0] >= 2, "expected a retry after the transient failure"
+
+    def test_retries_transient_empty_result_then_succeeds(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """A transient ``status=ok`` but empty result is retried, not accepted.
+
+        Pre-fix: the empty result is taken as final (cached as ``()``) →
+        fallback → ``icd_codes is None`` → FAILS."""
+        from src.conversational import concept_resolver as cr
+        calls = [0]
+        responses = [
+            {"status": "ok", "results": []},  # transient empty
+            {"status": "ok", "results": [
+                {"code": "K74.6", "title": "Cirrhosis of liver", "confidence": 0.88},
+            ]},
+        ]
+        monkeypatch.setattr(
+            cr, "icd_autocode", self._sequenced_autocode(responses, calls),
+            raising=False,
+        )
+        concept = ClinicalConcept(name="cirrhosis", concept_type="diagnosis")
+        result = grounded_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes == ["K74.6"], (
+            "transient empty result was not retried — grounding fell back "
+            f"(icd_codes={result.icd_codes!r})"
+        )
+        assert calls[0] >= 2, "expected a retry after the transient empty result"
+
+    def test_persistent_failure_falls_back_after_bounded_retries(
+        self, grounded_resolver, monkeypatch,
+    ):
+        """A *persistent* failure still falls back (no infinite loop), and the
+        retry count is bounded by ``_ICD_AUTOCODE_MAX_ATTEMPTS``.
+
+        Pre-fix: only 1 attempt is made, so ``calls[0] == MAX`` FAILS (MAX>1)."""
+        from src.conversational import concept_resolver as cr
+        calls = [0]
+        responses = [{"status": "unavailable", "error": "OMOPHub down"}]
+        monkeypatch.setattr(
+            cr, "icd_autocode", self._sequenced_autocode(responses, calls),
+            raising=False,
+        )
+        concept = ClinicalConcept(name="sepsis", concept_type="diagnosis")
+        result = grounded_resolver.resolve_diagnosis(concept)
+        assert result.icd_codes is None, "persistent failure should fall back"
+        assert result.fallback_reason is not None
+        max_attempts = getattr(cr, "_ICD_AUTOCODE_MAX_ATTEMPTS", 3)
+        assert max_attempts > 1, "retry budget must allow at least one retry"
+        assert calls[0] == max_attempts, (
+            f"expected exactly {max_attempts} bounded attempts, got {calls[0]}"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -67,6 +68,17 @@ def _cached_mimic_itemid_search(
     return tuple(out)
 
 
+# Retry budget for transient ``icd_autocode`` MCP misses. Under cumulative
+# load the OMOPHub tool intermittently returns ``unavailable`` (status != "ok")
+# or a transient empty result; a single miss used to fall straight through to
+# the (often empty) title-LIKE fallback, yielding spurious "no data" answers
+# for non-registry cohorts (e.g. DKA, cirrhosis). We retry a bounded number of
+# times with linear backoff before giving up. Module-level so tests can set the
+# backoff to 0 (monkeypatch) to avoid real sleeps.
+_ICD_AUTOCODE_MAX_ATTEMPTS = 3
+_ICD_AUTOCODE_RETRY_BACKOFF = 0.5  # seconds; multiplied by the attempt number
+
+
 @lru_cache(maxsize=256)
 def _cached_icd_autocode(
     text_lower: str, version: str,
@@ -77,22 +89,45 @@ def _cached_icd_autocode(
     the same MCP call. Returns a tuple of ``(code, confidence)`` pairs
     so the cache stores hashable values.
 
-    **Negative-result bypass:** when the underlying tool returns
-    ``unavailable``, this function raises ``LookupError`` so the cache
-    never stores the failure. Transient OMOPHub failures shouldn't
-    poison the cache for the rest of the process. The outer
-    ``_ground_via_icd_autocode`` catches LookupError and falls back.
+    **Transient resilience:** the underlying OMOPHub tool intermittently
+    returns ``unavailable`` (status != "ok") or a transient empty result under
+    load. We retry up to ``_ICD_AUTOCODE_MAX_ATTEMPTS`` times with linear
+    backoff, treating both an error status and an empty code list as a
+    retryable miss.
+
+    **Negative-result bypass:** if every attempt fails or comes back empty,
+    this raises ``LookupError`` so the cache never stores the failure —
+    a transient OMOPHub miss shouldn't poison the cache for the rest of the
+    process, and the outer ``_ground_via_icd_autocode`` catches LookupError
+    and falls back. Only a non-empty success is cached.
     """
-    envelope = icd_autocode(text_lower, version=version, max_results=_ICD_MAX_RESULTS)
-    if envelope.get("status") != "ok":
-        # Sentinel-raise: never cache negative results.
-        raise LookupError(envelope.get("error") or "icd_autocode unavailable")
-    results = envelope.get("results") or []
-    return tuple(
-        (str(r.get("code", "")), r.get("confidence"))
-        for r in results
-        if r.get("code")
-    )
+    last_error: str | None = None
+    for attempt in range(_ICD_AUTOCODE_MAX_ATTEMPTS):
+        envelope = icd_autocode(
+            text_lower, version=version, max_results=_ICD_MAX_RESULTS,
+        )
+        if envelope.get("status") == "ok":
+            results = envelope.get("results") or []
+            codes = tuple(
+                (str(r.get("code", "")), r.get("confidence"))
+                for r in results
+                if r.get("code")
+            )
+            if codes:
+                return codes  # success — cached by lru_cache
+            last_error = "icd_autocode returned no codes"
+        else:
+            last_error = envelope.get("error") or "icd_autocode unavailable"
+        # Transient miss/empty: back off and retry (no sleep after the last
+        # attempt, and none when the backoff is disabled e.g. in tests).
+        if attempt + 1 < _ICD_AUTOCODE_MAX_ATTEMPTS and _ICD_AUTOCODE_RETRY_BACKOFF:
+            time.sleep(_ICD_AUTOCODE_RETRY_BACKOFF * (attempt + 1))
+            logger.info(
+                "icd_autocode transient miss for %r (attempt %d/%d): %s — retrying",
+                text_lower, attempt + 1, _ICD_AUTOCODE_MAX_ATTEMPTS, last_error,
+            )
+    # Sentinel-raise: never cache a failed/empty lookup.
+    raise LookupError(last_error or "icd_autocode unavailable")
 
 
 # General pharmaceutical salt counter-ions and dose-form / route tokens. These
