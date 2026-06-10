@@ -60,6 +60,15 @@ Map clinical entities to one of these concept_type values:
                      Use attributes to specify specimen type when relevant:
                      e.g. attributes=["blood"] for serum labs, ["urine"] for urine labs
 
+                     IMPORTANT — concept ``name`` is the GENERAL analyte the user
+                     named ("troponin", "creatinine"), NOT a specific assay subtype
+                     ("troponin I", "troponin T"). Put the subtype precision in
+                     ``loinc_code``, never in the name. Leaking the subtype into the
+                     name ("troponin I") breaks the label-family fallback: if that
+                     subtype's MIMIC itemids are unpopulated, the system can no
+                     longer recover the populated sibling assay ("Troponin T") by
+                     matching the general "troponin" label.
+
                      IMPORTANT — LOINC grounding: when the lab has a clear LOINC
                      code, populate ``loinc_code``. This restricts the query to
                      that LOINC's specific MIMIC labitems and avoids pooling
