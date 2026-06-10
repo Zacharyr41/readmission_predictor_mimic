@@ -1804,3 +1804,98 @@ def test_warfarin_count_in_atrial_fibrillation(bq_pipeline):
         min_groups=1,
         value_predicate=lambda v: lo <= v <= hi,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 16 — the readmission comparison axis (the project's core signal):
+# a biomarker mean split by 30-day readmission must join the readmission-labels
+# CTE AND keep LOINC grounding per group. Cohort: heart failure (non-sepsis).
+# --------------------------------------------------------------------------- #
+
+
+def test_creatinine_by_30d_readmission_in_heart_failure(bq_pipeline):
+    """Q: "Compare the average creatinine between heart-failure patients who were
+    readmitted within 30 days and those who were not.".
+
+    Validity: 30-day readmission is THE label this whole project predicts, so a
+    biomarker split by it is the canonical analytic question. ``readmitted_30d``
+    is a registered ``comparison_axis`` whose ``sql_group_by`` is ``rl.``-prefixed
+    — it requires JOINing the on-the-fly readmission-labels CTE
+    (``LEAD(admittime) OVER (PARTITION BY subject_id ORDER BY admittime) <=
+    dischtime + 30d``), a different join than the gender axis in iteration 11.
+    Over the HF cohort the clean serum-creatinine (itemid 50912) mean is 1.83
+    mg/dL for the not-readmitted group and 1.98 for the readmitted (sicker)
+    group — both ordinary, with a small, clinically sensible gap. Expected path:
+    single biomarker concept + ``comparison_field="readmitted_30d"`` + an HF
+    filter → SQL fast-path grouped aggregate.
+
+    Two things are pinned at once: (1) the readmission-labels CTE is joined for a
+    *comparison axis* (not just a filter), so the grouped query is valid and each
+    bucket is real; and (2) LOINC grounding survives this grouped path too — a
+    LIKE-on-label match would pool serum + urine + 24-hr creatinine to ~5.4
+    mg/dL per group (the iteration-8 pollution signature), which the clean band
+    rejects. Checking EVERY group (not ``any``) is the point.
+
+    Oracle: both readmission groups must report a clean serum-creatinine mean in
+    the clinically valid band [0.7 .. 3.5] mg/dL. A grouped query that failed to
+    join ``rl`` would error or return no rows; one that dropped LOINC grounding
+    would balloon past 3.5.
+    """
+    _RL_HF_CTE = """
+        WITH rl AS (
+            SELECT hadm_id,
+                CASE WHEN LEAD(admittime) OVER (
+                         PARTITION BY subject_id ORDER BY admittime
+                     ) <= DATETIME_ADD(dischtime, INTERVAL 30 DAY)
+                     THEN 1 ELSE 0 END AS readmitted_30d
+            FROM `physionet-data.mimiciv_3_1_hosp.admissions`
+        ),
+        hf AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^I50')
+               OR REGEXP_CONTAINS(d.icd_code, r'^428')
+        )
+    """
+
+    def _readmit_serum_mean(flag: int) -> float:
+        assert flag in (0, 1)
+        return bq_scalar(
+            _RL_HF_CTE
+            + f"""
+            SELECT AVG(l.valuenum)
+            FROM `physionet-data.mimiciv_3_1_hosp.labevents` l
+            JOIN hf ON l.hadm_id = hf.hadm_id
+            JOIN rl ON l.hadm_id = rl.hadm_id
+            WHERE l.itemid = 50912 AND l.valuenum IS NOT NULL
+              AND rl.readmitted_30d = {flag}
+            """
+        )
+
+    gt_not = _readmit_serum_mean(0)
+    gt_readmit = _readmit_serum_mean(1)
+    assert gt_not and gt_readmit, "ground-truth readmission creatinine means missing"
+    assert 0.7 <= float(gt_not) <= 3.5 and 0.7 <= float(gt_readmit) <= 3.5, (
+        f"clean serum means should sit in band; got not={gt_not} readmit={gt_readmit}"
+    )
+
+    answer = bq_pipeline.ask(
+        "Compare the average creatinine between heart-failure patients who were "
+        "readmitted within 30 days and those who were not."
+    )
+
+    # Basic validity (no error / clarify, a query ran — so the rl JOIN succeeded).
+    assert_valid_answer(answer, min_groups=1)
+
+    # Two readmission groups, EACH a clean serum-creatinine mean (LOINC grounding
+    # held per group across the readmission-labels join).
+    means = _group_mean_cells(answer)
+    assert len(means) >= 2, (
+        f"expected a mean for each readmission group, got {means!r}; "
+        f"table={answer.data_table!r} "
+        f"subs={[s.data_table for s in (answer.sub_answers or [])]!r}"
+    )
+    assert all(0.7 <= v <= 3.5 for v in means), (
+        f"a readmission-group creatinine mean is outside the clean serum band "
+        f"[0.7, 3.5] — urine/24-hr pooling (LOINC grounding dropped?): {means!r}"
+    )
