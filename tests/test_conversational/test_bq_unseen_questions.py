@@ -1724,3 +1724,83 @@ def test_mortality_comparison_by_gender_splits_by_axis(bq_pipeline):
     assert abs(by_sex["F"] - float(gt_f)) <= 0.02, (
         f"female HF mortality {by_sex['F']} far from ground truth {gt_f}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 15 — drug-exposure COUNT in a cohort (warfarin among atrial-
+# fibrillation admissions): a distinct-admission count that must survive both
+# brand/generic drug strings and the prescription-row-inflation trap. Cohort:
+# atrial fibrillation (non-sepsis, per the diversify preference).
+# --------------------------------------------------------------------------- #
+
+
+def test_warfarin_count_in_atrial_fibrillation(bq_pipeline):
+    """Q: "How many patients with atrial fibrillation were prescribed warfarin?".
+
+    Validity: warfarin for stroke prevention is the textbook AF therapy. In
+    MIMIC-IV ``prescriptions`` the drug appears under several strings — 'Warfarin',
+    'warfarin', 'warfarin (Coumadin) Brand Name', '*NF* Warfarin' — all caught by
+    a ``drug ILIKE '%warfarin%'`` match, and atrial fibrillation is codeable
+    (ICD-10 I48.x, ICD-9 427.31). Over the AF cohort 27,278 distinct admissions
+    had a warfarin order — a large, unambiguous cohort. Expected path: single
+    ``drug`` concept + ``count`` + an AF diagnosis filter → SQL fast-path
+    ``COUNT(DISTINCT hadm_id)``.
+
+    This iteration probes two regressions at once on a fresh cohort: (1) the
+    iteration-4 grain — warfarin is dosed daily, so a naive ``COUNT(*)`` over
+    ``prescriptions`` rows would massively over-count vs distinct admissions; and
+    (2) iteration-6 brand/generic — the count must not depend on the decomposer
+    emitting the exact MIMIC casing/brand. Both are exercised here against an AF
+    cohort the prior drug tests never used.
+
+    Oracle: the count must track the distinct-admission ground truth (~27,278),
+    inside [0.5x .. 1.5x]. That band rejects a 0 (drug string never matched) and
+    the row-inflated count (daily warfarin orders → hundreds of thousands of
+    rows, far above 1.5x).
+    """
+    _AF_CTE = """
+        WITH af AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^I48')
+               OR d.icd_code = '42731'
+        )
+    """
+    gt_warfarin = bq_scalar(
+        _AF_CTE
+        + """
+        SELECT COUNT(DISTINCT pr.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.prescriptions` pr
+        JOIN af ON pr.hadm_id = af.hadm_id
+        WHERE LOWER(pr.drug) LIKE '%warfarin%'
+        """
+    )
+    gt_rows = bq_scalar(
+        _AF_CTE
+        + """
+        SELECT COUNT(*)
+        FROM `physionet-data.mimiciv_3_1_hosp.prescriptions` pr
+        JOIN af ON pr.hadm_id = af.hadm_id
+        WHERE LOWER(pr.drug) LIKE '%warfarin%'
+        """
+    )
+    assert gt_warfarin and gt_warfarin > 1000, (
+        f"expected a large warfarin-in-AF cohort; got {gt_warfarin}"
+    )
+    # The grain trap is only meaningful if rows >> distinct admissions.
+    assert gt_rows >= 3 * gt_warfarin, (
+        f"expected daily-dosing row inflation; distinct={gt_warfarin} rows={gt_rows}"
+    )
+
+    answer = bq_pipeline.ask(
+        "How many patients with atrial fibrillation were prescribed warfarin?"
+    )
+
+    # Track the distinct-admission count (~27k), NOT 0 and NOT the row-inflated
+    # count (hundreds of thousands of daily orders).
+    lo, hi = 0.5 * gt_warfarin, 1.5 * gt_warfarin
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: lo <= v <= hi,
+    )
