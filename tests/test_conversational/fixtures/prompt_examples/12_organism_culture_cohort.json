@@ -1,0 +1,13 @@
+{
+  "original_question": "How many patients with pneumonia had a blood culture that grew Klebsiella pneumoniae?",
+  "clinical_concepts": [
+    {"name": "blood culture", "concept_type": "microbiology", "attributes": ["Klebsiella pneumoniae"], "culture_status": "positive"}
+  ],
+  "patient_filters": [
+    {"field": "diagnosis", "operator": "contains", "value": "pneumonia"}
+  ],
+  "aggregation": "count",
+  "return_type": "text",
+  "scope": "cohort",
+  "interpretation_summary": "Count of pneumonia admissions whose blood culture grew Klebsiella pneumoniae (the organism was isolated). The specimen (blood culture) and the organism (its scientific binomial) are one microbiology concept so both constrain the result; the cohort is a patient_filter."
+}

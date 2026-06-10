@@ -240,6 +240,83 @@ def _run_fastpath(backend, cq) -> list[dict]:
     return [dict(zip(q.columns, r)) for r in rows]
 
 
+class TestMicrobiologyOrganismQualifier:
+    """A microbiology concept that names BOTH a specimen and an organism must
+    AND the two — the answer is the *intersection* (a blood culture that grew
+    *this* organism), not the union of "any blood culture" and "any isolate of
+    the organism".
+
+    iter10 bug: ``_compile_microbiology_aggregate`` read only the concept
+    ``name`` (OR-matched against spec_type_desc/org_name) and silently dropped
+    ``attributes``, where the decomposer carries the second culture dimension.
+    So "blood culture that grew E. coli" counted *every* positive blood culture
+    (organism ignored — a ~7x over-count in sepsis), and a question whose
+    organism never matched ``org_name`` collapsed to zero. The fix conjoins
+    each attribute term as an additional ``(spec_type_desc OR org_name)`` ILIKE
+    clause, each term still matched against either column because the decomposer
+    may place specimen or organism in either slot.
+
+    Synthetic fixture: hadm 101 = BLOOD CULTURE / STAPHYLOCOCCUS AUREUS,
+    hadm 103 = URINE / ESCHERICHIA COLI — so a blood culture grew S. aureus but
+    *no* blood culture grew E. coli (E. coli is in urine only).
+    """
+
+    @staticmethod
+    def _micro_cq(*, name, attributes, culture_status="positive"):
+        return CompetencyQuestion(
+            original_question="test",
+            clinical_concepts=[ClinicalConcept(
+                name=name,
+                concept_type="microbiology",
+                attributes=list(attributes),
+                culture_status=culture_status,
+            )],
+            aggregation="count",
+            scope="cohort",
+            return_type="text",
+        )
+
+    @staticmethod
+    def _count(backend, cq):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        q = compile_sql(cq, backend, get_default_registry())
+        rows = backend.execute(q.sql, q.params)
+        return rows[0][0]
+
+    def test_specimen_alone_counts_every_positive_blood_culture(self, backend):
+        # No organism qualifier → every positive blood culture (hadm 101).
+        cq = self._micro_cq(name="blood culture", attributes=[])
+        assert self._count(backend, cq) == 1
+
+    def test_specimen_and_matching_organism_intersect(self, backend):
+        # blood AND staph aureus → hadm 101 (the one blood culture that grew it).
+        cq = self._micro_cq(
+            name="blood culture", attributes=["Staphylococcus aureus"])
+        assert self._count(backend, cq) == 1
+
+    def test_specimen_and_nonmatching_organism_is_empty(self, backend):
+        # E. coli grew only in URINE here, so a *blood* culture growing E. coli
+        # matches nothing. Pre-fix (attributes dropped) this wrongly returned 1
+        # (the blood culture, organism ignored) — the core iter10 over-count.
+        cq = self._micro_cq(
+            name="blood culture", attributes=["Escherichia coli"])
+        assert self._count(backend, cq) == 0
+
+    def test_organism_as_name_specimen_as_attribute_is_symmetric(self, backend):
+        # The decomposer may place organism in ``name`` and specimen in
+        # ``attributes``; each term is matched against either column, so the
+        # intersection is identical regardless of slot assignment.
+        assert self._count(
+            backend, self._micro_cq(name="Escherichia coli", attributes=["urine"])
+        ) == 1
+        assert self._count(
+            backend,
+            self._micro_cq(name="Escherichia coli", attributes=["blood culture"]),
+        ) == 0
+
+
 class TestBiomarkerAggregateCorrectness:
     """Against synthetic_duckdb_with_events the biomarker AVG/MAX/MIN/COUNT
     for creatinine should match what a straight DuckDB query against the

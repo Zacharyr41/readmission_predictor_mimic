@@ -685,6 +685,28 @@ def _compile_microbiology_aggregate(
     where_clauses: list[str] = ["(" + " OR ".join(per_name_clauses) + ")"]
     params: list[Any] = list(per_name_params)
 
+    # Qualifier attributes narrow the SAME culture, so they *AND* with the
+    # name match. A microbiology question often names two dimensions — a
+    # specimen and an organism ("blood culture that grew E. coli") — and the
+    # decomposer puts one in ``name`` and the other in ``attributes``. Each
+    # term is still matched against *either* column (spec_type_desc OR
+    # org_name) because the decomposer may place specimen or organism in
+    # either slot, but the terms are conjoined: the result must match the
+    # specimen AND the organism, not their union. This is what gives
+    # "blood culture that grew E. coli" its true cohort (specimen∈blood ∧
+    # organism∈E. coli) instead of every blood culture *or* every E. coli
+    # isolate. General — no per-organism or per-specimen table; the organism
+    # is grounded to MIMIC's scientific-binomial ``org_name`` upstream by the
+    # decomposer (see prompts.py microbiology organism-grounding rule).
+    for attr in (concept.attributes or []):
+        term = attr.strip()
+        if not term:
+            continue
+        where_clauses.append(
+            f"({backend.ilike('m.spec_type_desc')} OR {backend.ilike('m.org_name')})"
+        )
+        params.extend([f"%{term}%", f"%{term}%"])
+
     # Result-status qualifier: a culture is *positive* iff an organism was
     # isolated (org_name IS NOT NULL); *negative* / no-growth is org_name IS
     # NULL. Grounded in the MIMIC schema, so "positive blood culture" counts

@@ -149,6 +149,30 @@ Map clinical entities to one of these concept_type values:
                      concept. Omit it (null) when the user asks about cultures
                      drawn/ordered regardless of result. A "positive culture" is
                      NOT the same as "a culture was performed".
+
+                     IMPORTANT — organism grounding: lab systems record the
+                     isolate by its *scientific binomial*, so express a named
+                     organism that way (analogous to LOINC grounding for labs):
+                     expand an abbreviated genus to its full form —
+                     "E. coli" → "Escherichia coli", "S. pneumoniae" →
+                     "Streptococcus pneumoniae", "P. aeruginosa" → "Pseudomonas
+                     aeruginosa". A bare genus the user already spells out
+                     ("Klebsiella", "Pseudomonas", "Enterococcus") is left as
+                     is. Resistance/phenotype shorthands like "MRSA" or "VRE"
+                     are NOT binomials — pass them through unchanged.
+
+                     IMPORTANT — specimen + organism in ONE concept: when a
+                     question names BOTH a specimen and an organism ("blood
+                     culture that grew E. coli", "urine culture positive for
+                     Klebsiella"), emit a SINGLE microbiology concept carrying
+                     both — one as ``name`` and the other in ``attributes`` —
+                     so the result is constrained by the specimen AND the
+                     organism (their intersection), e.g. {name:"blood culture",
+                     attributes:["Escherichia coli"], culture_status:"positive"}.
+                     Do NOT split the organism into a second clinical_concept.
+                     When the question also names a patient cohort ("patients
+                     with sepsis ..."), express that cohort as a patient_filter
+                     (diagnosis contains the condition), NOT as another concept.
 - "outcome"       → Patient outcomes: mortality, death, hospital expire, survival
                      NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
                      and use aggregation (e.g. aggregation="mean") for LOS queries

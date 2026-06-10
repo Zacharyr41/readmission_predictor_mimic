@@ -1150,3 +1150,128 @@ def test_positive_blood_culture_counts_only_growth(bq_pipeline):
         min_groups=1,
         value_predicate=lambda v: lo <= v <= hi,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 10 — a colloquial organism name ("E. coli") must resolve to the
+# scientific binomial MIMIC stores in org_name ("ESCHERICHIA COLI") and combine
+# with the specimen, or the count collapses to 0 / inflates to all-positive
+# --------------------------------------------------------------------------- #
+
+
+def test_ecoli_blood_culture_resolves_organism_name(bq_pipeline):
+    """Q: "How many patients with sepsis had a blood culture that grew E. coli?".
+
+    Validity: organism-specific blood-culture positivity is the bread-and-butter
+    sepsis microbiology question — "did the blood culture grow E. coli?" In
+    MIMIC-IV ``microbiologyevents`` the isolate is recorded in ``org_name`` using
+    the *scientific* binomial: E. coli is stored as ``ESCHERICHIA COLI`` (the
+    colloquial abbreviation "E. coli" appears nowhere in the column). Over the
+    sepsis cohort, 566 admissions had a blood culture grow ``ESCHERICHIA COLI``
+    — a real, sizeable, unambiguous cohort — versus 3,861 admissions with *any*
+    positive blood culture, so naming the organism carries a genuine ~6.8x
+    narrowing. The count and cohort are unambiguous and computable as one scalar.
+
+    Expected path: single ``microbiology`` concept + ``count`` aggregation, no
+    temporal constraint → SQL fast-path ``_compile_microbiology_aggregate``
+    (``COUNT(DISTINCT hadm_id)``), with the organism grounded against ``org_name``.
+
+    BUG (iteration 10 — the organism qualifier is lost two ways, so the cohort
+    is either empty or every blood culture): direct probes of the live pipeline
+    showed two compounding defects. (1) *No organism grounding* — the decomposer
+    emitted the colloquial name verbatim (``E. coli``) and ``ConceptResolver``
+    passed it through unchanged (it only normalizes via the curated
+    ``category_to_snomed`` or a SNOMED-hierarchy expansion keyed by MIMIC
+    ``org_name``, neither of which covers ``E. coli``). MIMIC stores only
+    ``ESCHERICHIA COLI``, so ``org_name ILIKE '%E. coli%'`` matched 0 rows — the
+    microbiology analogue of the missing-LOINC biomarker bug. (2) *Qualifier
+    dropped* — ``_compile_microbiology_aggregate`` read only the concept ``name``
+    (OR-matched against ``spec_type_desc``/``org_name``) and silently ignored
+    ``concept.attributes``, where the decomposer carries the *other* culture
+    dimension. So even the scientific name alone gave "E. coli in ANY specimen"
+    (1,736), not "E. coli in BLOOD" (566) — the band's 2.5x ceiling rejects the
+    any-specimen over-count, so organism grounding *alone* is insufficient. A
+    third, structural defect compounded it: the decomposer sometimes split
+    ``sepsis`` into a second ``diagnosis`` concept, and a 2-concept CQ misroutes
+    off the fast-path (the planner sends ``len(concepts) != 1`` to the graph).
+
+    Why MIMIC data can't be blamed: the blood+E. coli cohort is large (566) and
+    unambiguous; the query simply never grounded the organism to the vocabulary
+    MIMIC records nor conjoined the specimen the question explicitly named.
+
+    FIX (general, ontology-grounded, no curation): (A) compiler —
+    ``_compile_microbiology_aggregate`` now conjoins each ``attributes`` term as
+    an additional ``(spec_type_desc OR org_name)`` ILIKE clause, so a culture
+    qualified by both a specimen and an organism is the *intersection*, not the
+    union (general for "urine culture grew Klebsiella", etc.; covered offline by
+    ``TestMicrobiologyOrganismQualifier``). (B) decomposer — a prompt rule
+    grounds organism names to the scientific binomial lab systems record
+    (``E. coli`` → ``Escherichia coli``), exactly analogous to the LOINC rule for
+    labs, and keeps the specimen + organism in ONE microbiology concept with the
+    patient cohort as a ``patient_filter`` (reinforced by a non-overfit few-shot
+    example: a *Klebsiella pneumoniae* blood culture in *pneumonia*). The LLM's
+    own microbiology knowledge is the ontology — no curated synonym table — and
+    resistance shorthands (``MRSA`` → ``STAPH AUREUS COAG +``) are explicitly out
+    of scope. Post-fix the decomposer emits ``{name:"blood culture",
+    attributes:["Escherichia coli"], culture_status:"positive"}`` + a sepsis
+    filter, and the count lands at 566.
+
+    Oracle: the answer must track the E. coli ground truth (566), NOT collapse to
+    0 (colloquial "E. coli" never normalized to the scientific ``org_name``
+    string) and NOT inflate to ~3,861 (organism dropped, every positive blood
+    culture counted). The band [0.4x .. 2.5x] of the direct E. coli ground truth
+    admits the true value under cohort-definition wobble while rejecting both the
+    0-row normalization failure (below 0.4x) and the all-positive over-count
+    (3,861 ≈ 6.8x, far above 2.5x).
+    """
+    _SEPSIS_CTE = """
+        WITH sepsis AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^038')
+               OR d.icd_code IN ('99591','99592','78552','R652')
+        )
+    """
+    gt_ecoli = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT COUNT(DISTINCT m.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents` m
+        JOIN sepsis s ON m.hadm_id = s.hadm_id
+        WHERE LOWER(m.spec_type_desc) LIKE '%blood cult%'
+          AND LOWER(m.org_name) LIKE '%escherichia coli%'
+        """
+    )
+    gt_positive = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT COUNT(DISTINCT m.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents` m
+        JOIN sepsis s ON m.hadm_id = s.hadm_id
+        WHERE LOWER(m.spec_type_desc) LIKE '%blood cult%'
+          AND m.org_name IS NOT NULL
+        """
+    )
+    assert gt_ecoli and gt_positive, "ground-truth microbiology counts missing"
+    # The question is only discriminating if naming the organism really narrows
+    # the cohort below the all-positive blood-culture count.
+    assert gt_positive >= 3 * gt_ecoli, (
+        f"expected a large organism-specific vs any-positive gap; got "
+        f"ecoli={gt_ecoli} positive={gt_positive}"
+    )
+
+    answer = bq_pipeline.ask(
+        "How many patients with sepsis had a blood culture that grew E. coli?"
+    )
+
+    # The count must land near the E. coli ground truth (566), NOT 0 (organism
+    # name never normalized) and NOT ~3,861 (organism dropped, all positives
+    # counted). assert_valid_answer also rejects a spurious "no rows" and
+    # confirms a query executed.
+    lo, hi = 0.4 * gt_ecoli, 2.5 * gt_ecoli
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: lo <= v <= hi,
+    )
