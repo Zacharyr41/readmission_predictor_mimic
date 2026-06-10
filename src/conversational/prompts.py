@@ -163,6 +163,12 @@ Map clinical entities to one of these concept_type values:
                      abbreviation matches unrelated ICD titles as a substring
                      ("ards" matches "haz**ards**", "Edw**ards**"), badly
                      over-counting; the full name title-matches precisely.
+                     PRIMARY/PRINCIPAL diagnosis: when the user asks for the
+                     *primary* (or *principal*) diagnosis of a condition ("primary
+                     diagnosis of acute MI", "admitted primarily for sepsis"), set
+                     ``primary_only=true`` on the diagnosis concept — it restricts
+                     to MIMIC's principal diagnosis (seq_num = 1), a ~2x narrowing
+                     vs counting the condition in any position. Omit it otherwise.
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
                      wound culture, organism names (MRSA, E. coli, Klebsiella)
                      IMPORTANT — culture_status: a culture is "positive" when an
@@ -226,7 +232,7 @@ Use this when the user's question can be answered by one structured query.
 {
   "original_question": "<verbatim user question>",
   "clinical_concepts": [
-    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>", "icd_codes": ["<ICD-10 category codes, or null; diagnosis concepts only>"], "culture_status": "<positive|negative or null; microbiology concepts only>"}
+    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>", "icd_codes": ["<ICD-10 category codes, or null; diagnosis concepts only>"], "primary_only": "<true if the user asks for the primary/principal diagnosis; diagnosis concepts only>", "culture_status": "<positive|negative or null; microbiology concepts only>"}
   ],
   "temporal_constraints": [
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}

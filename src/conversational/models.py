@@ -28,6 +28,14 @@ class ClinicalConcept(BaseModel):
     # no positivity constraint (count every matching specimen). Only meaningful
     # for ``concept_type == "microbiology"``; ignored for other types.
     culture_status: Literal["positive", "negative"] | None = None
+    # Diagnosis-position qualifier. In MIMIC ``diagnoses_icd`` the PRIMARY
+    # (principal) diagnosis is ``seq_num = 1``; higher seq_nums are secondary
+    # diagnoses / comorbidities. When the user asks for the *primary* (or
+    # *principal*) diagnosis of a condition, the compiler restricts the count to
+    # ``seq_num = 1`` — a ~2x narrowing for many conditions (acute MI: ~8.6k
+    # primary vs ~16.5k any-position). ``False`` = any position. Only meaningful
+    # for ``concept_type == "diagnosis"``.
+    primary_only: bool = False
 
     @field_validator("icd_codes")
     @classmethod

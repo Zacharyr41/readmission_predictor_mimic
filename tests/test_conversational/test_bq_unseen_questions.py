@@ -2474,3 +2474,238 @@ def test_mean_hemoglobin_in_sepsis(bq_pipeline):
     assert_valid_answer(
         answer, min_groups=1, value_predicate=lambda v: 5.0 <= v <= 14.0
     )
+
+
+# --------------------------------------------------------------------------- #
+# T1/T2 DEMO-BATTERY COVERAGE — questions answerable via EXISTING features
+# (no new tables/concepts). Feasibility-analyzed against the pipeline's 11
+# reachable base tables: microbiology count (Q43), biomarker means in a cohort
+# (Q40 anion gap + osmolality; Q48 MELD components), outcome rate in a cohort
+# (Q48 cirrhosis mortality), biomarker MAX (Q13 peak troponin — re-exercises the
+# iter1 Troponin-I→T broadening on a MAX), and the graph median path (Q1 ICU LOS).
+# --------------------------------------------------------------------------- #
+
+
+def test_positive_blood_culture_count_all_patients(bq_pipeline):
+    """Q (battery Q43): "How many patients had at least one positive blood
+    culture?".
+
+    Validity: the all-cohort version of iter9 — a culture is positive iff an
+    organism was isolated (``org_name IS NOT NULL``). 8,731 distinct admissions
+    have a positive blood culture. Existing feature: microbiology COUNT +
+    ``culture_status="positive"``. → SQL fast-path.
+
+    Oracle: count near the direct ground truth (band [0.5x .. 2.0x]); rejects a
+    0 and the ~3x larger "cultures drawn" over-count iter9 fixed.
+    """
+    gt = bq_scalar(
+        """
+        SELECT COUNT(DISTINCT hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents`
+        WHERE LOWER(spec_type_desc) LIKE '%blood cult%' AND org_name IS NOT NULL
+        """
+    )
+    assert gt and gt > 3000, f"expected a large positive-blood-culture cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many patients had at least one positive blood culture?"
+    )
+    lo, hi = 0.5 * gt, 2.0 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_mean_anion_gap_in_dka(bq_pipeline):
+    """Q (battery Q40): "What is the average anion gap for patients with diabetic
+    ketoacidosis?".
+
+    Validity: an elevated anion gap is the defining metabolic feature of DKA —
+    the cohort mean (itemid 50868) is 14.8 mEq/L. Existing feature: biomarker
+    mean + a DKA diagnosis filter (grounds via the iter18-21 ICD path). → SQL
+    fast-path.
+
+    Oracle: a physiologic anion gap in [8 .. 30] mEq/L — above a near-zero "no
+    data" and below an impossible value.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average anion gap for patients with diabetic ketoacidosis?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 8.0 <= v <= 30.0
+    )
+
+
+def test_mean_osmolality_in_dka(bq_pipeline):
+    """Q (battery Q40): "What is the average serum osmolality for patients with
+    diabetic ketoacidosis?".
+
+    Validity: serum osmolality is elevated in DKA (hyperglycemia + dehydration) —
+    the cohort mean (itemid 50964) is 311 mOsm/kg. Existing feature: biomarker
+    mean + DKA filter. → SQL fast-path.
+
+    Oracle: a physiologic serum osmolality in [270 .. 370] mOsm/kg.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average serum osmolality for patients with diabetic "
+        "ketoacidosis?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 270.0 <= v <= 370.0
+    )
+
+
+def test_mean_creatinine_in_cirrhosis(bq_pipeline):
+    """Q (battery Q48, MELD component): "What is the average creatinine for
+    patients with cirrhosis?".
+
+    Validity: creatinine is a MELD component, mildly elevated in cirrhosis
+    (hepatorenal) — cohort serum mean (itemid 50912, LOINC 2160-0) is 1.58 mg/dL.
+    Third MELD component (with bilirubin/INR from iters 25-26). Existing feature:
+    LOINC-grounded biomarker mean + non-registry cirrhosis filter. → SQL fast-path.
+
+    Oracle: a clean serum creatinine in [0.7 .. 4.0] mg/dL — rejects urine/24-hr
+    pooling and a "no data" empty cohort.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average creatinine for patients with cirrhosis?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 0.7 <= v <= 4.0
+    )
+
+
+def test_cirrhosis_in_hospital_mortality(bq_pipeline):
+    """Q (battery Q48): "What is the in-hospital mortality rate for patients with
+    cirrhosis?".
+
+    Validity: the outcome half of Q48. Over the cirrhosis cohort the in-hospital
+    mortality rate is ~0.062. Existing feature: outcome-rate compiler + a
+    non-registry cirrhosis filter. → SQL fast-path.
+
+    Oracle: a structured mortality proportion within 0.04 of the ground truth
+    (~0.06) — a real rate, not a count.
+    """
+    gt_rate = bq_scalar(
+        """
+        WITH cirr AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^K74')
+               OR REGEXP_CONTAINS(d.icd_code, r'^K703')
+               OR d.icd_code IN ('5712','5715','5716')
+        )
+        SELECT SAFE_DIVIDE(
+                 COUNT(DISTINCT IF(a.hospital_expire_flag = 1, a.hadm_id, NULL)),
+                 COUNT(DISTINCT a.hadm_id))
+        FROM `physionet-data.mimiciv_3_1_hosp.admissions` a
+        JOIN cirr ON a.hadm_id = cirr.hadm_id
+        """
+    )
+    assert gt_rate is not None and 0.02 <= float(gt_rate) <= 0.15, (
+        f"ground-truth cirrhosis mortality should be ~0.06, got {gt_rate!r}"
+    )
+    answer = bq_pipeline.ask(
+        "What is the in-hospital mortality rate for patients with cirrhosis?"
+    )
+    assert_valid_answer(answer, min_groups=1)
+    prop_cells = _proportion_cells_in_unit_interval(answer)
+    assert prop_cells, (
+        "no structured proportion cell — cirrhosis mortality fell back to a count: "
+        f"table={answer.data_table!r} summary={answer.text_summary!r}"
+    )
+    assert any(abs(p - float(gt_rate)) <= 0.04 for p in prop_cells), (
+        f"no proportion within 0.04 of the cirrhosis mortality ground truth "
+        f"{gt_rate}; got {prop_cells}"
+    )
+
+
+def test_peak_troponin_in_myocardial_infarction(bq_pipeline):
+    """Q (battery Q13 capability): "What is the peak troponin level in patients
+    with a myocardial infarction?".
+
+    Validity: peak (MAX) troponin is the cardiology severity read-out. Generic
+    "troponin" grounds to Troponin I (LOINC 10839-9 → empty MIMIC itemids); the
+    iter1 broadening recovers the populated Troponin T (itemid 51003), whose MAX
+    over the MI cohort is ~52 ng/mL (no garbage artifact — p99.9 is ~23). Existing
+    features exercised together: biomarker MAX + the empty-subtype broadening +
+    an MI diagnosis filter. (The battery's STEMI-vs-NSTEMI split is a two-cohort
+    comparison; this single-cohort form exercises the peak-troponin capability.)
+    → SQL fast-path.
+
+    Oracle: a physiologic peak troponin in [5 .. 300] ng/mL — rejects a 0 (the
+    broadening failed → empty Troponin-I itemids) and an unscreened garbage spike.
+    """
+    answer = bq_pipeline.ask(
+        "What is the peak troponin level in patients with a myocardial infarction?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 5.0 <= v <= 300.0
+    )
+
+
+def test_median_icu_length_of_stay(bq_pipeline_graph):
+    """Q (battery Q1): "What is the median ICU length of stay?".
+
+    Validity: a headline T1 demo opener. The full-cohort median ICU LOS
+    (``icustays.los``) is 1.97 days. ``median`` has no portable SQL form, so it
+    routes to the GRAPH path (like iters 7-8); the bounded-cohort median is a
+    robust statistic that lands near the population value. Existing feature: the
+    metadata LOS aggregate on the graph path.
+
+    Oracle: a plausible ICU LOS median in [0.5 .. 15] days — above a near-zero
+    and below an implausible weeks-long median; rejects a spurious "no rows".
+    """
+    answer = bq_pipeline_graph.ask("What is the median ICU length of stay?")
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 0.5 <= v <= 15.0
+    )
+
+
+# --------------------------------------------------------------------------- #
+# T1/T2 deeper-analysis (tweak an EXISTING feature, no new tables): the "primary
+# diagnosis" qualifier — diagnoses_icd.seq_num = 1, mirroring microbiology's
+# culture_status. (User demo battery Q12.)
+# --------------------------------------------------------------------------- #
+
+
+def test_primary_diagnosis_of_acute_mi_count(bq_pipeline):
+    """Q (battery Q12): "How many admissions had a PRIMARY diagnosis of acute
+    myocardial infarction?".
+
+    Validity: in MIMIC ``diagnoses_icd`` the principal (primary) diagnosis is
+    ``seq_num = 1``. Acute MI (ICD-10 I21/I22, ICD-9 410) appears in ANY position
+    for 16,537 admissions but is the PRIMARY diagnosis for only 8,573 — the
+    "primary" qualifier carries a real ~1.9x narrowing (it's the reason for
+    admission, not a comorbidity).
+
+    BUG (the "primary" qualifier was silently dropped): a decompose probe showed
+    the decomposer emitted the MI diagnosis concept (icd ["I21","I22"]) but no
+    "primary" signal, so the count was every admission with an MI code in any
+    position (16,537) — confidently answering ~2x the principal-diagnosis cohort.
+
+    FIX (general, tweaks an existing feature — no new table/concept): a
+    ``primary_only`` flag on ``ClinicalConcept`` (the diagnosis analogue of
+    microbiology ``culture_status``); the decomposer sets it for "primary" /
+    "principal" diagnosis wording, and ``_compile_diagnosis_count`` adds
+    ``di.seq_num = 1``. General for any condition. Offline guard:
+    ``TestPrimaryDiagnosisQualifier``.
+
+    Oracle: the count must track the PRIMARY ground truth (~8,573), band
+    [0.5x .. 1.6x] — which rejects both a 0 and the ~16.5k any-position
+    over-count (16,537 > 1.6x·8,573 = 13,717).
+    """
+    gt_primary = _diagnosis_count_gt(
+        "seq_num = 1 AND (REGEXP_CONTAINS(icd_code, r'^I21') "
+        "OR REGEXP_CONTAINS(icd_code, r'^I22') OR REGEXP_CONTAINS(icd_code, r'^410'))"
+    )
+    assert gt_primary and gt_primary > 3000, (
+        f"expected a real primary-MI cohort; got {gt_primary}"
+    )
+    answer = bq_pipeline.ask(
+        "How many admissions had a primary diagnosis of acute myocardial "
+        "infarction?"
+    )
+    lo, hi = 0.5 * gt_primary, 1.6 * gt_primary
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )

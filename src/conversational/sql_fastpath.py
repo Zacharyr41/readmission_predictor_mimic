@@ -850,6 +850,11 @@ def _compile_diagnosis_count(
         cohort_clause = like_or
     where_clauses: list[str] = [cohort_clause]
     params.extend(per_name_params)
+    # "Primary diagnosis of X" → restrict to the principal diagnosis
+    # (``seq_num = 1``); higher seq_nums are secondary diagnoses / comorbidities.
+    # General for any condition (no per-condition logic).
+    if concept.primary_only:
+        where_clauses.append("di.seq_num = 1")
     where_clauses.extend(filter_where)
     params.extend(filter_params)
 

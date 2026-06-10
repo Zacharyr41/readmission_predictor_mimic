@@ -471,6 +471,40 @@ class TestDiagnosisGroundedCodePrefixMatch:
         assert self._count(backend, ["I67.82"]) == 0
 
 
+class TestPrimaryDiagnosisQualifier:
+    """A "primary diagnosis of X" count must restrict to MIMIC's principal
+    diagnosis (``diagnoses_icd.seq_num = 1``); higher seq_nums are secondary
+    diagnoses / comorbidities. The decomposer sets ``primary_only=True`` and the
+    compiler adds the ``seq_num = 1`` predicate — general for any condition
+    (e.g. acute MI: ~8.6k primary vs ~16.5k any-position)."""
+
+    @staticmethod
+    def _sql(backend, *, primary_only):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = CompetencyQuestion(
+            original_question="test",
+            clinical_concepts=[ClinicalConcept(
+                name="acute myocardial infarction",
+                concept_type="diagnosis",
+                primary_only=primary_only,
+            )],
+            aggregation="count",
+            scope="cohort",
+            return_type="text",
+        )
+        return compile_sql(
+            cq, backend, get_default_registry(), resolved_icd_codes=["I21"]
+        ).sql
+
+    def test_primary_only_emits_seq_num_filter(self, backend):
+        assert "di.seq_num = 1" in self._sql(backend, primary_only=True)
+
+    def test_default_any_position_has_no_seq_num_filter(self, backend):
+        assert "di.seq_num = 1" not in self._sql(backend, primary_only=False)
+
+
 class TestBiomarkerAggregateCorrectness:
     """Against synthetic_duckdb_with_events the biomarker AVG/MAX/MIN/COUNT
     for creatinine should match what a straight DuckDB query against the
