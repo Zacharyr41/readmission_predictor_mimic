@@ -680,7 +680,7 @@ def test_sepsis_in_hospital_mortality_rate(bq_pipeline):
 
     BUG (iteration 5 — *the outcome compiler answers a COUNT when the user asked
     for a RATE*):
-      ``_compile_outcome_mortality`` deliberately ignores ``cq.aggregation`` and
+      ``_compile_outcome_rate`` deliberately ignores ``cq.aggregation`` and
       always emits the grouped ``(expired, COUNT(DISTINCT hadm_id))`` shape —
       survivors and deaths as two raw counts. For "how many sepsis patients died"
       that is correct; for "what is the mortality RATE" it is the wrong
@@ -699,7 +699,7 @@ def test_sepsis_in_hospital_mortality_rate(bq_pipeline):
       counts are correct; the pipeline simply never computes the ratio the
       question names.
 
-    FIX (general, deterministic, no curation): ``_compile_outcome_mortality`` now
+    FIX (general, deterministic, no curation): ``_compile_outcome_rate`` now
       also computes each outcome bucket's share of the cohort in-query —
       ``COUNT(DISTINCT hadm_id) / NULLIF(SUM(COUNT(DISTINCT hadm_id)) OVER (), 0)
       AS fraction`` — so the grouped shape becomes ``(expired, count, fraction)``.
@@ -1643,11 +1643,11 @@ def test_mortality_comparison_by_gender_splits_by_axis(bq_pipeline):
     ~0.051 and female ~0.049 — close, but the *question* is the comparison, and a
     correct answer must report a rate for EACH sex. Expected path: single
     ``outcome`` concept + ``comparison_field="gender"`` + an HF diagnosis filter
-    → SQL fast-path ``_compile_outcome_mortality``.
+    → SQL fast-path ``_compile_outcome_rate``.
 
     BUG (iteration 14 — the comparison axis is silently dropped): a decompose +
     planner probe showed the question routes to SQL_FAST as one CQ with
-    ``comparison_field="gender"``, but ``_compile_outcome_mortality`` ignored it
+    ``comparison_field="gender"``, but ``_compile_outcome_rate`` ignored it
     entirely — it always emitted ``GROUP BY a.hospital_expire_flag`` only, with a
     whole-cohort ``fraction`` window. So the structured answer carried just the
     *pooled* HF mortality (~0.0498) and survival rows, with no gender dimension;
@@ -1659,7 +1659,7 @@ def test_mortality_comparison_by_gender_splits_by_axis(bq_pipeline):
     computable mortality; the compiler simply never grouped by the axis the CQ
     carried.
 
-    FIX (general, deterministic, no curation): ``_compile_outcome_mortality`` now
+    FIX (general, deterministic, no curation): ``_compile_outcome_rate`` now
     honors ``comparison_field`` exactly like the diagnosis/biomarker compilers —
     it adds ``group_value`` to the SELECT and GROUP BY and *partitions the share
     window by the axis* (``SUM(...) OVER (PARTITION BY <axis>)``), so each
@@ -1898,4 +1898,104 @@ def test_creatinine_by_30d_readmission_in_heart_failure(bq_pipeline):
     assert all(0.7 <= v <= 3.5 for v in means), (
         f"a readmission-group creatinine mean is outside the clean serum band "
         f"[0.7, 3.5] — urine/24-hr pooling (LOINC grounding dropped?): {means!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 17 — the project's headline metric was UNANSWERABLE: "what's the
+# 30-day readmission rate?" decomposed to a concept-less graph query that fell
+# back to length-of-stay and the answerer declined. Readmission is now a
+# first-class SQL outcome (like mortality). (User-supplied demo battery Q30.)
+# --------------------------------------------------------------------------- #
+
+
+def _proportion_cells_in_unit_interval(answer) -> list[float]:
+    """Every structured proportion/rate cell in [0,1] across the answer tree."""
+    out: list[float] = []
+    for leaf in _leaf_answers(answer):
+        for row in (leaf.data_table or []):
+            for k, v in row.items():
+                if _is_proportion_key(k) and _as_finite_float(v) is not None:
+                    fv = float(v)
+                    if 0.0 <= fv <= 1.0:
+                        out.append(fv)
+    return out
+
+
+def test_overall_30d_readmission_rate(bq_pipeline):
+    """Q: "What's the overall 30-day readmission rate?".
+
+    Validity: 30-day readmission is THE label this entire project predicts, so
+    the cohort-wide rate is its headline number. It is computable directly from
+    ``admissions``: label each admission ``readmitted_30d = 1`` iff the same
+    subject's next admission begins within 30 days of discharge
+    (``LEAD(admittime) OVER (PARTITION BY subject_id ORDER BY admittime) <=
+    dischtime + 30d``), then average. Over all 546,028 admissions the rate is
+    0.2003. Expected path: a single ``outcome`` concept → SQL fast-path.
+
+    BUG (iteration 17 — the headline metric is unanswerable): a full-pipeline
+    probe (bounded cohort) showed "what's the 30-day readmission rate?"
+    decomposed to a CQ with **no clinical concept** (just a ``readmitted_30d``
+    filter + ``count``). The planner sends concept-less CQs to the GRAPH path,
+    whose reasoner — with no event concept to anchor on — fell back to a
+    length-of-stay SPARQL query and returned ICU LOS rows; the answerer then
+    correctly but damningly replied "I cannot determine the overall 30-day
+    readmission rate from this data." So the demo's single most important
+    question produced a graceful *decline*, not the 0.20 that one ``AVG`` yields.
+
+    Why MIMIC data can't be blamed: every admission carries the timing needed to
+    label readmission; the rate is a one-line SQL aggregate. The pipeline simply
+    had no first-class path for it — readmission existed only as a *filter* and a
+    *comparison axis*, never as an *outcome whose rate you can ask for*.
+
+    FIX (general, deterministic, no curation): readmission is now a first-class
+    outcome alongside mortality. (1) Decomposer (prompt rule): a readmission-rate
+    question emits one ``outcome`` concept named for the window ("30-day
+    readmission" / "60-day readmission") with ``aggregation="count"``, so it
+    routes to SQL, not a concept-less graph build. (2) Compiler: the renamed
+    ``_compile_outcome_rate`` selects the binary flag via ``_outcome_flag`` —
+    ``hospital_expire_flag`` for mortality, ``rl.readmitted_30d``/``_60d`` (with
+    the readmission-labels JOIN) for readmission — and emits the same
+    ``(flag, count, fraction)`` rate shape, including the per-group partition for
+    comparison scope. Cohort filters and the comparison axis compose unchanged,
+    so "readmission rate for heart-failure patients" and "...by sex" work too.
+    Offline guard: ``TestOutcomeReadmissionRate``.
+
+    Oracle: the structured answer must carry a proportion cell within 0.05 of the
+    direct ground-truth readmission rate (~0.20) — i.e. the ``readmitted = 1``
+    row's fraction. The pre-fix LOS/decline shape has no such rate cell.
+    """
+    gt_rate = bq_scalar(
+        """
+        WITH rl AS (
+            SELECT hadm_id,
+                CASE WHEN LEAD(admittime) OVER (
+                         PARTITION BY subject_id ORDER BY admittime
+                     ) <= DATETIME_ADD(dischtime, INTERVAL 30 DAY)
+                     THEN 1 ELSE 0 END AS readmitted_30d
+            FROM `physionet-data.mimiciv_3_1_hosp.admissions`
+        )
+        SELECT AVG(readmitted_30d) FROM rl
+        """
+    )
+    assert gt_rate is not None and 0.15 <= float(gt_rate) <= 0.25, (
+        f"ground-truth 30-day readmission rate should be ~0.20, got {gt_rate!r}"
+    )
+
+    answer = bq_pipeline.ask("What's the overall 30-day readmission rate?")
+
+    # Hard validity: real rows, a query executed, no spurious error/decline.
+    assert_valid_answer(answer, min_groups=1)
+
+    # The crux: a STRUCTURED rate near ~0.20, not a count / LOS / decline. The
+    # readmitted=1 row's fraction is the rate; the readmitted=0 share (~0.80) is
+    # far away, so the 0.05 band selects exactly the readmission proportion.
+    prop_cells = _proportion_cells_in_unit_interval(answer)
+    assert prop_cells, (
+        "no structured proportion/rate cell — readmission rate fell back to a "
+        f"count or LOS: table={answer.data_table!r} summary={answer.text_summary!r}"
+    )
+    assert any(abs(p - float(gt_rate)) <= 0.05 for p in prop_cells), (
+        f"no structured proportion within 0.05 of the ground-truth 30-day "
+        f"readmission rate {gt_rate}; got {prop_cells}"
     )

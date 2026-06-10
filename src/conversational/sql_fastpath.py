@@ -216,7 +216,7 @@ def compile_sql(
             enable_mcp_grounding=enable_mcp_grounding,
         )
     if concept.concept_type == "outcome":
-        return _compile_outcome_mortality(
+        return _compile_outcome_rate(
             cq, concept, sql_fn, backend, registry,
             enable_mcp_grounding=enable_mcp_grounding,
         )
@@ -913,7 +913,26 @@ def _compile_diagnosis_list(
 # ---------------------------------------------------------------------------
 
 
-def _compile_outcome_mortality(
+def _outcome_flag(concept: ClinicalConcept) -> tuple[str, str, bool]:
+    """Ground an ``outcome`` concept to the binary admission-level flag whose
+    rate the question asks for: returns ``(flag_sql, flag_alias, needs_rl)``.
+
+    Two outcome families map onto MIMIC's admission schema. In-hospital
+    *mortality* is ``admissions.hospital_expire_flag``. *Readmission* is the
+    30-/60-day label the readmission-labels CTE computes (so it needs the ``rl``
+    join); the window is read from the concept name and defaults to 30-day, so
+    "30-day readmission rate" and "60-day readmission" both resolve. Anything
+    else falls back to mortality — the historical default. This is the schema
+    grounding of an outcome, the direct analogue of the comparison-axis →
+    ``sql_group_by`` mapping, not a curated synonym list."""
+    name = (concept.name or "").lower()
+    if "readmiss" in name or "readmit" in name:
+        window = "60" if "60" in name else "30"
+        return f"rl.readmitted_{window}d", f"readmitted{window}", True
+    return "a.hospital_expire_flag", "expired", False
+
+
+def _compile_outcome_rate(
     cq: CompetencyQuestion,
     concept: ClinicalConcept,
     sql_fn: str,
@@ -922,32 +941,33 @@ def _compile_outcome_mortality(
     *,
     enable_mcp_grounding: bool = False,
 ) -> SqlFastpathQuery:
-    """Mortality breakdown — the SPARQL ``mortality_count`` template's
-    (``expired``, ``count``) shape, enriched with each bucket's ``fraction`` of
-    the cohort. We ignore the caller's aggregation keyword and always emit
-    COUNT DISTINCT per expired flag (the clinically meaningful split), PLUS an
-    in-query proportion so a "mortality / survival RATE" question is answered
-    with an actual rate — the ``expired = 1`` row's ``fraction`` — rather than
-    leaving the division to the answerer LLM. The window ``SUM`` over the grouped
-    counts is the cohort total; ``NULLIF`` guards the (unreachable-when-any-row-
-    exists) empty-cohort divide.
+    """Binary-outcome rate over the cohort — the ``(<flag>, count, fraction)``
+    shape. Covers in-hospital *mortality* (``hospital_expire_flag``) and hospital
+    *readmission* (30-/60-day labels via the readmission-labels CTE); the flag is
+    selected by ``_outcome_flag`` from the outcome concept. We ignore the
+    caller's aggregation keyword and always emit COUNT DISTINCT per flag value
+    PLUS an in-query proportion, so a "... RATE" question is answered with an
+    actual rate — the ``flag = 1`` row's ``fraction`` — rather than a raw count
+    or a division left to the answerer LLM. The window ``SUM`` over the grouped
+    counts is the cohort total; ``NULLIF`` guards the empty-cohort divide.
 
-    Comparison scope: when the CQ carries a ``comparison_field`` (e.g. "mortality
-    rate for men vs women"), the outcome is grouped by that axis too and the
-    ``fraction`` window is *partitioned by the axis* — so each group's
-    ``expired = 1`` fraction is that group's own mortality rate (deaths-in-group
-    / group-total), not its share of the whole cohort. Without this the axis was
-    silently dropped and every comparison collapsed to the pooled rate."""
+    Comparison scope: when the CQ carries a ``comparison_field`` the outcome is
+    grouped by that axis too and the ``fraction`` window is *partitioned by the
+    axis* — so each group's ``flag = 1`` fraction is that group's own rate, not
+    its share of the whole cohort."""
     t = backend.table
+    flag_expr, flag_alias, flag_needs_rl = _outcome_flag(concept)
     group_by_col = _comparison_group_by_col(cq, registry)
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
     needs_patients = filter_needs_patients or _needs_patients_axis(group_by_col)
-    # rl is needed when the comparison axis is a readmission flag, or a filter
-    # referenced ``rl.`` without having joined it — but never twice.
+    # rl is needed when the OUTCOME flag is a readmission label, the comparison
+    # axis is a readmission flag, or a filter referenced ``rl.`` without having
+    # joined it — but never twice.
     needs_readmission = (
-        _needs_readmission_axis(group_by_col)
+        flag_needs_rl
+        or _needs_readmission_axis(group_by_col)
         or any("rl." in w for w in filter_where)
     ) and not filter_has_readmission
 
@@ -966,29 +986,29 @@ def _compile_outcome_mortality(
 
     if group_by_col is None:
         sql = (
-            f"SELECT a.hospital_expire_flag AS expired, "
+            f"SELECT {flag_expr} AS {flag_alias}, "
             f"COUNT(DISTINCT a.hadm_id) AS count, "
             f"COUNT(DISTINCT a.hadm_id) / "
             f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (), 0) AS fraction "
             f"FROM {t('admissions')} a {' '.join(joins)} "
             f"{where_part} "
-            f"GROUP BY a.hospital_expire_flag"
+            f"GROUP BY {flag_expr}"
         ).strip()
-        columns = ["expired", "count", "fraction"]
+        columns = [flag_alias, "count", "fraction"]
     else:
         # Partition the share window by the comparison axis so each group's
-        # fraction is its OWN mortality rate, not its slice of the whole cohort.
+        # fraction is its OWN rate, not its slice of the whole cohort.
         sql = (
             f"SELECT {group_by_col} AS group_value, "
-            f"a.hospital_expire_flag AS expired, "
+            f"{flag_expr} AS {flag_alias}, "
             f"COUNT(DISTINCT a.hadm_id) AS count, "
             f"COUNT(DISTINCT a.hadm_id) / "
             f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (PARTITION BY {group_by_col}), 0) "
             f"AS fraction "
             f"FROM {t('admissions')} a {' '.join(joins)} "
             f"{where_part} "
-            f"GROUP BY {group_by_col}, a.hospital_expire_flag"
+            f"GROUP BY {group_by_col}, {flag_expr}"
         ).strip()
-        columns = ["group_value", "expired", "count", "fraction"]
+        columns = ["group_value", flag_alias, "count", "fraction"]
 
     return SqlFastpathQuery(sql=sql, params=params, columns=columns)

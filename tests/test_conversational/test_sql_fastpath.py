@@ -339,7 +339,7 @@ class TestOutcomeMortalityComparison:
     """An outcome (mortality) question with a comparison axis must split by that
     axis and report each group's OWN rate, not the pooled cohort rate.
 
-    iter14 bug: ``_compile_outcome_mortality`` ignored ``comparison_field`` and
+    iter14 bug: ``_compile_outcome_rate`` ignored ``comparison_field`` and
     always grouped only by ``hospital_expire_flag``, so "compare mortality
     between men and women" silently collapsed to the overall mortality.
 
@@ -391,6 +391,45 @@ class TestOutcomeMortalityComparison:
             r for r in rows if r["group_value"] == "F" and r["expired"] == 0
         ][0]
         assert math.isclose(fem_survived["fraction"], 1.0, rel_tol=1e-6)
+
+
+class TestOutcomeReadmissionRate:
+    """Readmission is a first-class outcome, like mortality: "30-day readmission
+    rate" must compute the RATE (readmitted / cohort) via SQL, joining the
+    readmission-labels CTE — not route to a concept-less graph build that
+    returns a count or LOS.
+
+    Synthetic readmission labels: subject 1's two admissions are 101 (disch
+    2150-01-20) then 102 (admit 2150-02-10) — inside the 30-day window — so 101
+    is ``readmitted_30d = 1``; the other five admissions are not. Overall 30-day
+    readmission rate = 1/6 ≈ 0.167.
+    """
+
+    @staticmethod
+    def _rows(backend, cq):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        q = compile_sql(cq, backend, get_default_registry())
+        rows = [dict(zip(q.columns, r)) for r in backend.execute(q.sql, q.params)]
+        return rows, q.columns
+
+    def test_30d_readmission_outcome_reports_rate(self, backend):
+        cq = _cq(
+            concepts=[("30-day readmission", "outcome")], aggregation="count"
+        )
+        rows, cols = self._rows(backend, cq)
+        # The flag column is the readmission label, not the mortality flag.
+        assert "readmitted30" in cols and "expired" not in cols
+        readmit = [r for r in rows if r["readmitted30"] == 1][0]
+        assert math.isclose(readmit["fraction"], 1 / 6, rel_tol=1e-6)
+
+    def test_60d_readmission_window_selected_from_name(self, backend):
+        cq = _cq(
+            concepts=[("60-day readmission", "outcome")], aggregation="count"
+        )
+        _, cols = self._rows(backend, cq)
+        assert "readmitted60" in cols
 
 
 class TestBiomarkerAggregateCorrectness:

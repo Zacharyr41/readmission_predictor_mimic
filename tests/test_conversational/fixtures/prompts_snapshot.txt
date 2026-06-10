@@ -132,7 +132,17 @@ Map clinical entities to one of these concept_type values:
                      When the question also names a patient cohort ("patients
                      with sepsis ..."), express that cohort as a patient_filter
                      (diagnosis contains the condition), NOT as another concept.
-- "outcome"       → Patient outcomes: mortality, death, hospital expire, survival
+- "outcome"       → Patient outcomes: mortality, death, hospital expire, survival,
+                     and hospital readmission (30-day / 60-day).
+                     IMPORTANT — readmission is an OUTCOME, not a metadata /
+                     no-concept query: a "readmission rate" question must emit a
+                     single ``outcome`` concept whose name states the window —
+                     name="30-day readmission" (or "60-day readmission") — with
+                     aggregation="count", so the system computes the RATE
+                     (readmitted / cohort), not a raw count of readmissions and
+                     not a length-of-stay fallback. Cohort restrictions ("among
+                     heart-failure patients") stay in patient_filters; a
+                     comparison ("by sex") goes in comparison_field.
                      NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
                      and use aggregation (e.g. aggregation="mean") for LOS queries
 
