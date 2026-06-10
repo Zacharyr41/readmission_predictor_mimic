@@ -930,17 +930,31 @@ def _compile_outcome_mortality(
     with an actual rate — the ``expired = 1`` row's ``fraction`` — rather than
     leaving the division to the answerer LLM. The window ``SUM`` over the grouped
     counts is the cohort total; ``NULLIF`` guards the (unreachable-when-any-row-
-    exists) empty-cohort divide."""
+    exists) empty-cohort divide.
+
+    Comparison scope: when the CQ carries a ``comparison_field`` (e.g. "mortality
+    rate for men vs women"), the outcome is grouped by that axis too and the
+    ``fraction`` window is *partitioned by the axis* — so each group's
+    ``expired = 1`` fraction is that group's own mortality rate (deaths-in-group
+    / group-total), not its share of the whole cohort. Without this the axis was
+    silently dropped and every comparison collapsed to the pooled rate."""
     t = backend.table
+    group_by_col = _comparison_group_by_col(cq, registry)
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
+    needs_patients = filter_needs_patients or _needs_patients_axis(group_by_col)
+    # rl is needed when the comparison axis is a readmission flag, or a filter
+    # referenced ``rl.`` without having joined it — but never twice.
+    needs_readmission = (
+        _needs_readmission_axis(group_by_col)
+        or any("rl." in w for w in filter_where)
+    ) and not filter_has_readmission
+
     joins: list[str] = []
-    if filter_needs_patients:
+    if needs_patients:
         joins.append(f"JOIN {t('patients')} p ON a.subject_id = p.subject_id")
-    if filter_has_readmission is False and any(
-        "rl." in w for w in filter_where
-    ):
+    if needs_readmission:
         joins.append(
             f"JOIN {backend.readmission_labels_expr()} rl ON a.hadm_id = rl.hadm_id"
         )
@@ -950,16 +964,31 @@ def _compile_outcome_mortality(
     params = list(filter_params)
     where_part = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    sql = (
-        f"SELECT a.hospital_expire_flag AS expired, "
-        f"COUNT(DISTINCT a.hadm_id) AS count, "
-        f"COUNT(DISTINCT a.hadm_id) / "
-        f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (), 0) AS fraction "
-        f"FROM {t('admissions')} a {' '.join(joins)} "
-        f"{where_part} "
-        f"GROUP BY a.hospital_expire_flag"
-    ).strip()
+    if group_by_col is None:
+        sql = (
+            f"SELECT a.hospital_expire_flag AS expired, "
+            f"COUNT(DISTINCT a.hadm_id) AS count, "
+            f"COUNT(DISTINCT a.hadm_id) / "
+            f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (), 0) AS fraction "
+            f"FROM {t('admissions')} a {' '.join(joins)} "
+            f"{where_part} "
+            f"GROUP BY a.hospital_expire_flag"
+        ).strip()
+        columns = ["expired", "count", "fraction"]
+    else:
+        # Partition the share window by the comparison axis so each group's
+        # fraction is its OWN mortality rate, not its slice of the whole cohort.
+        sql = (
+            f"SELECT {group_by_col} AS group_value, "
+            f"a.hospital_expire_flag AS expired, "
+            f"COUNT(DISTINCT a.hadm_id) AS count, "
+            f"COUNT(DISTINCT a.hadm_id) / "
+            f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (PARTITION BY {group_by_col}), 0) "
+            f"AS fraction "
+            f"FROM {t('admissions')} a {' '.join(joins)} "
+            f"{where_part} "
+            f"GROUP BY {group_by_col}, a.hospital_expire_flag"
+        ).strip()
+        columns = ["group_value", "expired", "count", "fraction"]
 
-    return SqlFastpathQuery(
-        sql=sql, params=params, columns=["expired", "count", "fraction"],
-    )
+    return SqlFastpathQuery(sql=sql, params=params, columns=columns)

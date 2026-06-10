@@ -335,6 +335,64 @@ class TestMicrobiologyOrganismQualifier:
         ) == 1
 
 
+class TestOutcomeMortalityComparison:
+    """An outcome (mortality) question with a comparison axis must split by that
+    axis and report each group's OWN rate, not the pooled cohort rate.
+
+    iter14 bug: ``_compile_outcome_mortality`` ignored ``comparison_field`` and
+    always grouped only by ``hospital_expire_flag``, so "compare mortality
+    between men and women" silently collapsed to the overall mortality.
+
+    Synthetic fixture (whole cohort, no filter): Male admissions = 101, 102,
+    104, 106 (4 distinct; only 106 expired) → male mortality 1/4 = 0.25; Female
+    = 103, 105 (2 distinct; none expired) → 0.0. The pooled overall rate is
+    1/6 ≈ 0.167 — distinct from both, so the split is observable.
+    """
+
+    @staticmethod
+    def _outcome_cq(*, comparison_field=None):
+        return _cq(
+            concepts=[("mortality", "outcome")],
+            aggregation="count",
+            scope="comparison" if comparison_field else "cohort",
+            comparison_field=comparison_field,
+        )
+
+    @staticmethod
+    def _rows(backend, cq):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        q = compile_sql(cq, backend, get_default_registry())
+        rows = [dict(zip(q.columns, r)) for r in backend.execute(q.sql, q.params)]
+        return rows, q.columns
+
+    def test_ungrouped_outcome_reports_pooled_rate(self, backend):
+        rows, cols = self._rows(backend, self._outcome_cq())
+        assert "group_value" not in cols
+        died = [r for r in rows if r["expired"] == 1][0]
+        assert math.isclose(died["fraction"], 1 / 6, rel_tol=1e-6)
+
+    def test_comparison_outcome_splits_by_axis_with_per_group_rate(self, backend):
+        rows, cols = self._rows(
+            backend, self._outcome_cq(comparison_field="gender")
+        )
+        assert "group_value" in cols
+        assert {r["group_value"] for r in rows} == {"M", "F"}
+        # Male mortality = 1 death / 4 male admissions = 0.25 — its OWN rate,
+        # not the pooled 1/6 the bug produced.
+        male_died = [
+            r for r in rows if r["group_value"] == "M" and r["expired"] == 1
+        ][0]
+        assert math.isclose(male_died["fraction"], 0.25, rel_tol=1e-6)
+        # Female group present, zero deaths → survival fraction 1.0 (its own
+        # denominator, the 2 female admissions).
+        fem_survived = [
+            r for r in rows if r["group_value"] == "F" and r["expired"] == 0
+        ][0]
+        assert math.isclose(fem_survived["fraction"], 1.0, rel_tol=1e-6)
+
+
 class TestBiomarkerAggregateCorrectness:
     """Against synthetic_duckdb_with_events the biomarker AVG/MAX/MIN/COUNT
     for creatinine should match what a straight DuckDB query against the

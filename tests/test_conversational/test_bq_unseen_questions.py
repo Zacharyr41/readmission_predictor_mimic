@@ -1606,3 +1606,121 @@ def test_positive_sputum_culture_in_pneumonia_matches_specimen(bq_pipeline):
         min_groups=1,
         value_predicate=lambda v: lo <= v <= hi,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 14 — an OUTCOME question with a comparison axis silently dropped the
+# axis: "compare mortality between men and women" returned the pooled rate, not a
+# per-group split. Cohort: heart failure (non-sepsis, per the diversify pref).
+# --------------------------------------------------------------------------- #
+
+
+def _mortality_by_group(answer) -> dict[str, float]:
+    """Map each comparison group's label to its in-hospital mortality rate —
+    the ``Proportion`` cell of that group's ``Expired == 1`` row. Empty when the
+    answer carries no per-group breakdown (the pre-fix, axis-dropped shape)."""
+    out: dict[str, float] = {}
+    for leaf in _leaf_answers(answer):
+        for row in (leaf.data_table or []):
+            grp = row.get("Group Value")
+            expired = row.get("Expired")
+            prop = _as_finite_float(row.get("Proportion"))
+            if grp is None or prop is None:
+                continue
+            if expired in (1, True) or expired == "1":
+                out[str(grp).strip().upper()[:1]] = prop
+    return out
+
+
+def test_mortality_comparison_by_gender_splits_by_axis(bq_pipeline):
+    """Q: "Compare the in-hospital mortality rate between male and female
+    patients with heart failure.".
+
+    Validity: in-hospital mortality is ``admissions.hospital_expire_flag``, sex
+    is ``patients.gender`` (a registered ``comparison_axis`` → GROUP BY
+    ``p.gender``), and heart failure is codeable (ICD-10 I50.x, ICD-9 428.x). A
+    sex-split mortality rate is two scalars: over the HF cohort male mortality is
+    ~0.051 and female ~0.049 — close, but the *question* is the comparison, and a
+    correct answer must report a rate for EACH sex. Expected path: single
+    ``outcome`` concept + ``comparison_field="gender"`` + an HF diagnosis filter
+    → SQL fast-path ``_compile_outcome_mortality``.
+
+    BUG (iteration 14 — the comparison axis is silently dropped): a decompose +
+    planner probe showed the question routes to SQL_FAST as one CQ with
+    ``comparison_field="gender"``, but ``_compile_outcome_mortality`` ignored it
+    entirely — it always emitted ``GROUP BY a.hospital_expire_flag`` only, with a
+    whole-cohort ``fraction`` window. So the structured answer carried just the
+    *pooled* HF mortality (~0.0498) and survival rows, with no gender dimension;
+    the user asked to compare men and women and got a single undifferentiated
+    rate. Same family as iteration 5 (the outcome compiler emitting the wrong
+    shape) — there a count instead of a rate; here the axis omitted.
+
+    Why MIMIC data can't be blamed: both sexes are large HF cohorts with real,
+    computable mortality; the compiler simply never grouped by the axis the CQ
+    carried.
+
+    FIX (general, deterministic, no curation): ``_compile_outcome_mortality`` now
+    honors ``comparison_field`` exactly like the diagnosis/biomarker compilers —
+    it adds ``group_value`` to the SELECT and GROUP BY and *partitions the share
+    window by the axis* (``SUM(...) OVER (PARTITION BY <axis>)``), so each
+    group's ``expired = 1`` fraction is that group's OWN mortality rate
+    (deaths-in-group / group-total), not its slice of the whole cohort. General
+    across every outcome axis (gender, admission_type, readmission, …) and cohort.
+    Offline guard: ``TestOutcomeMortalityComparison``.
+
+    Oracle: the structured answer must carry a per-gender mortality rate for BOTH
+    sexes, each within 0.02 of its direct ground truth — which the pooled,
+    axis-dropped shape (no ``Group Value`` column, a single mortality row) cannot
+    satisfy.
+    """
+    _HF_CTE = """
+        WITH hf AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^I50')
+               OR REGEXP_CONTAINS(d.icd_code, r'^428')
+        )
+    """
+
+    def _hf_mortality(gender: str) -> float:
+        assert gender in ("M", "F")
+        return bq_scalar(
+            _HF_CTE
+            + f"""
+            SELECT SAFE_DIVIDE(
+                     COUNT(DISTINCT IF(a.hospital_expire_flag = 1, a.hadm_id, NULL)),
+                     COUNT(DISTINCT a.hadm_id))
+            FROM `physionet-data.mimiciv_3_1_hosp.admissions` a
+            JOIN hf ON a.hadm_id = hf.hadm_id
+            JOIN `physionet-data.mimiciv_3_1_hosp.patients` p ON a.subject_id = p.subject_id
+            WHERE p.gender = '{gender}'
+            """
+        )
+
+    gt_m = _hf_mortality("M")
+    gt_f = _hf_mortality("F")
+    assert gt_m and gt_f and 0.01 <= float(gt_m) <= 0.15 and 0.01 <= float(gt_f) <= 0.15, (
+        f"ground-truth HF mortality by sex should be ~0.05; got M={gt_m} F={gt_f}"
+    )
+
+    answer = bq_pipeline.ask(
+        "Compare the in-hospital mortality rate between male and female patients "
+        "with heart failure."
+    )
+
+    # Basic validity (no error / clarify, a query ran).
+    assert_valid_answer(answer, min_groups=1)
+
+    # The crux: a per-gender mortality rate for BOTH sexes, each near its own
+    # ground truth. The axis-dropped shape has no Group Value column → empty map.
+    by_sex = _mortality_by_group(answer)
+    assert {"M", "F"} <= set(by_sex), (
+        f"outcome comparison did not split by sex (axis dropped?): "
+        f"by_sex={by_sex!r} table={answer.data_table!r}"
+    )
+    assert abs(by_sex["M"] - float(gt_m)) <= 0.02, (
+        f"male HF mortality {by_sex['M']} far from ground truth {gt_m}"
+    )
+    assert abs(by_sex["F"] - float(gt_f)) <= 0.02, (
+        f"female HF mortality {by_sex['F']} far from ground truth {gt_f}"
+    )
