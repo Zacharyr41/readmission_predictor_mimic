@@ -316,6 +316,24 @@ class TestMicrobiologyOrganismQualifier:
             self._micro_cq(name="Escherichia coli", attributes=["blood culture"]),
         ) == 0
 
+    def test_specimen_culture_suffix_is_stripped_to_source(self, backend):
+        # MIMIC records non-blood specimens by anatomic source ('URINE',
+        # 'SPUTUM'), never '<source> culture'. So "urine culture" verbatim hits
+        # 0 rows; stripping the modality token matches the URINE row (hadm 103).
+        assert self._count(
+            backend, self._micro_cq(name="urine culture", attributes=[])
+        ) == 1
+        # Blood is the one specimen MIMIC labels '... CULTURE'; the stem 'blood'
+        # still matches it (hadm 101), so stripping never regresses blood.
+        assert self._count(
+            backend, self._micro_cq(name="blood culture", attributes=[])
+        ) == 1
+        # Same normalization when the specimen rides in attributes.
+        assert self._count(
+            backend,
+            self._micro_cq(name="Escherichia coli", attributes=["urine culture"]),
+        ) == 1
+
 
 class TestBiomarkerAggregateCorrectness:
     """Against synthetic_duckdb_with_events the biomarker AVG/MAX/MIN/COUNT

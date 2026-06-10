@@ -23,6 +23,7 @@ Unsupported CQ shapes raise ``ValueError`` so a misrouted CQ fails loudly.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -624,6 +625,28 @@ def _compile_drug_aggregate(
 # ---------------------------------------------------------------------------
 
 
+# A trailing "culture"/"cultures"/"cx" is the *test modality*, not the
+# specimen, and MIMIC's ``spec_type_desc`` records the specimen by anatomic
+# source — ``URINE``, ``SPUTUM``, ``STOOL``, ``SWAB`` — with the literal word
+# "culture" kept only for blood (``BLOOD CULTURE``). So matching "sputum
+# culture"/"urine culture" verbatim hits 0 rows. Dropping the modality token
+# lets the source match the schema vocabulary ("sputum culture" → ``SPUTUM``)
+# while blood still matches (``BLOOD CULTURE`` contains "blood"). This is a
+# morphological normalization, not a curated specimen table.
+_CULTURE_SUFFIX_RE = re.compile(r"\s+(?:cultures?|cx)\s*$", re.IGNORECASE)
+
+
+def _microbiology_match_term(term: str) -> str:
+    """Strip a trailing "culture"/"cultures"/"cx" modality token from a
+    microbiology term so the specimen source matches ``spec_type_desc``.
+
+    Only strips when a non-empty stem remains (so a bare "culture" is left
+    untouched). Organism names never carry the suffix, so they pass through
+    unchanged."""
+    stripped = _CULTURE_SUFFIX_RE.sub("", term).strip()
+    return stripped or term
+
+
 def _compile_microbiology_aggregate(
     cq: CompetencyQuestion,
     concept: ClinicalConcept,
@@ -678,10 +701,11 @@ def _compile_microbiology_aggregate(
     per_name_clauses: list[str] = []
     per_name_params: list[str] = []
     for n in names:
+        nt = _microbiology_match_term(n)
         per_name_clauses.append(
             f"({backend.ilike('m.spec_type_desc')} OR {backend.ilike('m.org_name')})"
         )
-        per_name_params.extend([f"%{n}%", f"%{n}%"])
+        per_name_params.extend([f"%{nt}%", f"%{nt}%"])
     where_clauses: list[str] = ["(" + " OR ".join(per_name_clauses) + ")"]
     params: list[Any] = list(per_name_params)
 
@@ -702,6 +726,7 @@ def _compile_microbiology_aggregate(
         term = attr.strip()
         if not term:
             continue
+        term = _microbiology_match_term(term)
         where_clauses.append(
             f"({backend.ilike('m.spec_type_desc')} OR {backend.ilike('m.org_name')})"
         )

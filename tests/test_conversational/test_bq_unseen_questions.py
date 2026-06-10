@@ -1506,3 +1506,103 @@ def test_max_lactate_in_sepsis_is_outlier_screened(bq_pipeline):
         f"reported max lactate outside the physiologic band [4, 60] mmol/L — "
         f"outlier screen did not fire on the SQL fast-path MAX? got {maxes!r}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 13 — a non-blood culture specimen ("sputum culture") never matches
+# MIMIC's spec_type_desc vocabulary (it stores 'SPUTUM', not 'SPUTUM CULTURE'),
+# so an organism-free specimen question collapses to a spurious 0. Cohort:
+# pneumonia (non-sepsis, per the "diversify cohorts" preference).
+# --------------------------------------------------------------------------- #
+
+
+def test_positive_sputum_culture_in_pneumonia_matches_specimen(bq_pipeline):
+    """Q: "How many patients with pneumonia had a positive sputum culture?".
+
+    Validity: a positive sputum culture is the core microbiology read-out in
+    pneumonia. In MIMIC-IV ``microbiologyevents`` the specimen is recorded in
+    ``spec_type_desc`` by *anatomic source* — ``SPUTUM`` (203,908 rows),
+    ``URINE`` (1.3M) — with the literal word "culture" kept only for blood
+    (``BLOOD CULTURE``). Over a pneumonia cohort 4,593 admissions had a
+    *positive* sputum culture (organism isolated) — a large, real, unambiguous
+    cohort. Expected path: single ``microbiology`` concept + ``count`` + a
+    ``pneumonia`` diagnosis filter → SQL fast-path ``COUNT(DISTINCT hadm_id)``.
+
+    BUG (iteration 13 — the specimen never matches its schema vocabulary):
+    decompose-only probes show the decomposer emits ``{name:"sputum culture",
+    culture_status:"positive"}`` (mirroring its "blood culture" handling), and
+    ``_compile_microbiology_aggregate`` matched the term verbatim:
+    ``spec_type_desc ILIKE '%sputum culture%'``. But MIMIC stores ``SPUTUM`` —
+    *zero* rows contain the substring "sputum culture" (likewise "urine
+    culture"). With no organism named, the OR-clause ``(spec ILIKE '%sputum
+    culture%' OR org_name ILIKE '%sputum culture%')`` matches nothing, so the
+    pipeline confidently answers **0** for a question whose true answer is
+    ~4,593 — a spurious "no data" a clinician would immediately distrust. Blood
+    escaped the bug only because its specimen string literally *is* "BLOOD
+    CULTURE".
+
+    Why MIMIC data can't be blamed: sputum cultures are abundant and positive in
+    thousands of pneumonia admissions; the query simply required the modality
+    word "culture" the schema only attaches to blood.
+
+    FIX (general, morphological, no curation): a trailing "culture"/"cultures"/
+    "cx" is the *test modality*, not the specimen, so ``_microbiology_match_term``
+    strips it before building the ILIKE clauses — "sputum culture" → ``SPUTUM``,
+    "urine culture" → ``URINE`` — while blood still matches (``BLOOD CULTURE``
+    contains "blood"; verified the positive-culture count is unchanged, 3861 vs
+    3863). This is the specimen analogue of iteration 10's organism grounding:
+    normalize the term to the vocabulary MIMIC records, with no per-specimen
+    table. Offline guard: ``TestMicrobiologyOrganismQualifier``.
+
+    Oracle: the count must track the positive-sputum ground truth (~4,593), not
+    collapse to 0. The band [0.3x .. 2.5x] of the direct ground truth admits
+    cohort-definition wobble while unambiguously rejecting the 0-row specimen
+    mismatch (0 is below 0.3x).
+    """
+    _PNA_CTE = """
+        WITH pna AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^J1[2-8]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^48[0-6]')
+        )
+    """
+    gt_positive_sputum = bq_scalar(
+        _PNA_CTE
+        + """
+        SELECT COUNT(DISTINCT m.hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents` m
+        JOIN pna ON m.hadm_id = pna.hadm_id
+        WHERE LOWER(m.spec_type_desc) LIKE '%sputum%'
+          AND m.org_name IS NOT NULL
+        """
+    )
+    # Verify the bug's premise directly: the verbatim "sputum culture" string
+    # the decomposer emits matches nothing in spec_type_desc.
+    gt_verbatim_specimen = bq_scalar(
+        """
+        SELECT COUNT(*)
+        FROM `physionet-data.mimiciv_3_1_hosp.microbiologyevents` m
+        WHERE LOWER(m.spec_type_desc) LIKE '%sputum culture%'
+        """
+    )
+    assert gt_positive_sputum and gt_positive_sputum > 1000, (
+        f"expected a large positive-sputum pneumonia cohort; got {gt_positive_sputum}"
+    )
+    assert gt_verbatim_specimen == 0, (
+        f"premise check: 'sputum culture' should match no spec_type_desc; got "
+        f"{gt_verbatim_specimen}"
+    )
+
+    answer = bq_pipeline.ask(
+        "How many patients with pneumonia had a positive sputum culture?"
+    )
+
+    # The count must land near the positive-sputum ground truth, NOT 0 (the
+    # specimen string never matched MIMIC's 'SPUTUM' vocabulary).
+    lo, hi = 0.3 * gt_positive_sputum, 2.5 * gt_positive_sputum
+    assert_valid_answer(
+        answer,
+        min_groups=1,
+        value_predicate=lambda v: lo <= v <= hi,
+    )
