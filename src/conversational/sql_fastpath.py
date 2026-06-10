@@ -823,16 +823,29 @@ def _compile_diagnosis_count(
 
     # When OMOPHub-grounded ICD codes are supplied, OR them in alongside
     # the LIKE clause. Net WHERE shape:
-    #   ((di.icd_code IN (?,?,...)) OR <like_or>) AND <filters>
-    # The IN-list catches grounded ICD-10 admissions precisely; the LIKE
-    # branch catches ICD-9 admissions whose codes aren't in OMOPHub's
-    # ICD10CM-only coverage. Empty list defensively treated as "no
-    # grounding" rather than emitting ``IN ()``.
+    #   ((<code prefix matches>) OR <like_or>) AND <filters>
+    # ``icd_autocode`` returns DOTTED, often category-level codes ('I63',
+    # 'E11.1'); MIMIC stores them UNDOTTED and BILLABLE ('I6300', 'E1110'). An
+    # exact ``IN`` on the dotted/category code therefore matched *nothing* — so
+    # each grounded code is normalized (dots stripped, uppercased) and matched
+    # as a PREFIX, so the grounded category catches its billable descendants
+    # (mirrors the cohort-registry Tier-1 prefix match). The LIKE branch still
+    # catches ICD-9 admissions outside OMOPHub's ICD10CM-only coverage. Empty
+    # list defensively treated as "no grounding".
     params: list[Any] = []
+    code_prefix_clauses: list[str] = []
+    code_prefix_params: list[str] = []
     if icd_codes:
-        in_placeholders = ", ".join(["?"] * len(icd_codes))
-        cohort_clause = f"((di.icd_code IN ({in_placeholders})) OR {like_or})"
-        params.extend(icd_codes)
+        from src.conversational.health_evidence.cohorts import normalize_icd_prefix
+        for c in icd_codes:
+            norm = normalize_icd_prefix(c)
+            if not norm:
+                continue
+            code_prefix_clauses.append("di.icd_code LIKE ?")
+            code_prefix_params.append(norm + "%")
+    if code_prefix_clauses:
+        cohort_clause = f"(({' OR '.join(code_prefix_clauses)}) OR {like_or})"
+        params.extend(code_prefix_params)
     else:
         cohort_clause = like_or
     where_clauses: list[str] = [cohort_clause]

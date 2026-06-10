@@ -138,6 +138,24 @@ Map clinical entities to one of these concept_type values:
                      the system will automatically resolve them to specific drugs.
 - "diagnosis"     → ICD-10 codes or description text: sepsis, stroke, pneumonia,
                      acute kidney injury, heart failure, cerebral infarction
+                     IMPORTANT — ICD grounding: populate ``icd_codes`` with the
+                     ICD-10 CATEGORY code(s) for the condition (analogous to LOINC
+                     for labs). The system matches them as PREFIXES against MIMIC's
+                     billable codes, so the broad 3-character category is correct —
+                     list every distinct category the term spans:
+                       - ischemic stroke     → ["I63"]
+                       - hemorrhagic stroke  → ["I60", "I61", "I62"]
+                       - acute MI            → ["I21", "I22"]
+                       - heart failure       → ["I50"]
+                       - pulmonary embolism  → ["I26"]
+                       - deep vein thrombosis → ["I82"]
+                       - COPD                → ["J44"]
+                     This is essential because the condition's ICD *title* often
+                     omits the colloquial term ("ischemic stroke" appears in no
+                     title — they read "Cerebral infarction"), and the semantic
+                     ICD lookup has coverage gaps. Emit ICD-10 only (the system
+                     also title-matches to catch ICD-9 admissions). Omit
+                     ``icd_codes`` (null) only when genuinely unsure of the codes.
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
                      wound culture, organism names (MRSA, E. coli, Klebsiella)
                      IMPORTANT — culture_status: a culture is "positive" when an
@@ -201,7 +219,7 @@ Use this when the user's question can be answered by one structured query.
 {
   "original_question": "<verbatim user question>",
   "clinical_concepts": [
-    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>", "culture_status": "<positive|negative or null; microbiology concepts only>"}
+    {"name": "<concept name>", "concept_type": "<type>", "attributes": [], "loinc_code": "<LOINC code or null; biomarker concepts only>", "icd_codes": ["<ICD-10 category codes, or null; diagnosis concepts only>"], "culture_status": "<positive|negative or null; microbiology concepts only>"}
   ],
   "temporal_constraints": [
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}

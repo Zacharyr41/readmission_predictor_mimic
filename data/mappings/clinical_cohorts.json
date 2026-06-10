@@ -52,6 +52,15 @@
       "cerebrovascular accident", "brain infarction"
     ]
   },
+  "stroke_hemorrhagic": {
+    "icd10_prefixes": ["I60.", "I61.", "I62."],
+    "icd9_prefixes": ["430", "431", "432."],
+    "aliases": [
+      "hemorrhagic stroke", "haemorrhagic stroke", "intracerebral hemorrhage",
+      "subarachnoid hemorrhage", "cerebral hemorrhage", "brain hemorrhage",
+      "intracranial hemorrhage"
+    ]
+  },
   "ards": {
     "icd10_prefixes": ["J80"],
     "icd9_prefixes": ["518.5", "518.81", "518.82"],

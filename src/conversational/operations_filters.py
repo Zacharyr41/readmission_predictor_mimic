@@ -166,8 +166,21 @@ def _maybe_ground_diagnosis_filter_clause(
             accepted_codes.append(code)
     if not accepted_codes:
         return None
-    placeholders = ", ".join(["?"] * len(accepted_codes))
-    return f"(di.icd_code IN ({placeholders}))", list(accepted_codes)
+    # icd_autocode returns DOTTED, often category-level codes ('I63', 'E11.1');
+    # MIMIC stores them UNDOTTED and BILLABLE ('I6300', 'E1110'). Normalize and
+    # PREFIX-match each (mirroring the Tier-1 registry path) — an exact IN on the
+    # dotted/category code matched nothing, silently emptying the cohort.
+    clauses: list[str] = []
+    params: list[str] = []
+    for code in accepted_codes:
+        norm = normalize_icd_prefix(code)
+        if not norm:
+            continue
+        clauses.append("di.icd_code LIKE ?")
+        params.append(norm + "%")
+    if not clauses:
+        return None
+    return f"({' OR '.join(clauses)})", params
 
 
 def _admission_type_description() -> str:

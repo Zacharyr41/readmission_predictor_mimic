@@ -432,6 +432,45 @@ class TestOutcomeReadmissionRate:
         assert "readmitted60" in cols
 
 
+class TestDiagnosisGroundedCodePrefixMatch:
+    """OMOPHub's ``icd_autocode`` returns DOTTED, often category-level codes
+    ('I63', 'I63.9'); MIMIC stores them UNDOTTED and BILLABLE ('I6300', 'I639').
+    Grounded codes must be normalized (dots stripped) and PREFIX-matched, or an
+    exact ``IN`` on the dotted/category code matches nothing — the iter18
+    grounding bug that silently returned 0 for ischemic stroke / DKA / etc.
+
+    Synthetic diagnoses: hadm 101=I639, 102=I634, 103=I630, 106=I639 — all
+    ischemic stroke (I63x); 104=G409, 105=I251 are not. So I63x covers 4 distinct
+    admissions, and the fixture titles read "Cerebral infarction" (no "ischemic
+    stroke"), so the title-LIKE fallback can't mask the prefix match.
+    """
+
+    @staticmethod
+    def _count(backend, codes):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(concepts=[("ischemic stroke", "diagnosis")], aggregation="count")
+        q = compile_sql(
+            cq, backend, get_default_registry(), resolved_icd_codes=codes
+        )
+        return backend.execute(q.sql, q.params)[0][0]
+
+    def test_category_code_prefix_matches_billable_descendants(self, backend):
+        # 'I63' is exactly what icd_autocode returns for "ischemic stroke"; it
+        # must catch the billable I639/I634/I630 rows (4 admissions). An exact
+        # IN ('I63') matched zero — the bug.
+        assert self._count(backend, ["I63"]) == 4
+
+    def test_dotted_code_is_normalized(self, backend):
+        # 'I63.9' → 'I639' → the two I639 admissions (101, 106).
+        assert self._count(backend, ["I63.9"]) == 2
+
+    def test_unmatched_code_yields_zero_not_error(self, backend):
+        # A grounded code absent from MIMIC compiles and returns 0 cleanly.
+        assert self._count(backend, ["I67.82"]) == 0
+
+
 class TestBiomarkerAggregateCorrectness:
     """Against synthetic_duckdb_with_events the biomarker AVG/MAX/MIN/COUNT
     for creatinine should match what a straight DuckDB query against the
@@ -697,8 +736,9 @@ class TestCompileSqlMcpFlagPlumbing:
             resolved_names=["creatinine"],
             enable_mcp_grounding=True,
         )
-        assert "di.icd_code IN (" in query.sql
-        assert "E34.0" in query.params
+        # Grounded codes are normalized (dots stripped) and prefix-matched.
+        assert "di.icd_code LIKE ?" in query.sql
+        assert "E340%" in query.params
 
     def test_mcp_flag_does_not_affect_biomarker_path_without_diagnosis_filter(
         self, backend, monkeypatch,
@@ -727,18 +767,18 @@ class TestCompileSqlMcpFlagPlumbing:
 
 class TestDiagnosisCountIcdGrounded:
     """Front-half OMOPHub grounding (Inc 4): when ``resolved_icd_codes``
-    is supplied, the diagnosis-count compile branch emits an IN-list as a
-    parallel OR with the existing title-LIKE clause. Defaults to
-    LIKE-only when codes are not supplied (back-compat).
+    is supplied, the diagnosis-count compile branch emits normalized
+    PREFIX-LIKE clauses as a parallel OR with the existing title-LIKE
+    clause. Defaults to LIKE-only when codes are not supplied (back-compat).
 
-    The parallel-OR design (instead of replacement) catches ICD-9
-    admissions whose codes aren't in OMOPHub's ICD10CM-only coverage.
-    Net effect: grounded codes match precisely; LIKE catches the long
-    tail of legacy ICD-9 entries.
+    Grounded codes are dotted/category-level ('A41.9', 'I63'); MIMIC stores
+    them undotted+billable, so they are dot-stripped and prefix-matched (an
+    exact IN matched nothing). The parallel-OR with title-LIKE still catches
+    ICD-9 admissions outside OMOPHub's ICD10CM-only coverage.
     """
 
-    def test_emits_icd_in_when_codes_supplied(self, backend):
-        """Resolved ICD codes → ``di.icd_code IN (?, ?, ...)`` clause."""
+    def test_emits_icd_prefix_when_codes_supplied(self, backend):
+        """Resolved ICD codes → normalized ``di.icd_code LIKE ?`` prefix clauses."""
         from src.conversational.operations import get_default_registry
         from src.conversational.sql_fastpath import compile_sql
 
@@ -752,13 +792,13 @@ class TestDiagnosisCountIcdGrounded:
             resolved_names=["sepsis"],
             resolved_icd_codes=["A41.9", "R65.21"],
         )
-        # IN-list clause emitted with the supplied codes as params.
-        assert "di.icd_code IN (" in query.sql
-        assert "A41.9" in query.params
-        assert "R65.21" in query.params
+        # Prefix-LIKE clauses with the normalized (undotted) codes as params.
+        assert "di.icd_code LIKE ?" in query.sql
+        assert "A419%" in query.params
+        assert "R6521%" in query.params
 
-    def test_combines_icd_in_with_title_like_as_or(self, backend):
-        """Final WHERE shape: ``((di.icd_code IN (...)) OR (<existing LIKE>))``.
+    def test_combines_icd_prefix_with_title_like_as_or(self, backend):
+        """Final WHERE shape: ``((di.icd_code LIKE ?) OR (<existing LIKE>))``.
         ICD-9 admissions whose codes aren't in OMOPHub still match via
         the LIKE branch on dd.long_title."""
         from src.conversational.operations import get_default_registry
@@ -775,7 +815,8 @@ class TestDiagnosisCountIcdGrounded:
             resolved_icd_codes=["A41.9"],
         )
         # Both clauses present.
-        assert "di.icd_code IN (" in query.sql
+        assert "di.icd_code LIKE ?" in query.sql
+        assert "A419%" in query.params
         # The LIKE clause is backend-dependent (DuckDB ILIKE; BigQuery
         # LOWER(...) LIKE LOWER(...)). Either form is acceptable.
         sql_upper = query.sql.upper()

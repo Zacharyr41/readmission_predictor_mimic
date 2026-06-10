@@ -108,15 +108,18 @@ class TestDiagnosisFilterGrounding:
         )
         frag = _compile_diagnosis(f, grounded_ctx)
         sql = " ".join(frag.where)
-        assert "di.icd_code IN (" in sql
-        assert "E34.0" in frag.params
-        assert "C7A.0" in frag.params
+        # icd_autocode returns dotted, category-level codes; MIMIC stores them
+        # undotted+billable, so they are normalized and PREFIX-matched (exact IN
+        # on the dotted code matched nothing).
+        assert "di.icd_code LIKE ?" in sql
+        assert "E340%" in frag.params
+        assert "C7A0%" in frag.params
 
-    def test_combines_in_with_like_as_or(
+    def test_combines_code_prefix_with_like_as_or(
         self, grounded_ctx, monkeypatch,
     ):
-        """Final shape: ``((di.icd_code IN (...)) OR (<existing LIKE>))``.
-        ICD-9 admissions stay matchable via the LIKE branch.
+        """Final shape: ``((di.icd_code LIKE ?) OR (<existing LIKE>))``.
+        ICD-9 admissions stay matchable via the title-LIKE branch.
 
         Uses 'carcinoid syndrome' so the autocode-fallback path fires
         (Inc 10 registry-first means 'sepsis' would have routed to
@@ -138,8 +141,9 @@ class TestDiagnosisFilterGrounding:
         )
         frag = _compile_diagnosis(f, grounded_ctx)
         sql = " ".join(frag.where)
-        assert "di.icd_code IN (" in sql
-        # Existing LIKE clauses preserved.
+        assert "di.icd_code LIKE ?" in sql
+        assert "E340%" in frag.params  # normalized + prefix
+        # Existing title-LIKE clauses preserved.
         sql_upper = sql.upper()
         assert "ILIKE" in sql_upper or "LOWER" in sql_upper
         assert "%carcinoid syndrome%" in frag.params

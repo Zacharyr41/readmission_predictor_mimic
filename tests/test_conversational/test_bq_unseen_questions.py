@@ -1999,3 +1999,159 @@ def test_overall_30d_readmission_rate(bq_pipeline):
         f"no structured proportion within 0.05 of the ground-truth 30-day "
         f"readmission rate {gt_rate}; got {prop_cells}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iterations 18–21 — diagnosis-count grounding BATCH (user demo battery Q6, Q12,
+# Q39). A "how many patients with <condition>" count must ground the colloquial
+# condition name to the ICD CODES MIMIC uses, because the ICD *titles* often
+# don't contain the colloquial term: "ischemic stroke" appears in ZERO titles
+# (they read "Cerebral infarction"). Cohorts span neuro / cardiology / endo.
+#
+# BUG (shared root cause, surfaced by this batch — all four initially returned
+# 0 or a wrong count): diagnosis grounding was broken two ways. (1) The decomposer
+# left ``icd_codes`` empty and the resolver grounded via OMOPHub ``icd_autocode``,
+# which returns DOTTED, often CATEGORY-level codes ('I63', 'E11.1'); the compiler
+# matched them with an exact ``icd_code IN (...)`` against MIMIC's UNDOTTED,
+# BILLABLE codes ('I6300', 'E1110') — so the IN-list matched NOTHING (count 0).
+# Sepsis/HF cohort *filters* escaped only because they hit the curated cohort
+# registry (Tier 1, prefix-matched) — concept counts had no such tier. (2)
+# ``icd_autocode`` has wide COVERAGE GAPS — it returns nothing at all for
+# hemorrhagic stroke, intracerebral hemorrhage, DVT, COPD exacerbation, upper-GI
+# bleed — so even after (1) those collapsed to a title-LIKE that also misses.
+#
+# FIX (general, ontology-grounded, no per-condition curation):
+#  - compiler (sql_fastpath._compile_diagnosis_count + operations_filters Tier 2):
+#    grounded codes are normalized (dots stripped, uppercased) and matched as a
+#    PREFIX, so a grounded category catches its billable descendants — mirroring
+#    the registry Tier-1 path. Offline guard: TestDiagnosisGroundedCodePrefixMatch.
+#  - decomposer (prompt rule): emit the ICD-10 CATEGORY codes for a diagnosis in
+#    ``icd_codes`` (analogous to LOINC for labs / scientific binomials for
+#    organisms) — the model's own ICD knowledge, which grounds ANY condition it
+#    knows (probe: subarachnoid→I60, cirrhosis→K70-K74, DVT→I82, all unseen in the
+#    prompt), bypassing icd_autocode's coverage gaps. icd_autocode + title-LIKE
+#    remain as fallbacks.
+# --------------------------------------------------------------------------- #
+
+
+def _diagnosis_count_gt(icd_where: str) -> int:
+    """Distinct admissions whose diagnoses match an ICD code set — the
+    code-grounded ground truth for a diagnosis-count question."""
+    return bq_scalar(
+        f"""
+        SELECT COUNT(DISTINCT hadm_id)
+        FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd`
+        WHERE {icd_where}
+        """
+    )
+
+
+def test_ischemic_stroke_count(bq_pipeline):
+    """Q (battery Q6): "How many patients were diagnosed with an ischemic
+    stroke?".
+
+    Validity: ischemic stroke is ICD-10 ``I63*`` (titled "Cerebral
+    infarction") and ICD-9 ``433.x1 / 434.x*`` — 12,014 distinct admissions.
+    The grounding trap: the *title* string "ischemic stroke" appears in ZERO
+    ``d_icd_diagnoses`` rows, so a name/title LIKE match returns 0. Only code
+    grounding (``icd_autocode`` → ``I63…`` IN-list) recovers the cohort.
+    Expected path: ``diagnosis`` concept + ``count`` → SQL fast-path.
+
+    Oracle: the count must land near the code-grounded ground truth (band
+    [0.4x .. 2.5x]); a near-0 answer means the condition name never reached the
+    ICD codes (title-LIKE-only).
+    """
+    gt = _diagnosis_count_gt(
+        "REGEXP_CONTAINS(icd_code, r'^I63') OR REGEXP_CONTAINS(icd_code, r'^43[34]')"
+    )
+    assert gt and gt > 1000, f"expected a large ischemic-stroke cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many patients were diagnosed with an ischemic stroke?"
+    )
+    lo, hi = 0.4 * gt, 2.5 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_hemorrhagic_stroke_count(bq_pipeline):
+    """Q (battery Q6): "How many patients were diagnosed with a hemorrhagic
+    stroke?".
+
+    Validity: hemorrhagic stroke is ICD-10 ``I60`` (SAH) / ``I61`` (intracerebral)
+    / ``I62`` and ICD-9 ``430 / 431 / 432`` — 6,952 distinct admissions. Like
+    ischemic stroke, the title string "hemorrhagic stroke" appears in ZERO ICD
+    titles (they read "Subarachnoid hemorrhage", "Intracerebral hemorrhage"), so
+    only code grounding recovers the cohort. → SQL fast-path diagnosis count.
+
+    Oracle: count near the code-grounded ground truth (band [0.4x .. 2.5x]); a
+    near-0 answer betrays title-LIKE-only grounding.
+    """
+    gt = _diagnosis_count_gt(
+        "REGEXP_CONTAINS(icd_code, r'^I6[012]') OR REGEXP_CONTAINS(icd_code, r'^43[012]')"
+    )
+    assert gt and gt > 1000, f"expected a large hemorrhagic-stroke cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many patients were diagnosed with a hemorrhagic stroke?"
+    )
+    lo, hi = 0.4 * gt, 2.5 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_acute_mi_count(bq_pipeline):
+    """Q (battery Q12): "How many admissions had a diagnosis of acute myocardial
+    infarction?".
+
+    Validity: *acute* MI is ICD-10 ``I21* / I22*`` and ICD-9 ``410.x*`` — 16,537
+    distinct admissions. The grounding trap is the opposite of stroke's: the
+    title token "myocardial infarction" ALSO matches chronic/historical codes
+    ("Old myocardial infarction" I25.2, "Personal history of …"), so a title-LIKE
+    match over-counts to ~40,465 — patients without an *acute* event. Accurate
+    code grounding (``I21/I22`` only) gives ~16,537. → SQL fast-path diagnosis
+    count.
+
+    Oracle: the count must track the *acute* ground truth, band [0.5x .. 2.0x]
+    (≈ [8.3k, 33k]) — which rejects the ~40k chronic-inclusive over-count while
+    admitting code-set wobble.
+    """
+    gt = _diagnosis_count_gt(
+        "REGEXP_CONTAINS(icd_code, r'^I21') OR REGEXP_CONTAINS(icd_code, r'^I22') "
+        "OR REGEXP_CONTAINS(icd_code, r'^410')"
+    )
+    assert gt and gt > 5000, f"expected a large acute-MI cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many admissions had a diagnosis of acute myocardial infarction?"
+    )
+    lo, hi = 0.5 * gt, 2.0 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_dka_count(bq_pipeline):
+    """Q (battery Q39): "How many admissions had diabetic ketoacidosis?".
+
+    Validity: DKA is ICD-10 ``E1x.1*`` (diabetes with ketoacidosis) and ICD-9
+    ``250.1*`` — 2,637 distinct admissions. Unlike stroke/MI this is a
+    *control*: the title token "ketoacidosis" matches the right codes cleanly
+    (title-LIKE ≈ 2,674 ≈ the code set), so a robust grounder should land here
+    whether it uses codes or titles. → SQL fast-path diagnosis count.
+
+    Oracle: count near the ground truth (band [0.4x .. 2.5x]); this should pass
+    even on title-LIKE grounding, isolating any stroke/MI failures as
+    *grounding*-specific rather than a broken diagnosis-count path.
+    """
+    gt = _diagnosis_count_gt(
+        r"REGEXP_CONTAINS(icd_code, r'^E1[0-3]\.?1') "
+        r"OR REGEXP_CONTAINS(icd_code, r'^250\.?1')"
+    )
+    assert gt and gt > 500, f"expected a real DKA cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many admissions had diabetic ketoacidosis?"
+    )
+    lo, hi = 0.4 * gt, 2.5 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )

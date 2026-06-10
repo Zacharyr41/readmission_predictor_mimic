@@ -729,6 +729,11 @@ class ConceptResolver:
                 confidence_floor=None,
             )
 
+        # OMOPHub icd_autocode semantic search. Note ``concept.icd_codes``
+        # (handled above) is the decomposer's own ICD grounding — used first when
+        # present, which is the general escape hatch for conditions OMOPHub's
+        # autocoder returns nothing for (hemorrhagic stroke, DVT, COPD
+        # exacerbation, upper-GI bleed, …).
         return self._ground_via_icd_autocode(concept.name, names)
 
     def _ground_via_icd_autocode(

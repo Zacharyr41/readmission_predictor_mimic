@@ -63,17 +63,17 @@ def test_diagnosis_count_path_emits_in_list_parallel_or(backend, reporter):
     )
     _record_sql(reporter, query, "How many sepsis patients? (Inc 4)")
 
-    in_clause_present = "di.icd_code IN (" in query.sql
+    in_clause_present = "di.icd_code LIKE ?" in query.sql
     reporter.add_assertion(
-        "SQL contains 'di.icd_code IN (' parallel-OR clause",
+        "SQL contains 'di.icd_code LIKE ?' prefix-match parallel-OR clause",
         in_clause_present,
         detail=f"sql: {query.sql[:200]!r}",
     )
     assert in_clause_present
 
-    a41_in_params = "A41.9" in query.params
+    a41_in_params = "A419%" in query.params
     reporter.add_assertion(
-        "Params include grounded sepsis code 'A41.9'",
+        "Params include normalized prefix for sepsis code ('A419%')",
         a41_in_params,
         detail=f"params: {query.params!r}",
     )
@@ -122,16 +122,16 @@ def test_filter_side_emits_in_list_for_unregistered_phrase(
     )
     _record_sql(reporter, query, "Mean serotonin in carcinoid cohort (Inc 9 autocode fallback)")
 
-    in_present = "di.icd_code IN (" in query.sql
+    in_present = "di.icd_code LIKE ?" in query.sql
     reporter.add_assertion(
-        "Filter emits 'di.icd_code IN (' for non-registry phrase (autocode fallback)",
+        "Filter emits 'di.icd_code LIKE ?' for non-registry phrase (autocode fallback)",
         in_present,
     )
     assert in_present
 
-    has_grounded_code = "E34.0" in query.params
+    has_grounded_code = "E340%" in query.params
     reporter.add_assertion(
-        "Params contain the autocode-returned ICD code (E34.0)",
+        "Params contain the normalized autocode ICD prefix (E340%)",
         has_grounded_code,
         detail=f"params: {query.params!r}",
     )
