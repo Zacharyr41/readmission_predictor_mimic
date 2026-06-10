@@ -108,6 +108,34 @@ Every fix ships with an offline test that fails on the pre-fix behavior, so the 
 
 ---
 
+## T1/T2 demo-battery feasibility analysis
+
+A systematic pass over every **T1/T2** question in the demo battery, classified by probing (a) the pipeline's reachable-table allow-list (`_BQ_TABLES` — **11 base hosp/icu tables**) and (b) the actual BigQuery schema (`physionet-data` datasets + table schemas).
+
+**Key finding:** the "derived clinical concepts" I'd first assumed unanswerable **exist as clean tables** in `mimiciv_3_1_derived` (`sepsis3`, `sofa`/`first_day_sofa`, `kdigo_stages`, `meld`, `ventilation`, `first_day_gcs`, `charlson`, `rrt`/`crrt`, `oasis`) — but the pipeline reaches only the 11 base tables, so answering them needs *wiring the derived dataset in as new concepts* (a feature). The data is present; the capability is not.
+
+### Answerable via existing features — implemented & passing
+Q1 median ICU LOS · Q6 ischemic/hemorrhagic stroke counts · Q12 acute-MI count · Q13 peak troponin (biomarker MAX + Troponin-I→T broadening + MI filter) · Q17 AKI count (ICD) · Q30 30-day readmission rate · Q35 ARDS count · Q39 DKA count · Q40 anion gap + serum osmolality in DKA · Q43 positive blood culture (all) · Q48 MELD *components* (bilirubin/INR/creatinine in cirrhosis) + cirrhosis mortality.
+
+### Answerable via a small tweak to an existing feature — implemented & passing
+- **Q12 "primary diagnosis"** — added a `primary_only` qualifier on `ClinicalConcept` (the diagnosis analogue of microbiology `culture_status`) → `diagnoses_icd.seq_num = 1`. Fixes a silent ~1.9x over-count (16,537 any-position vs 8,573 primary). General for any condition.
+
+### Deferred — would need a major new feature (NOT built, per the "no new major features" constraint)
+- **Derived-table concepts** (data exists in `mimiciv_3_1_derived`, pipeline can't reach it): Q3 Sepsis-3, Q5 SOFA tertiles, Q7 GCS total (chartevents has only the 3 components), Q17-by-KDIGO / Q18 (`kdigo_stages` — an ICD-AKI proxy exists), Q36 PaO₂/FiO₂ + ARDS severity, Q48 MELD *score*, Q14 Charlson comorbidities.
+- **Procedure concepts** (no procedure concept type): Q8 EVD, Q19 RRT/CRRT, Q23 RBC transfusion (in `inputevents`/`procedures_icd`, not `prescriptions`).
+- **New filter types**: Q25 thrombocytopenia (biomarker-value-threshold cohort), Q32 (≥5-medications count).
+- **Comparison on the metadata-LOS path**: Q31 LOS *by admission type* — the LOS path drops the comparison axis (returns raw per-stay LOS); honoring it is a feature.
+- **Top-N ranking**: Q29, Q44 (a new aggregation shape; explicitly skipped).
+- **Data genuinely absent**: Q50 ED triage lactate (no `mimiciv_ed` dataset loaded).
+
+### Recommended next features (high demo value, priority order)
+1. A general **derived-cohort/measurement concept** wiring `mimiciv_3_1_derived` (unlocks Sepsis-3, KDIGO, SOFA, MELD-score, ventilation, GCS, Charlson — a large fraction of the ICU/research battery in one general mechanism).
+2. A **procedure concept type** (EVD / RRT / transfusion / ventilation via `procedures_icd` / `procedureevents` / `inputevents`).
+3. **Biomarker-value-threshold cohorts** (Q25/Q32).
+4. **Top-N / ranked aggregation** (Q29/Q44).
+
+---
+
 ## Conclusion
 
 Across 30 unseen questions spanning 12 specialties and both backend paths, the pipeline's **routing and execution were sound**, but its **grounding and aggregate-shape layers harbored a recurring class of "confident wrong number" bugs** — exactly the failures that erode clinician trust in a live demo. The fixes were uniformly **general and ontology-grounded** (LOINC, RxNorm, SNOMED-style scientific names, ICD-10 categories, MIMIC schema semantics) rather than per-question patches, so they repair entire bug *classes* and were shown to generalize to fresh cohorts (neuro, hepatology, pulmonary, nephrology, hematology) the fixes were never tuned against. The system also declines the genuinely-unanswerable gracefully. Net: the demo-relevant question space is now substantially more trustworthy, with ranked aggregation the main remaining feature gap.
