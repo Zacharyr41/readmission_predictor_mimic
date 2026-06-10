@@ -156,6 +156,13 @@ Map clinical entities to one of these concept_type values:
                      ICD lookup has coverage gaps. Emit ICD-10 only (the system
                      also title-matches to catch ICD-9 admissions). Omit
                      ``icd_codes`` (null) only when genuinely unsure of the codes.
+                     ALSO set the concept ``name`` to the FULL condition name,
+                     expanding abbreviations — "ARDS" → "acute respiratory
+                     distress syndrome", "DKA" → "diabetic ketoacidosis", "COPD"
+                     → "chronic obstructive pulmonary disease". A bare
+                     abbreviation matches unrelated ICD titles as a substring
+                     ("ards" matches "haz**ards**", "Edw**ards**"), badly
+                     over-counting; the full name title-matches precisely.
 - "microbiology"  → Culture results: blood culture, urine culture, sputum culture,
                      wound culture, organism names (MRSA, E. coli, Klebsiella)
                      IMPORTANT — culture_status: a culture is "positive" when an

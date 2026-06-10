@@ -2376,3 +2376,101 @@ def test_intracerebral_hemorrhage_mortality(bq_pipeline):
         f"no proportion within 0.08 of the ICH mortality ground truth "
         f"{gt_rate}; got {prop_cells}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iterations 28–30 — PULM / NEPHRO / HEME coverage (more specialties). Diagnosis
+# counts whose ICD *titles* diverge from the colloquial term ("ARDS" → "acute
+# respiratory distress syndrome"; "AKI" → "Acute kidney failure"), so they lean
+# entirely on the decomposer's ICD-10 grounding; plus a biomarker mean in a new
+# specialty. Counts use ICD-9-tolerant bands (the model emits ICD-10 categories;
+# the ICD-9 tail is caught only when titles happen to match).
+# --------------------------------------------------------------------------- #
+
+
+def test_ards_count(bq_pipeline):
+    """Q (battery Q35): "How many patients were diagnosed with ARDS?".
+
+    Validity: ARDS is ICD-10 ``J80`` ("Acute respiratory distress syndrome") —
+    769 distinct admissions on the clean ICD-10 code (ICD-9 has no exact ARDS
+    code). → SQL fast-path diagnosis count.
+
+    BUG (surfaced here — an abbreviation name massively over-counts): the
+    decomposer grounded ``icd_codes=["J80"]`` correctly, but it also left the
+    concept ``name="ARDS"``, and the title-LIKE fallback (OR-ed with the J80
+    prefix) matched ``%ards%`` as a BARE SUBSTRING — hitting 12,186 unrelated
+    admissions whose ICD titles merely contain the letters "ards"
+    ("personal history … presenting **haz**ards** to health", "**Edw**ards**'
+    syndrome", "li**zards**", "Rich**ards**on"). So "how many ARDS patients"
+    answered 12,953 — a ~17x over-count a clinician would instantly distrust.
+    General class: any short abbreviation used as a concept name
+    (ARDS, DKA, COPD, MI, …) over-matches via the substring title fallback.
+
+    FIX (general, decomposer prompt rule): expand abbreviations in the concept
+    ``name`` to the full descriptive term ("ARDS" → "acute respiratory distress
+    syndrome"), so the title fallback matches the precise phrase (or nothing,
+    leaving the ICD-10 codes to ground the cohort) instead of a noisy 4-letter
+    substring. Verified: post-fix the decomposer emits name="acute respiratory
+    distress syndrome" + icd ["J80"] and the count is 769.
+
+    Oracle: count near the clean ICD-10 ground truth with an ICD-9-tolerant band
+    [0.3x .. 2.5x]; rejects both a 0-row grounding miss and the ~13k substring
+    over-count.
+    """
+    gt = _diagnosis_count_gt("REGEXP_CONTAINS(icd_code, r'^J80')")  # clean ICD-10 ARDS
+    assert gt and gt > 400, f"expected a real ARDS cohort; got {gt}"
+    answer = bq_pipeline.ask("How many patients were diagnosed with ARDS?")
+    # Band rejects BOTH a 0-row grounding miss and the ~13k substring over-count
+    # (the pre-fix '%ards%' bug), while admitting the clean J80 count (~769).
+    lo, hi = 0.5 * gt, 2.0 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_aki_count(bq_pipeline):
+    """Q (battery Q17): "How many patients were diagnosed with acute kidney
+    injury?".
+
+    Validity: AKI is ICD-10 ``N17*`` and ICD-9 ``584*`` — 73,202 distinct
+    admissions (one of the most common ICU complications). The grounding trap:
+    the ICD-10 *title* is "Acute kidney **failure**", not "injury", so title-LIKE
+    on the colloquial "acute kidney injury" misses; only code grounding (``N17``)
+    recovers the (large) cohort. → SQL fast-path diagnosis count.
+
+    Oracle: count near the code ground truth with an ICD-9-tolerant band
+    [0.3x .. 2.5x]; rejects the 0/near-0 a title-LIKE-only grounding produced.
+    """
+    gt = _diagnosis_count_gt(
+        "REGEXP_CONTAINS(icd_code, r'^N17') OR REGEXP_CONTAINS(icd_code, r'^584')"
+    )
+    assert gt and gt > 10000, f"expected a large AKI cohort; got {gt}"
+    answer = bq_pipeline.ask(
+        "How many patients were diagnosed with acute kidney injury?"
+    )
+    lo, hi = 0.3 * gt, 2.5 * gt
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: lo <= v <= hi
+    )
+
+
+def test_mean_hemoglobin_in_sepsis(bq_pipeline):
+    """Q (battery Q24 family): "What is the average hemoglobin for patients with
+    sepsis?".
+
+    Validity: anemia is near-universal in sepsis — the cohort serum hemoglobin
+    (itemid 51222, LOINC 718-7) mean is 9.10 g/dL (normal ~12-16), a clean,
+    low-but-physiologic value. Hemoglobin has effectively one assay, so it is a
+    LOINC-grounding *control* (label-LIKE pools to ~9.08, indistinguishable), and
+    the sepsis filter is registry-grounded — so this isolates a plain
+    biomarker-mean-in-cohort. → SQL fast-path.
+
+    Oracle: a real anemic-range hemoglobin in [5.0 .. 14.0] g/dL — above a
+    near-zero "no data" and below an impossible value.
+    """
+    answer = bq_pipeline.ask(
+        "What is the average hemoglobin for patients with sepsis?"
+    )
+    assert_valid_answer(
+        answer, min_groups=1, value_predicate=lambda v: 5.0 <= v <= 14.0
+    )
