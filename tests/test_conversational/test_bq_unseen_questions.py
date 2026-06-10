@@ -1275,3 +1275,128 @@ def test_ecoli_blood_culture_resolves_organism_name(bq_pipeline):
         min_groups=1,
         value_predicate=lambda v: lo <= v <= hi,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Iteration 11 — a GROUP BY comparison-axis aggregate must keep the per-concept
+# LOINC grounding for every group, or the grouped means pool unit-incompatible
+# lab variants (serum vs urine creatinine) exactly as the ungrounded path does
+# --------------------------------------------------------------------------- #
+
+
+def _group_mean_cells(answer) -> list[float]:
+    """Per-group mean values from a comparison answer, read from the *mean*
+    columns only (``Average`` / ``Mean Value``) — deliberately excluding the
+    ``Count`` column ``_aggregate_cells`` would also pick up, since a grouped
+    aggregate row carries both the mean and a large per-group n."""
+    out: list[float] = []
+    for leaf in _leaf_answers(answer):
+        for row in (leaf.data_table or []):
+            for col in ("Average", "Mean Value"):
+                fv = _as_finite_float(row.get(col))
+                if fv is not None:
+                    out.append(fv)
+    return out
+
+
+def test_creatinine_gender_comparison_keeps_loinc_grounding(bq_pipeline):
+    """Q: "Compare the average creatinine between male and female patients with
+    sepsis.".
+
+    Validity: a sex split of serum creatinine in sepsis is a routine clinical
+    comparison — ``gender`` is a registered ``comparison_axis`` (GROUP BY
+    ``p.gender``), creatinine is a LOINC-groundable biomarker, and sepsis is a
+    diagnosis filter. Over the sepsis cohort the clean serum-creatinine
+    (itemid 50912) mean is 1.41 mg/dL (F) and 1.86 mg/dL (M) — both
+    physiologically ordinary, with the small M>F gap muscle mass predicts. Both
+    groups are huge (>160k measurements each), so the comparison is real and
+    computable as two scalars. Expected path: single biomarker concept +
+    ``comparison_field="gender"`` + ``mean`` → SQL fast-path grouped aggregate.
+
+    Why this is a discriminating probe: ``creatinine`` is the canonical
+    unit-incompatible-pooling trap. A LIKE-on-label match pools serum (~1.4),
+    urine (tens to low hundreds), and 24-hr-collection creatinine into one
+    average — over this same sepsis cohort the label-LIKE mean is ~5.4 mg/dL
+    (F) / ~5.3 mg/dL (M), a ~3-4x inflation no real serum mean can reach. The
+    LOINC grounding (loinc 2160-0 → serum itemid) is what restricts the AVG to
+    serum. The open question this iteration pins: does that grounding survive
+    the GROUP BY comparison path, or is it applied only to the ungrouped
+    aggregate? If the grouped compile drops ``resolved_itemids`` (the iteration-8
+    failure mode, but on the SQL comparison path), each gender's mean balloons
+    to the ~5.3-5.4 urine-polluted pool.
+
+    Oracle: BOTH gender groups must report a clean serum-creatinine mean in the
+    clinically valid band [0.7 .. 3.5] mg/dL — a cohort-mean serum creatinine
+    above 3.5 is physiologically impossible and is the unmistakable signature of
+    urine/24-hr pooling. The band accepts the true 1.41 / 1.86 while rejecting
+    the ~5.3 LIKE-pooled value a grounding-drop would produce. Checking *every*
+    group (not ``any``) is the point: a single polluted group must fail.
+    """
+    _SEPSIS_CTE = """
+        WITH sepsis AS (
+            SELECT DISTINCT d.hadm_id
+            FROM `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` d
+            WHERE REGEXP_CONTAINS(d.icd_code, r'^A4[01]')
+               OR REGEXP_CONTAINS(d.icd_code, r'^038')
+               OR d.icd_code IN ('99591','99592','78552','R652')
+        )
+    """
+
+    def _gender_serum_mean(gender: str) -> float:
+        # ``gender`` is a controlled literal ('F'/'M'), so direct interpolation
+        # is safe here (bq_scalar takes no params binding).
+        assert gender in ("F", "M")
+        return bq_scalar(
+            _SEPSIS_CTE
+            + f"""
+            SELECT AVG(l.valuenum)
+            FROM `physionet-data.mimiciv_3_1_hosp.labevents` l
+            JOIN sepsis s ON l.hadm_id = s.hadm_id
+            JOIN `physionet-data.mimiciv_3_1_hosp.admissions` a ON l.hadm_id = a.hadm_id
+            JOIN `physionet-data.mimiciv_3_1_hosp.patients`  p ON a.subject_id = p.subject_id
+            WHERE l.itemid = 50912 AND l.valuenum IS NOT NULL AND p.gender = '{gender}'
+            """
+        )
+
+    gt_f = _gender_serum_mean("F")
+    gt_m = _gender_serum_mean("M")
+    # The label-LIKE pool (serum + urine + 24-hr) over the same cohort — the
+    # wrong answer a grounding-drop produces. Proves the probe is discriminating.
+    gt_polluted = bq_scalar(
+        _SEPSIS_CTE
+        + """
+        SELECT AVG(l.valuenum)
+        FROM `physionet-data.mimiciv_3_1_hosp.labevents` l
+        JOIN sepsis s ON l.hadm_id = s.hadm_id
+        JOIN `physionet-data.mimiciv_3_1_hosp.d_labitems` d ON l.itemid = d.itemid
+        WHERE LOWER(d.label) LIKE '%creatinine%' AND l.valuenum IS NOT NULL
+        """
+    )
+    assert gt_f and gt_m, "ground-truth gender serum-creatinine means missing"
+    assert 0.7 <= float(gt_f) <= 3.5 and 0.7 <= float(gt_m) <= 3.5, (
+        f"clean serum means should sit in the valid band; got F={gt_f} M={gt_m}"
+    )
+    # Discriminating only if pooling really inflates well past the clean band.
+    assert float(gt_polluted) > 4.0, (
+        f"expected label-LIKE pooling to inflate past 4 mg/dL; got {gt_polluted}"
+    )
+
+    answer = bq_pipeline.ask(
+        "Compare the average creatinine between male and female patients with "
+        "sepsis."
+    )
+
+    # Basic validity (no error / clarify, non-empty summary, a query ran).
+    assert_valid_answer(answer, min_groups=1)
+
+    # The discriminating check: two gender groups, EACH a clean serum mean.
+    means = _group_mean_cells(answer)
+    assert len(means) >= 2, (
+        f"expected a mean for each gender group, got {means!r}; "
+        f"table={answer.data_table!r} subs={[s.data_table for s in (answer.sub_answers or [])]!r}"
+    )
+    assert all(0.7 <= v <= 3.5 for v in means), (
+        f"a gender-group creatinine mean is outside the clean serum band "
+        f"[0.7, 3.5] — urine/24-hr pooling (LOINC grounding dropped on the "
+        f"comparison path?): {means!r}"
+    )
