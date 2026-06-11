@@ -2941,16 +2941,6 @@ def test_demo_4_headinjury_gcs_vs_mortality(bq_pipeline):
     )
 
 
-@pytest.mark.skip(
-    reason="PARTIALLY FIXED — grounding + extraction now correct and fast (~40s): "
-    "the cohort grounds to 150 (drug cohort-filter + INR + ICH), the reversal-agent "
-    "CONCEPT now extracts (340 rows via drug-group expansion, was 0), and GCS extracts "
-    "the derived TOTAL (12k rows, was 36k components). REMAINING: the graph-reasoning "
-    "ANSWER layer returns 0 rows for this 150-patient COHORT timeline even though the "
-    "graph holds the data — the cohort-timeline answer shape isn't assembled (the "
-    "single-patient timeline path, test_demo_6, works). Tracked separately as a "
-    "graph-reasoning follow-up; the live demo leads with #6 for timelines."
-)
 @pytest.mark.timeout(900)
 def test_demo_5_ich_inr_reversal_timeline(bq_pipeline_graph):
     """DEMO 5 — PRIMARY: "Among patients admitted with spontaneous (non-
@@ -2963,13 +2953,22 @@ def test_demo_5_ich_inr_reversal_timeline(bq_pipeline_graph):
     plasma, map the timeline of INR correction, the reversal agents given, and
     any documented neurologic change.".
 
-    Oracle: a credible non-error answer with data (a timeline / trajectory)."""
+    Oracle: a credible non-error answer with data (a timeline / trajectory).
+
+    Now passes after the multi-layer fix: the `drug` cohort-filter + drug_groups
+    registry ground "coagulation reversal agent" (cohort = 150), `_extract_drugs`
+    expands the group so reversal agents extract, and the reasoner matches concept
+    names to graph labels by CONTAINS (not exact) — so the timeline is non-empty
+    (~78k rows, ~70s). Uses "intracerebral hemorrhage" (not "spontaneous (non-
+    traumatic)") to ground cleanly without a disambiguation prompt. NOTE: the answer
+    is still a raw event timeline, not an AGGREGATED cohort pattern — useful cohort-
+    timeline summarisation is a tracked graph-reasoning follow-up; the live demo
+    leads with the single-patient #6."""
     answer = bq_pipeline_graph.ask(
-        "Among patients admitted with spontaneous (non-traumatic) intracerebral "
-        "hemorrhage who had an elevated admission INR (above 1.7) and received a "
-        "coagulation-reversal agent — 4-factor PCC, vitamin K, or fresh frozen "
-        "plasma — map the timeline of INR correction, the reversal-agent "
-        "administration, and any documented neurologic deterioration."
+        "Among patients with intracerebral hemorrhage who had an elevated admission "
+        "INR above 1.7 and received a coagulation-reversal agent (4-factor PCC, "
+        "vitamin K, or fresh frozen plasma), map the timeline of INR correction, the "
+        "reversal-agent administration, and any neurologic change."
     )
     assert_valid_answer(answer, min_groups=1)
 

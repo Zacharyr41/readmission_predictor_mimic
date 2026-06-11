@@ -100,14 +100,13 @@ procedure, a chronic-use diagnosis, a lab threshold — not just the fixed axes:
 
 ## Timelines (single small cohorts)
 
-- **#5 (⚠️ not for live)** "Among patients with **spontaneous (non-traumatic)
-  intracerebral hemorrhage** who had an **elevated admission INR (>1.7)** and received
-  a coagulation-reversal agent — 4-factor PCC, vitamin K, or FFP — map the timeline of
+- **#5 (raw timeline; lead with #6 for live)** "Among patients with **intracerebral
+  hemorrhage** who had an **elevated admission INR (>1.7)** and received a
+  coagulation-reversal agent — 4-factor PCC, vitamin K, or FFP — map the timeline of
   INR correction, the reversal-agent administration, and any neurologic change."
-  *(Grounding + extraction now correct and fast (~40s): cohort=150, reversal agents
-  and GCS-total all extract. But the 150-patient COHORT-timeline answer assembly still
-  returns empty — a graph-reasoning follow-up. **Use #6 for a reliable timeline
-  walkthrough.**)*
+  *(Now NON-empty and fast (~78k rows, ~70s): cohort=150, reversal agents + GCS + INR
+  all flow through the reasoner. It returns the RAW per-event timeline, not yet an
+  AGGREGATED cohort pattern — so for a clean live walkthrough still prefer #6.)*
 - **#6 (patient walkthrough)** "Walk me through the entire ICU course of patient
   **18744840** as a timeline — GCS, coagulation labs, reversal agents,
   blood-pressure control, and any procedures."  *(slower: ~60–90 s; the patient is
@@ -140,7 +139,8 @@ instead of a confident wrong number:
 - **EVD-specific split** (#2 primary): mechanical ventilation grounds (above), but the
   external ventricular drain procedure code isn't wired yet — use the ventilation split
   for the demo.
-- **Cohort-timeline answer assembly** (#5): grounding + extraction are fixed (cohort
-  grounds, all concepts extract, fast ~40s), but the graph-reasoning layer doesn't
-  assemble a 150-patient cohort timeline into an answer (single-patient timelines, #6,
-  do work). Needs a cohort-timeline answer shape.
+- **Cohort-timeline AGGREGATION** (#5): grounding + extraction + reasoner are fixed —
+  #5 now returns a NON-empty raw per-event timeline (~78k rows). What's missing is
+  summarising that 150-patient cohort into a PATTERN (most-common event order, median
+  INR-correction time, etc.) instead of a raw event dump. Single-patient timelines (#6)
+  already read well; the cohort case needs an aggregation step.
