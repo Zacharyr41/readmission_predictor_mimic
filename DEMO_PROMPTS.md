@@ -1,13 +1,14 @@
 # Clinical Conversational Demo — Verified Prompt Set
 
-Every prompt below is backed by a **passing live BigQuery end-to-end test** in
-`tests/test_conversational/test_bq_unseen_questions.py` (`-m bigquery`). Use these
-with confidence. Prompts that the system can't yet answer **decline gracefully**
-(the bot asks you to clarify or says it can't) rather than fabricating a number —
-those are listed under *Guardrails*, and the missing capabilities under *Planned*.
+The prompts from **Headline** through **Metadata** are each backed by a **passing live
+BigQuery end-to-end test** in `tests/test_conversational/test_bq_unseen_questions.py`
+(`-m bigquery`) — use those with confidence. The last two sections are different:
+**Guardrails** are prompts the bot correctly **declines** (it asks you to clarify, or
+says it can't, instead of fabricating a number), and **Planned** lists capabilities that
+aren't demo-ready yet.
 
 > Backend: BigQuery (`mimic-485500`, `physionet-data.mimiciv_3_1_*`).
-> Diagnosis grounding is now **ICD-anchored + consistent** (see the highlight below).
+> Diagnosis grounding is **ICD-anchored and consistent** (see the Headline below).
 
 ---
 
@@ -34,7 +35,7 @@ e.g. *"stroke"* → "did you mean ischemic (I63) or hemorrhagic (I60–I62)?"
 - "How many patients were diagnosed with an **ischemic stroke**?"  (I63 / 433–434)
 - "How many patients were diagnosed with a **hemorrhagic stroke**?"  (I60–I62 / 430–432)
 - "How many patients were diagnosed with a **subarachnoid hemorrhage**?"  (**1,576**)
-- "How many patients had an **acute MI**?" · "…**DKA**?" · "…**AKI**?" · "…**ARDS**?"
+- "How many patients had an **acute MI**?"  (the same shape works for **DKA**, **AKI**, **ARDS**)
 - "How many patients had **acute MI** as a **primary** diagnosis?"  (seq_num = 1)
 
 ## Mortality & outcomes
