@@ -79,3 +79,22 @@ def register_default_comparisons(registry: OperationRegistry) -> None:
         admission_clause="mimic:hasDischargeLocation ?group_value ;",
         sql_group_by="a.discharge_location",
     ))
+    # Dynamic split-by-condition axis (SQL-fast-path only). Unlike the fixed-
+    # column axes above, this one has NO ``sql_group_by`` and NO SPARQL clause:
+    # the GROUP BY column is built at compile time from ``cq.split_condition``
+    # as a ``CASE WHEN EXISTS(<sub-condition>) THEN 'yes' ELSE 'no' END`` (see
+    # ``sql_fastpath._comparison_group_by_col``). It exists in the registry so
+    # the decomposer prompt advertises it; the planner routes a
+    # ``comparison_field='condition'`` CQ with a populated ``split_condition``
+    # straight to the SQL fast-path, never to the graph, so the missing SPARQL
+    # clause is never reached.
+    registry.register(ComparisonOperation(
+        name="condition",
+        description=(
+            "split the cohort by presence/absence of a sub-condition supplied "
+            "in split_condition (e.g. a diagnosis like 'chronic anticoagulant "
+            "use', or 'ventilation'); use comparison_field='condition' WITH a "
+            "split_condition object — yields two groups, 'yes' and 'no'"
+        ),
+        sql_group_by=None,
+    ))

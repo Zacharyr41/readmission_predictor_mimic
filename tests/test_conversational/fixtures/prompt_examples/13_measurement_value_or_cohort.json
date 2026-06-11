@@ -1,0 +1,18 @@
+{
+  "original_question": "What proportion of ICU patients developed thrombocytopenia (platelet count < 50 K/µL), hypotension (mean arterial pressure < 65 mmHg), or an elevated shock index, and what was their in-hospital mortality?",
+  "clinical_concepts": [
+    {"name": "in-hospital mortality", "concept_type": "outcome"}
+  ],
+  "patient_filters": [
+    {"field": "icu_stay", "operator": "=", "value": "1"},
+    {"field": "or_any", "operator": "in", "value": "any", "sub_filters": [
+      {"field": "lab_value", "operator": "<", "value": "50", "measurement": "platelet count", "loinc_code": "777-3"},
+      {"field": "vital_value", "operator": "<", "value": "65", "measurement": "mean arterial pressure", "loinc_code": "8478-0"},
+      {"field": "derived_value", "operator": ">=", "value": "0.9", "measurement": "shock index"}
+    ]}
+  ],
+  "aggregation": "count",
+  "return_type": "text",
+  "scope": "cohort",
+  "interpretation_summary": "In-hospital mortality rate over the ICU cohort meeting ANY of three value-defined conditions: platelets < 50 K/uL (lab_value), MAP < 65 mmHg (vital_value), or an elevated shock index (derived_value — its formula and abnormal threshold are looked up from the literature). The three are OR'd via or_any; 'ICU patients' is the icu_stay filter; the proportion and its mortality come from the in-hospital mortality outcome concept with aggregation count."
+}

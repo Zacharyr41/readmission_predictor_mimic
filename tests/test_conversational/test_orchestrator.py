@@ -2409,13 +2409,13 @@ def _make_query_obj():
 # ---------------------------------------------------------------------------
 
 
-def _make_diagnosis_cq(*, icd_codes=None) -> CompetencyQuestion:
+def _make_diagnosis_cq(*, icd_codes=None, name="sepsis") -> CompetencyQuestion:
     """Diagnosis-cohort CQ for testing orchestrator grounding wiring."""
     return CompetencyQuestion(
-        original_question="how many patients had sepsis?",
+        original_question=f"how many patients had {name}?",
         clinical_concepts=[
             ClinicalConcept(
-                name="sepsis", concept_type="diagnosis",
+                name=name, concept_type="diagnosis",
                 icd_codes=icd_codes,
             ),
         ],
@@ -2442,14 +2442,21 @@ class TestDiagnosisGroundingWiring:
     def test_passes_concept_icd_codes_to_compile_sql(
         self,
         mock_decompose_q, mock_extract, mock_merge, mock_build, mock_reason,
-        mock_answer, mock_compile,
+        mock_answer, mock_compile, monkeypatch,
     ):
-        """When the CQ's diagnosis concept carries icd_codes, the resolver
-        returns them directly and compile_sql is called with
-        resolved_icd_codes set to the same list."""
+        """When the CQ's diagnosis concept carries icd_codes AND no candidate
+        grounding covers the term, the LLM-supplied codes pass through to
+        compile_sql unchanged (the escape-hatch). A confident exact-match
+        candidate would otherwise enhance them; here we simulate no coverage."""
+        from src.conversational.concept_resolver import ConceptResolver
         from src.conversational.models import DecompositionResult
         from src.conversational.sql_fastpath import SqlFastpathQuery
 
+        # No candidate coverage → has_prior leaves the LLM codes untouched.
+        monkeypatch.setattr(
+            ConceptResolver, "resolve_diagnosis_candidates",
+            lambda self, concept: [],
+        )
         cq = _make_diagnosis_cq(icd_codes=["A41.9", "R65.21"])
         mock_decompose_q.return_value = DecompositionResult(
             competency_questions=[cq],
@@ -2601,11 +2608,15 @@ class TestProductionMcpGrounding:
         pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
         pipeline.ask("how many patients had sepsis?")
 
-        # icd_autocode was invoked.
+        # icd_autocode was invoked (candidate gathering for "sepsis").
         assert "sepsis" in captured
-        # compile_sql received the grounded codes.
+        # compile_sql received grounded codes (registry + OMOPHub candidate,
+        # normalized + merged — assert the sepsis A41 family is present rather
+        # than an exact list, which now depends on the candidate merge).
         kw = mock_compile.call_args.kwargs
-        assert kw.get("resolved_icd_codes") == ["A41.9", "R65.21"]
+        codes = kw.get("resolved_icd_codes")
+        assert codes, "expected diagnosis to ground to ICD codes"
+        assert any("A41" in c for c in codes)
 
     @_patch_fastpath
     def test_pipeline_falls_back_when_icd_autocode_unavailable(
@@ -2626,7 +2637,9 @@ class TestProductionMcpGrounding:
             return {"status": "unavailable", "error": "MCP timeout"}
         monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
 
-        cq = _make_diagnosis_cq(icd_codes=None)
+        # Use an UNREGISTERED term so the registry Tier-1 doesn't ground it; with
+        # OMOPHub unavailable too there are no candidates → loud fallback.
+        cq = _make_diagnosis_cq(icd_codes=None, name="carcinoid syndrome")
         mock_decompose_q.return_value = DecompositionResult(
             competency_questions=[cq],
         )
@@ -2637,7 +2650,7 @@ class TestProductionMcpGrounding:
         mock_answer.return_value = _make_answer("Count was 100")
 
         pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
-        result = pipeline.ask("how many patients had sepsis?")
+        result = pipeline.ask("how many patients had carcinoid syndrome?")
 
         # No grounded codes passed.
         kw = mock_compile.call_args.kwargs
@@ -3827,3 +3840,123 @@ class TestContextualizationWiring:
         # contextualize fires.
         assert mock_contextualize.call_count == 1
 
+
+
+class TestDiagnosisCandidateDisambiguation:
+    """Orchestrator candidate-disambiguation: a confident exact-match candidate
+    grounds (and overrides partial LLM codes); a genuinely ambiguous term asks."""
+
+    @_patch_fastpath
+    def test_exact_match_overrides_partial_llm_codes(
+        self, mock_decompose_q, mock_extract, mock_merge, mock_build,
+        mock_reason, mock_answer, mock_compile, monkeypatch,
+    ):
+        from src.conversational.concept_resolver import (
+            ConceptResolver, DiagnosisCandidate,
+        )
+        from src.conversational.models import DecompositionResult
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+        cand = DiagnosisCandidate(
+            label="Subarachnoid hemorrhage", icd_codes=("I60", "430"),
+            icd_versions=(10, 9), source="omophub", confidence=0.99,
+        )
+        monkeypatch.setattr(
+            ConceptResolver, "resolve_diagnosis_candidates",
+            lambda self, c: [cand],
+        )
+        cq = _make_diagnosis_cq(icd_codes=["I60"], name="subarachnoid hemorrhage")
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq])
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT 1 AS count_value", params=[], columns=["count_value"])
+        mock_answer.return_value = _make_answer("x")
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_disambiguation=True)
+        pipeline.ask("how many subarachnoid hemorrhage patients?")
+        # The single-version LLM grounding (I60) is overridden by the
+        # both-version exact-match candidate (I60 + 430) — fixes ICD-9 undercount.
+        codes = mock_compile.call_args.kwargs.get("resolved_icd_codes")
+        assert set(codes) == {"I60", "430"}
+
+    @_patch_fastpath
+    def test_asks_when_ambiguous(
+        self, mock_decompose_q, mock_extract, mock_merge, mock_build,
+        mock_reason, mock_answer, mock_compile, monkeypatch,
+    ):
+        from src.conversational.concept_resolver import (
+            ConceptResolver, DiagnosisCandidate,
+        )
+        from src.conversational.models import DecompositionResult
+        cands = [
+            DiagnosisCandidate("ischemic stroke", ("I63",), (10,), "registry", None),
+            DiagnosisCandidate("hemorrhagic stroke", ("I60", "I61"), (10, 10), "registry", None),
+        ]
+        monkeypatch.setattr(
+            ConceptResolver, "resolve_diagnosis_candidates",
+            lambda self, c: cands,
+        )
+        cq = _make_diagnosis_cq(icd_codes=None, name="stroke")
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq])
+        mock_answer.return_value = _make_answer("x")
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_disambiguation=True)
+        result = pipeline.ask("how many stroke patients?")
+        # "stroke" matches neither candidate exactly → clarifying question.
+        assert result.clarifying_question
+        assert "ischemic stroke" in result.clarifying_question
+
+    @_patch_fastpath
+    def test_split_condition_diagnosis_grounds_inclusively_to_union(
+        self, mock_decompose_q, mock_extract, mock_merge, mock_build,
+        mock_reason, mock_answer, mock_compile, monkeypatch,
+    ):
+        """A diagnosis ``split_condition`` whose term yields MULTIPLE candidates
+        is grounded INCLUSIVELY — its ``resolved_icd_codes`` becomes the
+        order-preserving UNION of every candidate's codes, NOT the exact-match-
+        or-ask path. This is what keeps the comparison's 'yes' group non-empty
+        for terms like "chronic anticoagulant use" (Z79.01 / Z79.02 + variants).
+        """
+        from src.conversational.concept_resolver import (
+            ConceptResolver, DiagnosisCandidate,
+        )
+        from src.conversational.models import DecompositionResult
+
+        cands = [
+            DiagnosisCandidate(
+                "long-term anticoagulant use", ("Z7901",), (10,),
+                "omophub", 0.9,
+            ),
+            DiagnosisCandidate(
+                "long-term antithrombotic use", ("Z7902", "V5861"),
+                (10, 9), "registry", None,
+            ),
+        ]
+        monkeypatch.setattr(
+            ConceptResolver, "resolve_diagnosis_candidates",
+            lambda self, c: cands,
+        )
+        split = PatientFilter(
+            field="diagnosis", operator="contains",
+            value="chronic anticoagulant use",
+        )
+        cq = CompetencyQuestion(
+            original_question="mortality split by chronic antithrombotic use",
+            clinical_concepts=[
+                ClinicalConcept(name="in-hospital mortality", concept_type="outcome"),
+            ],
+            aggregation="count",
+            scope="comparison",
+            comparison_field="condition",
+            split_condition=split,
+        )
+        decomp = DecompositionResult(competency_questions=[cq])
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_disambiguation=True)
+        pipeline._disambiguate_diagnoses(decomp, original_question="x")
+
+        # UNION of all candidate codes, dedup, order preserved.
+        assert split.resolved_icd_codes == ["Z7901", "Z7902", "V5861"]
+        # Inclusive grounding must NOT raise a clarifying question for the split.
+        assert not cq.clarifying_question

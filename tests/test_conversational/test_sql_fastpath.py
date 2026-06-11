@@ -432,6 +432,384 @@ class TestOutcomeReadmissionRate:
         assert "readmitted60" in cols
 
 
+class TestSplitByConditionComparison:
+    """``comparison_field='condition'`` + a ``split_condition`` groups the cohort
+    by presence/absence of a sub-condition, emitting
+    ``CASE WHEN EXISTS(<sub-condition>) THEN 'yes' ELSE 'no' END`` as the GROUP BY
+    — so demo prompts like "mortality split by whether [a condition]" compile in
+    one SQL pass instead of being declined for an unsupported axis."""
+
+    @staticmethod
+    def _split_cq(*, concepts, split_condition, aggregation="count"):
+        return CompetencyQuestion(
+            original_question="test",
+            clinical_concepts=[
+                ClinicalConcept(name=n, concept_type=t) for n, t in concepts
+            ],
+            aggregation=aggregation,
+            scope="comparison",
+            comparison_field="condition",
+            split_condition=split_condition,
+        )
+
+    @staticmethod
+    def _compile(backend, cq):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        return compile_sql(cq, backend, get_default_registry())
+
+    # -- SQL shape -----------------------------------------------------------
+
+    def test_diagnosis_split_emits_case_when_exists_with_prefix_param(self, backend):
+        cq = self._split_cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            split_condition=PatientFilter(
+                field="diagnosis", operator="contains",
+                value="chronic anticoagulant use",
+                resolved_icd_codes=["Z79.01", "Z79.02"],
+            ),
+        )
+        q = self._compile(backend, cq)
+        assert "CASE WHEN EXISTS" in q.sql
+        assert "di2.icd_code LIKE ?" in q.sql
+        # Codes are normalized (dots stripped, uppercased) and prefix-matched.
+        assert "Z7901%" in q.params and "Z7902%" in q.params
+        # The grouped outcome shape carries the group_value + flag columns.
+        assert q.columns[0] == "group_value"
+
+    def test_ventilation_split_emits_procedureevents_itemids(self, backend):
+        cq = self._split_cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            split_condition=PatientFilter(
+                field="ventilation", operator="=", value="1",
+            ),
+        )
+        q = self._compile(backend, cq)
+        assert "CASE WHEN EXISTS" in q.sql
+        assert "procedureevents" in q.sql
+        # Invasive Ventilation (225792), Intubation (224385), Non-invasive
+        # Ventilation (225794) — verified-live procedureevents itemids.
+        assert "225792" in q.sql and "224385" in q.sql and "225794" in q.sql
+
+    def test_ventilation_detected_by_value_keyword(self, backend):
+        # The decomposer routinely mislabels ventilation field="diagnosis"
+        # value="mechanical ventilation"; the keyword path still routes it to the
+        # procedureevents EXISTS, not an (empty) diagnosis title-LIKE.
+        cq = self._split_cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            split_condition=PatientFilter(
+                field="diagnosis", operator="contains",
+                value="mechanical ventilation",
+            ),
+        )
+        q = self._compile(backend, cq)
+        assert "procedureevents" in q.sql and "225792" in q.sql
+        assert "%mechanical ventilation%" not in q.params  # not a diagnosis LIKE
+
+    def test_or_any_split_ors_each_grounded_leaf(self, backend):
+        # "anticoagulants OR antiplatelets" → or_any of two diagnosis leaves;
+        # each grounds to its codes and the EXISTS clauses are OR-ed together.
+        cq = self._split_cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            split_condition=PatientFilter(
+                field="or_any", operator="in", value="any",
+                sub_filters=[
+                    PatientFilter(
+                        field="diagnosis", operator="contains",
+                        value="chronic anticoagulant use",
+                        resolved_icd_codes=["Z79.01"],
+                    ),
+                    PatientFilter(
+                        field="diagnosis", operator="contains",
+                        value="chronic antiplatelet use",
+                        resolved_icd_codes=["Z79.02"],
+                    ),
+                ],
+            ),
+        )
+        q = self._compile(backend, cq)
+        assert q.sql.count("EXISTS") >= 2  # one per leaf, OR-ed
+        assert "Z7901%" in q.params and "Z7902%" in q.params
+
+    def test_diagnosis_split_without_codes_falls_back_to_title_like(self, backend):
+        cq = self._split_cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            split_condition=PatientFilter(
+                field="diagnosis", operator="contains",
+                value="atrial fibrillation",
+            ),
+        )
+        q = self._compile(backend, cq)
+        assert "CASE WHEN EXISTS" in q.sql
+        # Title-LIKE fallback joins the dictionary on the typed phrase.
+        assert "d_icd_diagnoses" in q.sql
+        assert "%atrial fibrillation%" in q.params
+
+    # -- Executable parity on the synthetic fixture --------------------------
+
+    def test_split_by_diagnosis_groups_cohort_yes_no(self, backend):
+        # Split the whole cohort's in-hospital mortality by whether the
+        # admission carries an ischemic-stroke (I63x) diagnosis. Fixture: 101,
+        # 102, 103, 106 are I63x (yes → 4 admissions, only 106 expired); 104,
+        # 105 are not (no → 2 admissions, none expired). So the 'yes' group's
+        # mortality is its OWN rate 1/4, distinct from the pooled 1/6.
+        cq = self._split_cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            split_condition=PatientFilter(
+                field="diagnosis", operator="contains",
+                value="ischemic stroke", resolved_icd_codes=["I63"],
+            ),
+        )
+        q = self._compile(backend, cq)
+        rows = [dict(zip(q.columns, r)) for r in backend.execute(q.sql, q.params)]
+        assert {r["group_value"] for r in rows} == {"yes", "no"}
+        yes_died = [
+            r for r in rows if r["group_value"] == "yes" and r["expired"] == 1
+        ][0]
+        assert math.isclose(yes_died["fraction"], 0.25, rel_tol=1e-6)
+        # 'no' group: 2 admissions, none expired → survival fraction 1.0.
+        no_survived = [
+            r for r in rows if r["group_value"] == "no" and r["expired"] == 0
+        ][0]
+        assert math.isclose(no_survived["fraction"], 1.0, rel_tol=1e-6)
+
+    def test_split_by_diagnosis_on_count_aggregate(self, backend):
+        # The split axis also works on a plain diagnosis COUNT. Count epilepsy
+        # admissions (G40x: only hadm 104), split by whether they ALSO carry a
+        # stroke (I63x) diagnosis. hadm 104 has no I63x, so it lands in the 'no'
+        # group → count 1; the 'yes' group is empty (absent from the result).
+        cq = self._split_cq(
+            concepts=[("epilepsy", "diagnosis")],
+            split_condition=PatientFilter(
+                field="diagnosis", operator="contains",
+                value="ischemic stroke", resolved_icd_codes=["I63"],
+            ),
+        )
+        # Ground the main concept's codes via the orchestrator-supplied kwarg.
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        q = compile_sql(
+            cq, backend, get_default_registry(), resolved_icd_codes=["G40"],
+        )
+        rows = [dict(zip(q.columns, r)) for r in backend.execute(q.sql, q.params)]
+        by_group = {r["group_value"]: r["count"] for r in rows}
+        assert by_group.get("no") == 1
+        assert "yes" not in by_group
+
+
+class TestEventOrderingPostProcessor:
+    """``_event_ordering_post_processor`` turns per-patient FIRST-event-time rows
+    into the most-common temporal order + per-first-event fractions + median
+    inter-event gap."""
+
+    @staticmethod
+    def _post(rows):
+        from src.conversational.operations import get_default_registry
+
+        op = get_default_registry().require("aggregate", "event_ordering")
+        return op.post_processor(rows)
+
+    def test_most_common_sequence_and_gcs_first_fraction(self):
+        from datetime import datetime
+
+        # patient1: intubation @ t0, GCS drop @ t1 → order (intubation, GCS drop)
+        # patient2: GCS drop @ t0, intubation @ t1 → order (GCS drop, intubation)
+        # patient3: GCS drop @ t0, intubation @ t1 → same as patient2
+        # So the most common sequence is "GCS drop → intubation" (2 of 3), and
+        # GCS drop is FIRST for 2 of 3 patients.
+        rows = [
+            {"hadm_id": 1, "event_name": "intubation", "event_time": datetime(2020, 1, 1, 0, 0)},
+            {"hadm_id": 1, "event_name": "GCS drop", "event_time": datetime(2020, 1, 1, 1, 0)},
+            {"hadm_id": 2, "event_name": "GCS drop", "event_time": datetime(2020, 1, 2, 0, 0)},
+            {"hadm_id": 2, "event_name": "intubation", "event_time": datetime(2020, 1, 2, 3, 0)},
+            {"hadm_id": 3, "event_name": "GCS drop", "event_time": datetime(2020, 1, 3, 0, 0)},
+            {"hadm_id": 3, "event_name": "intubation", "event_time": datetime(2020, 1, 3, 5, 0)},
+        ]
+        out, cols = self._post(rows)
+        row = out[0]
+        assert row["most_common_sequence"] == "GCS drop → intubation"
+        assert row["n_patients"] == 2
+        assert math.isclose(row["pct"], 2 / 3, rel_tol=1e-6)
+        # GCS drop is first for patients 2 and 3 → 2/3.
+        assert math.isclose(row["gcs_drop_first_fraction"], 2 / 3, rel_tol=1e-6)
+        assert "gcs_drop_first_fraction" in cols
+        # Median first→last gap: patient1 1h, patient2 3h, patient3 5h → median 3h.
+        assert math.isclose(row["median_first_to_last_hours"], 3.0, rel_tol=1e-6)
+
+    def test_null_event_times_are_dropped(self):
+        from datetime import datetime
+
+        # patient1 only ever had intubation (GCS drop time is NULL) → a 1-event
+        # sequence; patient2 had both. The NULL row must not count.
+        rows = [
+            {"hadm_id": 1, "event_name": "intubation", "event_time": datetime(2020, 1, 1, 0, 0)},
+            {"hadm_id": 1, "event_name": "GCS drop", "event_time": None},
+            {"hadm_id": 2, "event_name": "intubation", "event_time": datetime(2020, 1, 2, 0, 0)},
+            {"hadm_id": 2, "event_name": "GCS drop", "event_time": datetime(2020, 1, 2, 2, 0)},
+        ]
+        out, _ = self._post(rows)
+        # patient1's gap is undefined (only 1 event); patient2's is 2h → median 2h.
+        assert math.isclose(out[0]["median_first_to_last_hours"], 2.0, rel_tol=1e-6)
+
+    def test_empty_rows_returns_null_summary(self):
+        out, cols = self._post([])
+        assert out[0]["most_common_sequence"] is None
+        assert out[0]["n_patients"] == 0
+        assert "median_first_to_last_hours" in cols
+
+
+class TestEventOrderingCompile:
+    """``_compile_event_ordering`` emits a UNION ALL of per-event MIN(time)
+    sub-queries over the cohort, one per event concept."""
+
+    @staticmethod
+    def _ordering_cq(*, concepts, filters=None):
+        return CompetencyQuestion(
+            original_question="test",
+            clinical_concepts=[
+                ClinicalConcept(name=n, concept_type=t) for n, t in concepts
+            ],
+            patient_filters=[
+                PatientFilter(field=f, operator=o, value=v)
+                for f, o, v in (filters or [])
+            ],
+            aggregation="event_ordering",
+            scope="cohort",
+        )
+
+    @staticmethod
+    def _compile(backend, cq):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        return compile_sql(cq, backend, get_default_registry())
+
+    def test_union_all_with_min_time_per_event(self, backend):
+        cq = self._ordering_cq(
+            concepts=[
+                ("intubation", "procedure"),
+                ("hyperosmolar therapy", "drug"),
+            ],
+        )
+        q = self._compile(backend, cq)
+        assert q.columns == ["hadm_id", "event_name", "event_time"]
+        assert "UNION ALL" in q.sql
+        # Intubation → procedureevents itemids (Invasive Ventilation 225792 +
+        # Intubation 224385); hyperosmolar → mannitol/hypertonic.
+        assert "procedureevents" in q.sql
+        assert "225792" in q.sql and "224385" in q.sql
+        assert "%mannitol%" in q.sql and "%hypertonic%" in q.sql
+        assert q.sql.count("MIN(") == 2
+        assert "AS event_time" in q.sql
+
+    def test_cohort_filter_applied_in_each_subquery(self, backend):
+        # The ICH diagnosis cohort filter must appear in BOTH sub-queries so all
+        # event times are within-cohort. It is applied as a correlated EXISTS
+        # (not a JOIN) so two diagnosis filters can't collide on alias ``di``.
+        cq = self._ordering_cq(
+            concepts=[
+                ("intubation", "procedure"),
+                ("hyperosmolar therapy", "drug"),
+            ],
+            filters=[("diagnosis", "contains", "intracerebral hemorrhage")],
+        )
+        cq.patient_filters[0].resolved_icd_codes = ["I61"]
+        q = self._compile(backend, cq)
+        # Each sub-query's WHERE carries a correlated EXISTS for the cohort
+        # filter — one per sub-query — not a cohort table JOIN.
+        assert q.sql.count("EXISTS (") == 2
+        assert "di2.icd_code LIKE ?" in q.sql
+        # With resolved codes the EXISTS uses a prefix LIKE; applied in each of
+        # the 2 sub-queries, the LIKE param repeats.
+        assert q.params.count("I61%") == 2
+
+    def test_two_diagnosis_filters_no_alias_collision(self, backend):
+        # Regression for "Duplicate table alias di": a cohort with TWO diagnosis
+        # filters (ICH + ICP-monitoring proxy) must compile without colliding on
+        # the hardcoded ``di`` alias. EXISTS sub-conditions self-contain their
+        # aliases, so the UNION compiles + executes.
+        cq = self._ordering_cq(
+            concepts=[
+                ("intubation", "procedure"),
+                ("hyperosmolar therapy", "drug"),
+            ],
+            filters=[
+                ("diagnosis", "contains", "intracerebral hemorrhage"),
+                ("diagnosis", "contains", "intracranial pressure monitoring"),
+            ],
+        )
+        cq.patient_filters[0].resolved_icd_codes = ["I61"]
+        cq.patient_filters[1].resolved_icd_codes = ["I62"]
+        q = self._compile(backend, cq)
+        # Two cohort filters × two sub-queries = four EXISTS predicates.
+        assert q.sql.count("EXISTS (") == 4
+        # No cohort table JOIN means no hardcoded ``di``/``dd`` alias — so the
+        # two diagnosis filters can't collide. Each sub-query only JOINs its own
+        # event table (procedureevents); the cohort filters are all EXISTS.
+        assert " di " not in f" {q.sql} " and " di." not in q.sql
+        assert " dd " not in f" {q.sql} " and " dd." not in q.sql
+
+    def test_gcs_event_skipped_offline_but_others_remain(self, backend):
+        # The DuckDB/offline backend has no derived GCS table, so the GCS event
+        # is dropped — but intubation + hyperosmolar still form a valid UNION.
+        cq = self._ordering_cq(
+            concepts=[
+                ("intubation", "procedure"),
+                ("hyperosmolar therapy", "drug"),
+                ("GCS drop", "vital"),
+            ],
+        )
+        q = self._compile(backend, cq)
+        assert "UNION ALL" in q.sql
+        assert q.sql.count("MIN(") == 2  # GCS sub-query omitted offline
+        assert "mimiciv_3_1_derived" not in q.sql
+
+    def test_executable_union_orders_events_on_fixture(self, backend):
+        # Add a procedureevents table + mannitol prescriptions so a 2-event
+        # ordering executes end-to-end. Two patients (101, 106) get intubation
+        # BEFORE mannitol; one patient (103) gets mannitol only. So the
+        # most-common sequence is "intubation → hyperosmolar therapy" (2 of 3).
+        conn = backend._conn
+        conn.execute(
+            "CREATE TABLE procedureevents ("
+            "subject_id INTEGER, hadm_id INTEGER, stay_id INTEGER, "
+            "itemid INTEGER, starttime TIMESTAMP)"
+        )
+        conn.execute(
+            "INSERT INTO procedureevents VALUES "
+            "(1, 101, 1001, 224385, '2150-01-15 09:00:00'), "
+            "(5, 106, 1003, 225792, '2151-04-11 06:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO prescriptions VALUES "
+            "(1, 101, '2150-01-15 12:00:00', '2150-01-16 12:00:00', "
+            "'Mannitol 20%', 50.0, 'g', 'IV'), "
+            "(5, 106, '2151-04-11 10:00:00', '2151-04-12 10:00:00', "
+            "'Mannitol 20%', 50.0, 'g', 'IV'), "
+            "(2, 103, '2151-03-02 08:00:00', '2151-03-03 08:00:00', "
+            "'Mannitol 20%', 50.0, 'g', 'IV')"
+        )
+        cq = self._ordering_cq(
+            concepts=[
+                ("intubation", "procedure"),
+                ("hyperosmolar therapy", "drug"),
+            ],
+        )
+        q = self._compile(backend, cq)
+        raw = backend.execute(q.sql, q.params)
+        rows = [dict(zip(q.columns, r)) for r in raw]
+        from src.conversational.operations import get_default_registry
+
+        op = get_default_registry().require("aggregate", "event_ordering")
+        out, _ = op.post_processor(rows)
+        # 101 and 106 both go intubation → mannitol; 103 has mannitol only. So
+        # the 2-event order wins (2 of 3 patients).
+        assert out[0]["most_common_sequence"] == "intubation → hyperosmolar therapy"
+        assert out[0]["n_patients"] == 2
+
+
 class TestDiagnosisGroundedCodePrefixMatch:
     """OMOPHub's ``icd_autocode`` returns DOTTED, often category-level codes
     ('I63', 'I63.9'); MIMIC stores them UNDOTTED and BILLABLE ('I6300', 'I639').
@@ -831,10 +1209,10 @@ class TestDiagnosisCountIcdGrounded:
         assert "A419%" in query.params
         assert "R6521%" in query.params
 
-    def test_combines_icd_prefix_with_title_like_as_or(self, backend):
-        """Final WHERE shape: ``((di.icd_code LIKE ?) OR (<existing LIKE>))``.
-        ICD-9 admissions whose codes aren't in OMOPHub still match via
-        the LIKE branch on dd.long_title."""
+    def test_emits_codes_only_when_grounded(self, backend):
+        """When ICD codes are supplied the cohort clause is CODES-ONLY — the
+        broad title-LIKE is dropped so a precise grounding can't be re-polluted
+        by title matches (the diagnosis analogue of the biomarker→LOINC fix)."""
         from src.conversational.operations import get_default_registry
         from src.conversational.sql_fastpath import compile_sql
 
@@ -848,15 +1226,11 @@ class TestDiagnosisCountIcdGrounded:
             resolved_names=["sepsis"],
             resolved_icd_codes=["A41.9"],
         )
-        # Both clauses present.
+        # ICD-prefix clause present...
         assert "di.icd_code LIKE ?" in query.sql
         assert "A419%" in query.params
-        # The LIKE clause is backend-dependent (DuckDB ILIKE; BigQuery
-        # LOWER(...) LIKE LOWER(...)). Either form is acceptable.
-        sql_upper = query.sql.upper()
-        assert "ILIKE" in sql_upper or "LIKE" in sql_upper
-        # The label-substring param ("%sepsis%") is still emitted.
-        assert "%sepsis%" in query.params
+        # ...and the broad title-LIKE substring is NOT bound (codes-only).
+        assert "%sepsis%" not in query.params
 
     def test_falls_back_to_like_only_when_codes_none(self, backend):
         """Default behavior preserved: no resolved_icd_codes → LIKE-only.
@@ -1001,3 +1375,153 @@ class TestCompileRefusesUnsupportedShapes:
         )
         with pytest.raises(ValueError, match="(?i)concept"):
             compile_sql(cq, backend, get_default_registry())
+
+
+# ===========================================================================
+# Measurement-value cohort filters (lab / vital / derived) + composition
+# ===========================================================================
+
+from pathlib import Path as _Path  # noqa: E402
+from src.conversational.concept_resolver import ConceptResolver  # noqa: E402
+from src.conversational.derived_formula import (  # noqa: E402
+    DerivedFormula, Operand,
+)
+
+_MAPPINGS = _Path(__file__).parent.parent.parent / "data" / "mappings"
+
+
+def _outcome_cq(filters):
+    return CompetencyQuestion(
+        original_question="test",
+        clinical_concepts=[ClinicalConcept(
+            name="in-hospital mortality", concept_type="outcome")],
+        patient_filters=filters,
+        aggregation="count", scope="cohort", return_type="text_and_table",
+    )
+
+
+class TestMeasurementValueFilters:
+    @pytest.fixture
+    def resolver(self):
+        return ConceptResolver(mappings_dir=_MAPPINGS)
+
+    def test_lab_value_grounds_to_itemid_and_executes(self, backend, resolver):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(
+            field="lab_value", operator="<", value="50",
+            measurement="platelet count", loinc_code="777-3")])
+        q = compile_sql(cq, backend, get_default_registry(), resolver=resolver)
+        assert "EXISTS" in q.sql and "labevents" in q.sql
+        assert 51265 in q.params  # platelet itemid, grounded via LOINC
+        assert ".valuenum <" in q.sql
+        backend.execute(q.sql, q.params)  # executes without error
+
+    def test_lab_value_label_fallback_without_resolver(self, backend):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(
+            field="lab_value", operator="<", value="50",
+            measurement="platelet count")])
+        q = compile_sql(cq, backend, get_default_registry())  # no resolver
+        assert "EXISTS" in q.sql and "d_labitems" in q.sql  # label-LIKE fallback
+        assert "%platelet count%" in q.params
+        backend.execute(q.sql, q.params)
+
+    def test_vital_value_grounds_to_chartevents(self, backend, resolver):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(
+            field="vital_value", operator=">", value="90",
+            measurement="heart rate", loinc_code="8867-4")])
+        q = compile_sql(cq, backend, get_default_registry(), resolver=resolver)
+        assert "EXISTS" in q.sql and "chartevents" in q.sql
+        assert 220045 in q.params and ".valuenum >" in q.sql
+        backend.execute(q.sql, q.params)
+
+    def test_icu_stay_filter_exists_icustays(self, backend):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(field="icu_stay", operator="=", value="1")])
+        q = compile_sql(cq, backend, get_default_registry())
+        assert "EXISTS" in q.sql and "icustays" in q.sql
+        backend.execute(q.sql, q.params)
+
+    def test_or_any_unions_child_exists_clauses(self, backend, resolver):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(
+            field="or_any", operator="in", value="any", sub_filters=[
+                PatientFilter(field="lab_value", operator="<", value="50",
+                              measurement="platelet count", loinc_code="777-3"),
+                PatientFilter(field="vital_value", operator=">", value="90",
+                              measurement="heart rate", loinc_code="8867-4"),
+                PatientFilter(field="icu_stay", operator="=", value="1"),
+            ])])
+        q = compile_sql(cq, backend, get_default_registry(), resolver=resolver)
+        assert " OR " in q.sql and q.sql.count("EXISTS") >= 3
+        backend.execute(q.sql, q.params)
+
+
+class TestDerivedValueFilter:
+    @pytest.fixture
+    def shock_index(self):
+        # threshold 0.5 so the fixture's co-charted HR 78 / SBP 120 = 0.65 matches
+        return DerivedFormula(
+            operands=(
+                Operand(ref="hr", itemids=(220045,), table="chartevents",
+                        guard_low=10, guard_high=300),
+                Operand(ref="sbp", itemids=(220179,), table="chartevents",
+                        guard_low=30, guard_high=300),
+            ),
+            expression={"op": "/", "args": ["hr", "sbp"]},
+            operator=">=", threshold=0.5,
+            time_semantics="per_instant", stay_aggregate="max",
+        )
+
+    def test_per_instant_time_matched_self_join(self, backend, shock_index):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(
+            field="derived_value", operator=">=", value="0.5",
+            measurement="shock index")])
+        q = compile_sql(cq, backend, get_default_registry(),
+                        derived_formulas={"shock index": shock_index})
+        # Row-level "ever crosses" form (de-correlatable EXISTS, no HAVING).
+        # (The outer outcome query has its own GROUP BY hospital_expire_flag —
+        # only the derived EXISTS must be aggregate-free.)
+        assert ".stay_id = " in q.sql and ".charttime = " in q.sql
+        assert "NULLIF(" in q.sql and ") >= ?" in q.sql
+        assert "HAVING" not in q.sql
+        backend.execute(q.sql, q.params)  # co-charted HR/SBP → ratio computable
+
+    def test_per_stay_three_operand_subqueries(self, backend):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        # anion-gap-style 3-operand per_stay formula (all labevents)
+        formula = DerivedFormula(
+            operands=(
+                Operand(ref="na", itemids=(50983,), table="labevents", aggregate="max"),
+                Operand(ref="cl", itemids=(50902,), table="labevents", aggregate="max"),
+                Operand(ref="hco3", itemids=(50882,), table="labevents", aggregate="max"),
+            ),
+            expression={"op": "-", "args": ["na", {"op": "+", "args": ["cl", "hco3"]}]},
+            operator=">", threshold=12, time_semantics="per_stay",
+        )
+        cq = _outcome_cq([PatientFilter(
+            field="derived_value", operator=">", value="12",
+            measurement="anion gap")])
+        q = compile_sql(cq, backend, get_default_registry(),
+                        derived_formulas={"anion gap": formula})
+        assert q.sql.count("SELECT MAX(mv.valuenum)") == 3  # one subquery per operand
+        backend.execute(q.sql, q.params)
+
+    def test_missing_formula_drops_arm_to_empty(self, backend):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+        cq = _outcome_cq([PatientFilter(
+            field="derived_value", operator=">=", value="0.9",
+            measurement="shock index")])
+        q = compile_sql(cq, backend, get_default_registry())  # no derived_formulas
+        assert "1 = 0" in q.sql
+        backend.execute(q.sql, q.params)

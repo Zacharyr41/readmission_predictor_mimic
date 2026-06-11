@@ -1,0 +1,15 @@
+{
+  "original_question": "For intracerebral hemorrhage patients with ICP monitoring, what is the most common order of intubation, hyperosmolar therapy, and a GCS drop?",
+  "clinical_concepts": [
+    {"name": "intubation", "concept_type": "procedure"},
+    {"name": "hyperosmolar therapy", "concept_type": "drug"},
+    {"name": "GCS drop", "concept_type": "vital"}
+  ],
+  "patient_filters": [
+    {"field": "diagnosis", "operator": "contains", "value": "intracerebral hemorrhage"}
+  ],
+  "aggregation": "event_ordering",
+  "return_type": "text_and_table",
+  "scope": "cohort",
+  "interpretation_summary": "The most common temporal order of intubation, hyperosmolar therapy, and a GCS drop among intracerebral hemorrhage patients with ICP monitoring."
+}

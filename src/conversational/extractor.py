@@ -42,6 +42,7 @@ _BQ_TABLES = {
     "d_labitems": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.d_labitems",
     "chartevents": f"{_BQ_SOURCE}.mimiciv_3_1_icu.chartevents",
     "d_items": f"{_BQ_SOURCE}.mimiciv_3_1_icu.d_items",
+    "procedureevents": f"{_BQ_SOURCE}.mimiciv_3_1_icu.procedureevents",
     "prescriptions": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.prescriptions",
     "diagnoses_icd": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.diagnoses_icd",
     "d_icd_diagnoses": f"{_BQ_SOURCE}.mimiciv_3_1_hosp.d_icd_diagnoses",

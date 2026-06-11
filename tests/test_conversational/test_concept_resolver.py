@@ -793,6 +793,107 @@ class TestIcdAutocodeRetryResilience:
         )
 
 
+class TestResolveVital:
+    """Vital-sign LOINC→chartevents grounding — the vital analogue of
+    TestBiomarkerLoincResolution. Pure in-codebase (chartitem_to_snomed.json),
+    no MCP."""
+
+    @pytest.fixture
+    def resolver(self):
+        return ConceptResolver(mappings_dir=MAPPINGS_DIR)
+
+    def test_map_grounds_to_chartevents_itemids(self, resolver):
+        res = resolver.resolve_vital(ClinicalConcept(
+            name="mean arterial pressure", concept_type="vital",
+            loinc_code="8478-0"))
+        assert res.itemids == [220052, 220181]
+        assert res.fallback_reason is None
+
+    def test_systolic_bp_grounds(self, resolver):
+        res = resolver.resolve_vital(ClinicalConcept(
+            name="systolic blood pressure", concept_type="vital",
+            loinc_code="8480-6"))
+        assert 220050 in res.itemids and 220179 in res.itemids
+
+    def test_heart_rate_grounds_includes_measurement_itemid(self, resolver):
+        res = resolver.resolve_vital(ClinicalConcept(
+            name="heart rate", concept_type="vital", loinc_code="8867-4"))
+        assert 220045 in res.itemids  # the HR measurement itemid
+
+    def test_no_loinc_silent_fallback(self, resolver):
+        res = resolver.resolve_vital(ClinicalConcept(
+            name="heart rate", concept_type="vital"))
+        assert res.itemids is None and res.fallback_reason is None
+        assert res.names == ["heart rate"]
+
+    def test_unknown_loinc_loud_fallback(self, resolver):
+        res = resolver.resolve_vital(ClinicalConcept(
+            name="made up vital", concept_type="vital", loinc_code="99999-9"))
+        assert res.itemids is None and res.fallback_reason is not None
+
+
+class TestClinicalFormulaLookupRetryResilience:
+    """PubMed-backed formula evidence must survive a *transient* miss — mirrors
+    TestIcdAutocodeRetryResilience. The transient is injected deterministically
+    via a sequenced mock, so these fail reliably without the retry and pass with
+    it (no real PubMed dependence)."""
+
+    @pytest.fixture(autouse=True)
+    def _fast_no_sleep(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        cr._cached_clinical_formula_evidence.cache_clear()
+        monkeypatch.setattr(cr, "_FORMULA_LOOKUP_RETRY_BACKOFF", 0.0, raising=False)
+
+    @staticmethod
+    def _sequenced(responses, calls):
+        def fake(name, **kwargs):
+            calls[0] += 1
+            return responses[min(calls[0] - 1, len(responses) - 1)]
+        return fake
+
+    def test_retries_transient_unavailable_then_succeeds(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        calls = [0]
+        responses = [
+            {"status": "unavailable", "error": "transient PubMed timeout"},
+            {"status": "ok", "results": [
+                {"pmid": "1", "title": "Shock index",
+                 "abstract": "HR/SBP, abnormal >= 0.9", "url": "u"}]},
+        ]
+        monkeypatch.setattr(
+            cr, "clinical_formula_lookup", self._sequenced(responses, calls),
+            raising=False)
+        out = cr._cached_clinical_formula_evidence("shock index")
+        assert out and out[0]["pmid"] == "1"
+        assert calls[0] >= 2
+
+    def test_retries_transient_empty_then_succeeds(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        calls = [0]
+        responses = [
+            {"status": "ok", "results": []},
+            {"status": "ok", "results": [
+                {"pmid": "2", "title": "t", "abstract": "a", "url": "u"}]},
+        ]
+        monkeypatch.setattr(
+            cr, "clinical_formula_lookup", self._sequenced(responses, calls),
+            raising=False)
+        out = cr._cached_clinical_formula_evidence("anion gap")
+        assert out and out[0]["pmid"] == "2"
+        assert calls[0] >= 2
+
+    def test_persistent_failure_bounded_then_raises(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        calls = [0]
+        responses = [{"status": "unavailable", "error": "PubMed down"}]
+        monkeypatch.setattr(
+            cr, "clinical_formula_lookup", self._sequenced(responses, calls),
+            raising=False)
+        with pytest.raises(LookupError):
+            cr._cached_clinical_formula_evidence("shock index")
+        assert calls[0] == cr._FORMULA_LOOKUP_MAX_ATTEMPTS
+
+
 # ---------------------------------------------------------------------------
 # Inc 7 — biomarker mimic_itemid_search fallback when LOINC mapping misses
 # ---------------------------------------------------------------------------
@@ -1097,3 +1198,68 @@ class TestLiveOmophubFrontHalfGrounding:
             isinstance(p, str) and p.startswith(("A41", "R65", "A40", "A42"))
             for p in query.params
         ), f"expected sepsis-family ICD codes in params; got {query.params!r}"
+
+
+class TestResolveDiagnosisCandidates:
+    """Candidate-disambiguation gathering: distinct candidates for ambiguous
+    terms, merged candidates for one-concept terms, registry-only offline."""
+
+    def _resolver(self, grounding):
+        return ConceptResolver(
+            mappings_dir=MAPPINGS_DIR, enable_mcp_grounding=grounding,
+        )
+
+    def _dx(self, name):
+        return ClinicalConcept(name=name, concept_type="diagnosis")
+
+    def test_distinct_candidates_for_ambiguous_term(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        # OMOPHub returns the precise nontraumatic SAH codes (both versions).
+        def fake(text, **kw):
+            return {"status": "ok", "results": [
+                {"code": "430", "title": "Subarachnoid hemorrhage",
+                 "version": "9", "confidence": 1.0},
+                {"code": "I60", "title": "Subarachnoid haemorrhage",
+                 "version": "10", "confidence": 0.998},
+            ]}
+        monkeypatch.setattr(cr, "icd_autocode", fake)
+        cands = self._resolver(True).resolve_diagnosis_candidates(
+            self._dx("subarachnoid hemorrhage"))
+        # Precise OMOPHub grouping (I60+430) + broad registry hemorrhagic-stroke
+        # = two DISTINCT candidates → the orchestrator will disambiguate.
+        assert len(cands) == 2
+        omo = next(c for c in cands if "omophub" in c.source)
+        reg = next(c for c in cands if "registry" in c.source)
+        assert set(omo.icd_codes) == {"I60", "430"}
+        # registry cohort is broader (adds I61/I62 = intracerebral/other)
+        assert "I61" in reg.icd_codes and "I60" in reg.icd_codes
+
+    def test_same_concept_candidates_merge(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        # OMOPHub "Sepsis" label matches the registry cohort name "sepsis" →
+        # the two collapse into ONE merged candidate (no spurious question).
+        def fake(text, **kw):
+            return {"status": "ok", "results": [
+                {"code": "995.91", "title": "Sepsis",
+                 "version": "9", "confidence": 1.0}]}
+        monkeypatch.setattr(cr, "icd_autocode", fake)
+        cands = self._resolver(True).resolve_diagnosis_candidates(
+            self._dx("sepsis"))
+        assert len(cands) == 1
+        assert "99591" in cands[0].icd_codes  # dot-normalised
+        assert "A41" in cands[0].icd_codes    # registry codes unioned in
+
+    def test_registry_only_when_mcp_disabled(self):
+        cands = self._resolver(False).resolve_diagnosis_candidates(
+            self._dx("sepsis"))
+        assert len(cands) == 1
+        assert cands[0].source == "registry"
+
+    def test_unknown_term_no_candidates(self, monkeypatch):
+        from src.conversational import concept_resolver as cr
+        monkeypatch.setattr(
+            cr, "icd_autocode",
+            lambda text, **kw: {"status": "ok", "results": []})
+        cands = self._resolver(True).resolve_diagnosis_candidates(
+            self._dx("zxqv nonexistent condition"))
+        assert cands == []

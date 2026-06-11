@@ -124,5 +124,15 @@
       "covid", "covid 19", "covid-19", "sars-cov-2",
       "coronavirus", "novel coronavirus"
     ]
+  },
+  "chronic_antithrombotic": {
+    "icd10_prefixes": ["Z79.01", "Z79.02"],
+    "icd9_prefixes": ["V58.61", "V58.63"],
+    "aliases": [
+      "chronic anticoagulant use", "long-term anticoagulant use",
+      "long term use of anticoagulants", "chronic antiplatelet use",
+      "long-term antiplatelet use", "long term use of antithrombotics",
+      "chronic anticoagulation", "chronic antithrombotic use"
+    ]
   }
 }

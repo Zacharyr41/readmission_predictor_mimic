@@ -225,10 +225,10 @@ class TestPhiCompartmentalization:
 class TestSubAgentToolCoverage:
     def test_sub_agent_constructed_with_all_tool_defs(self):
         """When you construct the sub-agent, the underlying EvidenceAgent
-        receives ALL_TOOL_DEFS — all 12 source-of-truth tools (3
+        receives ALL_TOOL_DEFS — all 13 source-of-truth tools (3
         originals + 5 Phase G core + 3 Phase G-extra extensions +
-        mimic_itemid_search Phase H follow-up) are advertised to the
-        model on every consult() call."""
+        mimic_itemid_search Phase H follow-up + clinical_formula_lookup)
+        are advertised to the model on every consult() call."""
         client = mock_anthropic([_valid_payload()])
         agent = HealthSourceOfTruthAgent(client)
         agent.consult("any question")
@@ -237,7 +237,8 @@ class TestSubAgentToolCoverage:
         assert names == {
             "pubmed_search", "mimic_distribution_lookup",
             "mimic_itemid_search",
-            "loinc_reference_range", "snomed_search", "snomed_expand_ecl",
+            "loinc_reference_range", "clinical_formula_lookup",
+            "snomed_search", "snomed_expand_ecl",
             "rxnorm_lookup", "code_map", "trials_search",
             "openfda_drug_label", "icd_lookup", "icd_autocode",
         }

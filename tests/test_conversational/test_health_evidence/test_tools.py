@@ -1429,3 +1429,132 @@ class TestMimicItemidSearchRegistry:
             mimic_itemid_search as direct,
         )
         assert mimic_itemid_search is direct
+
+
+# ===========================================================================
+# clinical_formula_lookup — PubMed-grounded derived-quantity definitions
+# ===========================================================================
+
+
+_SHOCK_INDEX_EFETCH_XML = """<?xml version="1.0"?>
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>33123456</PMID>
+      <Article>
+        <ArticleTitle>The shock index in emergency triage</ArticleTitle>
+        <Abstract>
+          <AbstractText>The shock index, defined as heart rate divided by
+          systolic blood pressure, is considered elevated when it is greater
+          than or equal to 0.9 and predicts in-hospital mortality.</AbstractText>
+        </Abstract>
+      </Article>
+    </MedlineCitation>
+  </PubmedArticle>
+</PubmedArticleSet>"""
+
+
+def _efetch_response(text: str):
+    resp = MagicMock(spec=requests.Response)
+    resp.status_code = 200
+    resp.raise_for_status.return_value = None
+    resp.text = text
+    return resp
+
+
+class TestClinicalFormulaLookup:
+    """The PubMed-backed formula/definition lookup: searches PubMed (esearch)
+    then fetches ABSTRACTS (efetch), where the formula is stated. Envelope
+    contract identical to the other tools; never raises."""
+
+    def test_happy_path_returns_abstract_evidence(self, monkeypatch):
+        def fake_get(url, params=None, timeout=None, **kw):
+            if "esearch" in url:
+                return _make_response(_esearch_payload(["33123456"]))
+            return _efetch_response(_SHOCK_INDEX_EFETCH_XML)
+
+        monkeypatch.setattr(
+            "src.conversational.health_evidence.tools.requests.get", fake_get,
+        )
+        result = he_tools.clinical_formula_lookup("shock index")
+        assert result["status"] == "ok"
+        assert len(result["results"]) == 1
+        rec = result["results"][0]
+        assert rec["pmid"] == "33123456"
+        assert "heart rate divided by" in rec["abstract"].lower()
+        assert "systolic blood pressure" in rec["abstract"].lower()
+        assert rec["url"] == "https://pubmed.ncbi.nlm.nih.gov/33123456/"
+
+    def test_queries_pubmed_esearch_and_efetch(self, monkeypatch):
+        """Proves the definition is MCP/PubMed-SOURCED (not hardcoded): both
+        NCBI endpoints are hit and the formula name is in the search term."""
+        calls: list[str] = []
+
+        def fake_get(url, params=None, timeout=None, **kw):
+            calls.append(url)
+            if "esearch" in url:
+                assert "shock index" in (params or {}).get("term", "")
+                return _make_response(_esearch_payload(["33123456"]))
+            assert "33123456" in (params or {}).get("id", "")
+            return _efetch_response(_SHOCK_INDEX_EFETCH_XML)
+
+        monkeypatch.setattr(
+            "src.conversational.health_evidence.tools.requests.get", fake_get,
+        )
+        he_tools.clinical_formula_lookup("shock index")
+        assert any("esearch" in u for u in calls)
+        assert any("efetch" in u for u in calls)
+
+    def test_empty_idlist_skips_efetch(self, monkeypatch):
+        calls: list[str] = []
+
+        def fake_get(url, **kw):
+            calls.append(url)
+            return _make_response(_esearch_payload([]))
+
+        monkeypatch.setattr(
+            "src.conversational.health_evidence.tools.requests.get", fake_get,
+        )
+        result = he_tools.clinical_formula_lookup("not a real index xyzzy")
+        assert result == {"status": "ok", "results": []}
+        assert len(calls) == 1 and "esearch" in calls[0]
+
+    def test_network_error_returns_unavailable(self, monkeypatch):
+        def fake_get(*a, **kw):
+            raise requests.RequestException("connection refused")
+
+        monkeypatch.setattr(
+            "src.conversational.health_evidence.tools.requests.get", fake_get,
+        )
+        result = he_tools.clinical_formula_lookup("shock index")
+        assert result["status"] == "unavailable"
+
+    def test_malformed_efetch_xml_returns_unavailable(self, monkeypatch):
+        def fake_get(url, **kw):
+            if "esearch" in url:
+                return _make_response(_esearch_payload(["33123456"]))
+            return _efetch_response("<not-valid-xml ><<<")
+
+        monkeypatch.setattr(
+            "src.conversational.health_evidence.tools.requests.get", fake_get,
+        )
+        result = he_tools.clinical_formula_lookup("shock index")
+        assert result["status"] == "unavailable"
+
+    def test_invalid_name_returns_unavailable_without_network(self, monkeypatch):
+        def fake_get(*a, **kw):  # must NOT be called
+            raise AssertionError("network hit for an invalid name")
+
+        monkeypatch.setattr(
+            "src.conversational.health_evidence.tools.requests.get", fake_get,
+        )
+        assert he_tools.clinical_formula_lookup("a")["status"] == "unavailable"
+        assert he_tools.clinical_formula_lookup("bad; drop table")["status"] == "unavailable"
+
+    def test_registered_in_dispatch_and_defs(self):
+        from src.conversational.health_evidence.tool_defs import (
+            ALL_TOOL_DEFS, TOOL_DISPATCH,
+        )
+        assert TOOL_DISPATCH["clinical_formula_lookup"] is he_tools.clinical_formula_lookup
+        names = {d["name"] for d in ALL_TOOL_DEFS}
+        assert "clinical_formula_lookup" in names

@@ -226,6 +226,39 @@ Map clinical entities to one of these concept_type values:
                      comparison ("by sex") goes in comparison_field.
                      NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
                      and use aggregation (e.g. aggregation="mean") for LOS queries
+- "procedure"     → Procedures / interventions recorded as events: intubation,
+                     mechanical ventilation, extubation, dialysis lines, etc.
+                     Used as one of the events in an ``event_ordering`` question
+                     (see EVENT ORDERING below).
+
+EVENT ORDERING — when the question asks for the most common ORDER / SEQUENCE of
+several clinical events ("which usually comes first — intubation, hyperosmolar
+therapy, or a GCS drop?"), set ``aggregation: "event_ordering"`` and list EACH
+event as its own clinical_concept (≥2 of them), using the natural concept_type
+for each (a procedure like "intubation", a drug like "hyperosmolar therapy", a
+vital like "GCS drop"). Keep ``scope: "cohort"`` and put the cohort restriction
+(e.g. the diagnosis) in patient_filters. The system finds each patient's FIRST
+time of each event and reports the most common order. Do NOT add
+temporal_constraints — the ordering IS the answer.
+
+VALUE-THRESHOLD COHORTS — when the user defines a cohort by a measurement crossing
+a cutoff (e.g. "platelets < 50k", "MAP < 65", "lactate > 4") or by a named derived
+clinical index ("an elevated shock index"), express it as a patient_filter — NOT a
+diagnosis filter, and never drop the threshold:
+  - lab_value     → a lab analyte: set ``measurement`` (e.g. "platelet count"),
+                    ``loinc_code``, ``operator``, and numeric ``value``.
+  - vital_value   → a charted vital: set ``measurement`` (e.g. "mean arterial
+                    pressure"), ``loinc_code``, ``operator``, and ``value``.
+  - derived_value → a named index/score (e.g. "shock index"): set ``measurement``
+                    to the index name; its formula + abnormal threshold are looked
+                    up from the literature (operator/value are placeholders).
+  - or_any        → OR several conditions into one union cohort ("A or B or C"):
+                    put the child filters in ``sub_filters`` (operator "in").
+  - icu_stay      → "ICU patients" → {"field":"icu_stay","operator":"=","value":"1"}.
+  Common LOINCs: platelet count 777-3, mean arterial pressure 8478-0, heart rate
+  8867-4, systolic blood pressure 8480-6, creatinine 2160-0, lactate 2524-7. A
+  "proportion of patients who … and their mortality" question is an ``outcome``
+  concept (name "in-hospital mortality") + aggregation "count" + these filters.
 """
 
 
@@ -247,12 +280,13 @@ Use this when the user's question can be answered by one structured query.
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}
   ],
   "patient_filters": [
-    {"field": "<see Supported Operations / filter>", "operator": "<see that filter's row>", "value": "<string or list of strings>"}
+    {"field": "<see Supported Operations / filter>", "operator": "<see that filter's row>", "value": "<string or list of strings>", "measurement": "<analyte name; lab_value/vital_value/derived_value only>", "loinc_code": "<analyte LOINC; lab_value/vital_value only>", "sub_filters": "<list of child filter objects; or_any only>"}
   ],
   "aggregation": "<see Supported Operations / aggregate; or null>",
   "return_type": "<text|table|text_and_table|visualization>",
   "scope": "<single_patient|cohort|comparison>",
   "comparison_field": "<see Supported Operations / comparison_axis; or null>",
+  "split_condition": "<a single patient_filter object; REQUIRED when comparison_field is 'condition', omit/null otherwise. Splits the cohort by presence/absence of this sub-condition (e.g. a diagnosis or ventilation), yielding 'yes'/'no' groups>",
   "interpretation_summary": "<one-sentence restatement of what the pipeline will actually compute, in clinician-readable language; always required>",
   "clarifying_question": "<question to ask the user when a field above would otherwise be a guess; null/omitted when confident>"
 }
@@ -392,6 +426,16 @@ When scope is "comparison", set comparison_field to the dimension being compared
 continuous field ("above 70 and under 70", "over 65 vs 65 or below"), do NOT use
 a continuous comparison_field — return Shape B with one filtered cohort sub-CQ
 per side (see "Numeric-threshold split" under Big-Question Decomposition).
+
+When the comparison splits the cohort by **whether patients have a second
+condition** ("mortality split by whether they were mechanically ventilated",
+"... split by whether they have chronic anticoagulant use"), set
+``comparison_field: "condition"`` AND populate ``split_condition`` with the
+sub-condition as a single patient_filter object (a ``diagnosis`` filter, or
+``{"field": "ventilation", ...}``). This yields two groups, "yes" and "no". The
+main metric stays in ``clinical_concepts`` / ``aggregation`` and the BASE cohort
+stays in ``patient_filters`` — ``split_condition`` is ONLY the dividing
+sub-condition.
 
 **Similarity + causal combination**: a question like "compare tPA vs no-tPA
 among patients similar to hadm 101" is causal-with-narrowing — set

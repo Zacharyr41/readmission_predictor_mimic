@@ -56,6 +56,18 @@ class FilterCompileContext:
     admission_alias: str = "a"
     patient_alias: str = "p"
     enable_mcp_grounding: bool = False
+    # ``resolver`` (a ConceptResolver) lets measurement-value filters
+    # (lab_value / vital_value) ground their analyte LOINC → itemids via
+    # ``resolve_biomarker`` / ``resolve_vital``. ``derived_formulas`` maps a
+    # derived-index name → a pre-resolved ``DerivedFormula`` (built by the
+    # orchestrator from a PubMed lookup) for the ``derived_value`` filter.
+    # ``registry`` is self-injected by ``compile_filters`` so the ``or_any``
+    # composite can compile its child filters. All default ``None`` so existing
+    # callers / unit tests stay offline-safe (the filters fall back to
+    # label-LIKE or drop to an empty cohort when grounding is unavailable).
+    resolver: Any = None
+    registry: Any = None
+    derived_formulas: dict[str, Any] | None = None
 
 
 @dataclass
@@ -351,6 +363,12 @@ class OperationRegistry:
         where: list[str] = []
         params: list[Any] = []
         needs_patients = False
+
+        # Make the registry reachable to compile_fns (the ``or_any`` composite
+        # compiles its child filters through it). Set here so no caller has to
+        # remember to thread it.
+        if ctx.registry is None:
+            ctx.registry = self
 
         for f in filters:
             op = self.get("filter", f.field)

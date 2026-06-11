@@ -23,11 +23,28 @@ Unsupported CQ shapes raise ``ValueError`` so a misrouted CQ fails loudly.
 
 from __future__ import annotations
 
+import contextvars
 import re
 from dataclasses import dataclass
 from typing import Any
 
-from src.conversational.models import ClinicalConcept, CompetencyQuestion
+from src.conversational.models import (
+    ClinicalConcept,
+    CompetencyQuestion,
+    PatientFilter,
+)
+
+# Ambient grounding context for measurement-value filters, set by ``compile_sql``
+# and read by ``_filter_fragment`` — avoids threading ``resolver`` /
+# ``derived_formulas`` through all six concept-type compile branches. Holds
+# ``(resolver, derived_formulas)``: ``resolver`` (a ConceptResolver) lets the
+# lab_value/vital_value filters ground their analyte LOINC → itemids;
+# ``derived_formulas`` maps a derived-index name → a pre-resolved DerivedFormula
+# for the derived_value filter. Defaults to ``(None, None)`` so the filters fall
+# back to label-LIKE / drop gracefully when grounding wasn't supplied.
+_FILTER_GROUNDING_CTX: contextvars.ContextVar = contextvars.ContextVar(
+    "sql_fastpath_filter_grounding", default=(None, None),
+)
 from src.conversational.operations import (
     FilterCompileContext,
     OperationRegistry,
@@ -109,6 +126,41 @@ def compile_sql(
     resolved_icd_codes: list[str] | None = None,
     enable_mcp_grounding: bool = False,
     outlier_screen: "OutlierScreen | None" = None,
+    resolver: Any = None,
+    derived_formulas: dict[str, Any] | None = None,
+) -> SqlFastpathQuery:
+    """Compile a CQ to a SQL fast-path query.
+
+    Thin wrapper that publishes the measurement-value-filter grounding context
+    (``resolver`` + ``derived_formulas``) for ``_filter_fragment`` via a
+    contextvar, then delegates to ``_compile_sql_dispatch``. The try/finally
+    reset keeps the ambient context from leaking across compile calls. See
+    ``_compile_sql_dispatch`` for the full parameter documentation.
+    """
+    token = _FILTER_GROUNDING_CTX.set((resolver, derived_formulas))
+    try:
+        return _compile_sql_dispatch(
+            cq, backend, registry,
+            resolved_names=resolved_names,
+            resolved_itemids=resolved_itemids,
+            resolved_icd_codes=resolved_icd_codes,
+            enable_mcp_grounding=enable_mcp_grounding,
+            outlier_screen=outlier_screen,
+        )
+    finally:
+        _FILTER_GROUNDING_CTX.reset(token)
+
+
+def _compile_sql_dispatch(
+    cq: CompetencyQuestion,
+    backend: Any,
+    registry: OperationRegistry,
+    *,
+    resolved_names: list[str] | None = None,
+    resolved_itemids: list[int] | None = None,
+    resolved_icd_codes: list[str] | None = None,
+    enable_mcp_grounding: bool = False,
+    outlier_screen: "OutlierScreen | None" = None,
 ) -> SqlFastpathQuery:
     """Dispatch to the right compile branch based on CQ shape.
 
@@ -150,6 +202,16 @@ def compile_sql(
     # Defensive re-check: planner should already have gated these out,
     # but an explicit raise here surfaces misrouting instead of emitting
     # broken SQL.
+    #
+    # event_ordering is a MULTI-event operation (it deliberately carries ≥2
+    # clinical_concepts and asks "which event came first"), so it is dispatched
+    # BEFORE the single-concept / temporal guards below — those would otherwise
+    # reject it. It returns per-patient FIRST-event-time rows; the aggregate's
+    # ``_event_ordering_post_processor`` turns them into the ordering summary.
+    if cq.aggregation == "event_ordering":
+        return _compile_event_ordering(cq, backend, registry,
+                                       enable_mcp_grounding=enable_mcp_grounding)
+
     if cq.temporal_constraints:
         raise ValueError(
             "sql_fastpath cannot compile a CQ with temporal_constraints — "
@@ -232,20 +294,193 @@ def compile_sql(
 
 
 def _comparison_group_by_col(
-    cq: CompetencyQuestion, registry: OperationRegistry,
-) -> str | None:
-    """Return the SQL GROUP BY column for a comparison CQ, or None if the
-    CQ isn't a comparison scope."""
+    cq: CompetencyQuestion,
+    registry: OperationRegistry,
+    backend: Any | None = None,
+    *,
+    enable_mcp_grounding: bool = False,
+) -> tuple[str | None, list[Any]]:
+    """Return ``(group_by_col, group_by_params)`` for a comparison CQ.
+
+    For the FIXED-column axes (gender/age/admission_type/…) the column is the
+    axis's ``sql_group_by`` and there are no params — ``(col, [])``.
+
+    For the dynamic ``condition`` axis (``comparison_field == "condition"``
+    plus a ``split_condition``) the column is a correlated
+    ``CASE WHEN EXISTS(<sub-condition>) THEN 'yes' ELSE 'no' END`` and the
+    params are the sub-condition's. The same CASE/EXISTS text + params appear
+    in both the SELECT and the GROUP BY; callers reference the column by its
+    SELECT alias in the GROUP BY (``GROUP BY group_value``) so the params are
+    supplied exactly once.
+
+    Returns ``(None, [])`` when the CQ isn't a comparison scope.
+    """
     if cq.scope != "comparison":
-        return None
+        return None, []
     if not cq.comparison_field:
         raise ValueError("comparison scope requires comparison_field")
+    # The dynamic split-by-condition axis is checked BEFORE the sql_group_by
+    # guard because its registered axis carries ``sql_group_by=None`` (the
+    # column is built here from the sub-condition, not a fixed table column).
+    if cq.comparison_field == "condition":
+        if cq.split_condition is None:
+            raise ValueError(
+                "comparison_field='condition' requires split_condition"
+            )
+        if backend is None:
+            raise ValueError(
+                "split-by-condition comparison requires a backend to build "
+                "the EXISTS sub-condition"
+            )
+        ctx = _split_condition_ctx(backend, enable_mcp_grounding)
+        exists_sql, params = _split_condition_exists(cq.split_condition, ctx)
+        col = f"CASE WHEN {exists_sql} THEN 'yes' ELSE 'no' END"
+        return col, list(params)
     axis_op = registry.get("comparison_axis", cq.comparison_field)
     if axis_op is None or getattr(axis_op, "sql_group_by", None) is None:
         raise ValueError(
             f"comparison axis {cq.comparison_field!r} has no sql_group_by"
         )
-    return axis_op.sql_group_by
+    return axis_op.sql_group_by, []
+
+
+def _split_condition_ctx(backend: Any, enable_mcp_grounding: bool) -> FilterCompileContext:
+    """Build a FilterCompileContext for compiling a split_condition's EXISTS.
+
+    Threads the same measurement-grounding context (resolver / derived
+    formulas) the cohort filters use so a ``lab_value`` / ``vital_value``
+    split_condition grounds its analyte → itemids identically. The registry
+    is left ``None`` here; ``_split_condition_exists`` injects it on the rare
+    composite path that needs it.
+    """
+    resolver, derived_formulas = _FILTER_GROUNDING_CTX.get()
+    return FilterCompileContext(
+        backend=backend,
+        enable_mcp_grounding=enable_mcp_grounding,
+        resolver=resolver,
+        derived_formulas=derived_formulas,
+    )
+
+
+def _split_condition_exists(
+    f: "PatientFilter", ctx: FilterCompileContext,
+) -> tuple[str, list[Any]]:
+    """Build a correlated ``EXISTS(...)`` for a split-by-condition sub-condition.
+
+    The outer query's admissions alias is ``a`` (every fast-path FROM/JOIN
+    introduces ``admissions a``), so the inner queries correlate on
+    ``a.hadm_id``. Returns ``(exists_sql, params)``.
+
+    Grounding per field — mirrors the cohort-filter EXISTS style in
+    ``operations_filters.py``:
+
+    * ``diagnosis`` — ICD-grounded via ``f.resolved_icd_codes`` (set by the
+      orchestrator's ``_disambiguate_diagnoses``); each code is normalised and
+      prefix-matched (``norm + '%'``), exactly like the diagnosis cohort filter.
+      When no codes are grounded, fall back to a title-LIKE EXISTS joining
+      ``d_icd_diagnoses`` on ``f.value``.
+    * ``ventilation`` — invasive/non-invasive ventilation + intubation
+      procedure events (``procedureevents`` itemids 225792 'Invasive
+      Ventilation', 224385 'Intubation', 225794 'Non-invasive Ventilation').
+      No params.
+    * anything else (``lab_value`` / ``vital_value`` / ``icu_stay`` / …) —
+      compiled through the registered filter op, whose ``FilterFragment.where[0]``
+      is already an ``EXISTS(...)``; that fragment is reused verbatim.
+    """
+    t = ctx.backend.table
+    field = getattr(f, "field", None)
+    value = f.value if isinstance(f.value, str) else ""
+
+    # Mechanical ventilation is a PROCEDURE, but the decomposer routinely
+    # mislabels it field="diagnosis" value="mechanical ventilation". Detect it by
+    # marker so either shape lands on the procedureevents EXISTS (invasive vent /
+    # intubation / non-invasive vent). Markers are specific enough to skip
+    # diagnoses that merely mention a ventilator (e.g. ventilator-assoc pneumonia).
+    if field == "ventilation" or any(
+        m in value.lower() for m in ("mechanical vent", "intubat", "invasive vent")
+    ):
+        inner = (
+            f"SELECT 1 FROM {t('procedureevents')} pe "
+            f"WHERE pe.hadm_id = a.hadm_id "
+            f"AND pe.itemid IN (225792, 224385, 225794)"
+        )
+        return f"EXISTS ({inner})", []
+
+    # ``or_any`` composite — match if ANY sub-condition holds (e.g. chronic
+    # anticoagulant OR antiplatelet use). Recurse so each leaf grounds via its own
+    # path; diagnosis leaves carry resolved_icd_codes set by the orchestrator.
+    if field == "or_any":
+        parts: list[str] = []
+        or_params: list[Any] = []
+        for sub in (getattr(f, "sub_filters", None) or []):
+            sub_sql, sub_p = _split_condition_exists(sub, ctx)
+            parts.append(sub_sql)
+            or_params.extend(sub_p)
+        if parts:
+            return "(" + " OR ".join(parts) + ")", or_params
+        return "EXISTS (SELECT 1 WHERE 1 = 0)", []
+
+    if field == "diagnosis":
+        resolved = getattr(f, "resolved_icd_codes", None)
+        if resolved:
+            from src.conversational.health_evidence.cohorts import (
+                normalize_icd_prefix,
+            )
+            clauses: list[str] = []
+            params: list[Any] = []
+            for code in resolved:
+                norm = normalize_icd_prefix(code)
+                if not norm:
+                    continue
+                clauses.append("di2.icd_code LIKE ?")
+                params.append(norm + "%")
+            if clauses:
+                inner = (
+                    f"SELECT 1 FROM {t('diagnoses_icd')} di2 "
+                    f"WHERE di2.hadm_id = a.hadm_id AND ({' OR '.join(clauses)})"
+                )
+                return f"EXISTS ({inner})", params
+        # No grounded codes → title-LIKE fallback (ICD-9 / ungrounded terms).
+        value = f.value if isinstance(f.value, str) else ""
+        inner = (
+            f"SELECT 1 FROM {t('diagnoses_icd')} di2 "
+            f"JOIN {t('d_icd_diagnoses')} dd2 ON di2.icd_code = dd2.icd_code "
+            f"AND di2.icd_version = dd2.icd_version "
+            f"WHERE di2.hadm_id = a.hadm_id "
+            f"AND ({ctx.backend.ilike('dd2.long_title')} OR di2.icd_code LIKE ?)"
+        )
+        return f"EXISTS ({inner})", [f"%{value}%", f"{value}%"]
+
+    # Generic path: reuse the registered filter's EXISTS fragment. The filter
+    # compile_fns correlate on ``ctx.admission_alias`` ("a" by default), which
+    # is exactly the outer alias here.
+    registry = ctx.registry or _default_operation_registry()
+    ctx.registry = registry
+    op = registry.get("filter", field)
+    if op is None:
+        # Unknown field — emit a never-true sub-condition so the split degrades
+        # to a single "no" group rather than crashing.
+        return "EXISTS (SELECT 1 WHERE 1 = 0)", []
+    frag = op.compile(f, ctx)
+    if frag.joins or not frag.where:
+        # A filter that needs an unconditional JOIN can't be a self-contained
+        # correlated EXISTS; degrade safely.
+        return "EXISTS (SELECT 1 WHERE 1 = 0)", []
+    where_sql = " AND ".join(frag.where)
+    return f"({where_sql})", list(frag.params)
+
+
+def _default_operation_registry() -> OperationRegistry:
+    """Lazy accessor for the process-wide default registry.
+
+    Used by ``_split_condition_exists`` when no registry is threaded through
+    the compile context (e.g. a direct ``_comparison_group_by_col`` call in a
+    unit test). Kept out of the module top-level import to avoid the
+    operations ↔ operations_filters circular-import dance at module load.
+    """
+    from src.conversational.operations import get_default_registry
+
+    return get_default_registry()
 
 
 def _filter_fragment(
@@ -266,8 +501,10 @@ def _filter_fragment(
     OMOPHub-backed icd_autocode in the production pipeline. Default
     False keeps unit tests offline-safe.
     """
+    resolver, derived_formulas = _FILTER_GROUNDING_CTX.get()
     ctx = FilterCompileContext(
         backend=backend, enable_mcp_grounding=enable_mcp_grounding,
+        resolver=resolver, derived_formulas=derived_formulas,
     )
     frag = registry.compile_filters(cq.patient_filters, ctx)
     needs_readmission = any(
@@ -359,7 +596,9 @@ def _compile_event_aggregate(
         name_col = "d.label"
         join_dict = f"JOIN {dict_table} ON c.itemid = d.itemid"
 
-    group_by_col = _comparison_group_by_col(cq, registry)
+    group_by_col, group_by_params = _comparison_group_by_col(
+        cq, registry, backend, enable_mcp_grounding=enable_mcp_grounding,
+    )
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
@@ -478,9 +717,15 @@ def _compile_event_aggregate(
                 "count", "n_outliers",
             ]
             select_params = list(screen_cond_params) * 3
-        group_by_clause = f"GROUP BY {group_by_col}"
+        # GROUP BY the SELECT alias rather than re-emitting the axis expression,
+        # so a parameterized axis (the ``condition`` CASE/EXISTS) binds its
+        # params exactly once (in the SELECT). Both DuckDB and BigQuery permit
+        # grouping by output alias.
+        group_by_clause = "GROUP BY group_value"
 
-    params: list[Any] = select_params + where_params
+    # ``group_by_col`` is the first SELECT column for the comparison shape, so
+    # its params lead the positional list.
+    params: list[Any] = list(group_by_params) + select_params + where_params
 
     sql = (
         f"SELECT {select_cols} "
@@ -568,7 +813,9 @@ def _compile_drug_aggregate(
         )
 
     t = backend.table
-    group_by_col = _comparison_group_by_col(cq, registry)
+    group_by_col, group_by_params = _comparison_group_by_col(
+        cq, registry, backend, enable_mcp_grounding=enable_mcp_grounding,
+    )
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
@@ -602,11 +849,13 @@ def _compile_drug_aggregate(
             f"COUNT(DISTINCT a.hadm_id) AS count"
         )
         columns = ["group_value", "avg_value", "count"]
-        group_by_clause = f"GROUP BY {group_by_col}"
+        group_by_clause = "GROUP BY group_value"
 
     name_clause, name_params = _ilike_any(backend, "pr.drug", names)
     where_clauses: list[str] = [name_clause]
-    params: list[Any] = list(name_params)
+    # ``group_by_col`` (when present) leads the SELECT, so its params precede
+    # the WHERE-clause params positionally.
+    params: list[Any] = list(group_by_params) + list(name_params)
     where_clauses.extend(filter_where)
     params.extend(filter_params)
 
@@ -663,7 +912,9 @@ def _compile_microbiology_aggregate(
         )
 
     t = backend.table
-    group_by_col = _comparison_group_by_col(cq, registry)
+    group_by_col, group_by_params = _comparison_group_by_col(
+        cq, registry, backend, enable_mcp_grounding=enable_mcp_grounding,
+    )
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
@@ -694,7 +945,7 @@ def _compile_microbiology_aggregate(
             f"COUNT(DISTINCT a.hadm_id) AS count"
         )
         columns = ["group_value", "avg_value", "count"]
-        group_by_clause = f"GROUP BY {group_by_col}"
+        group_by_clause = "GROUP BY group_value"
 
     # Microbiology matches both specimen type and organism name, so each
     # resolved name contributes two ILIKE clauses OR-combined.
@@ -707,7 +958,9 @@ def _compile_microbiology_aggregate(
         )
         per_name_params.extend([f"%{nt}%", f"%{nt}%"])
     where_clauses: list[str] = ["(" + " OR ".join(per_name_clauses) + ")"]
-    params: list[Any] = list(per_name_params)
+    # ``group_by_col`` (when present) leads the SELECT, so its params precede
+    # the WHERE-clause params positionally.
+    params: list[Any] = list(group_by_params) + list(per_name_params)
 
     # Qualifier attributes narrow the SAME culture, so they *AND* with the
     # name match. A microbiology question often names two dimensions — a
@@ -776,7 +1029,9 @@ def _compile_diagnosis_count(
         )
 
     t = backend.table
-    group_by_col = _comparison_group_by_col(cq, registry)
+    group_by_col, group_by_params = _comparison_group_by_col(
+        cq, registry, backend, enable_mcp_grounding=enable_mcp_grounding,
+    )
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
@@ -809,7 +1064,7 @@ def _compile_diagnosis_count(
             f"COUNT(DISTINCT di.hadm_id) AS count"
         )
         columns = ["group_value", "avg_value", "count"]
-        group_by_clause = f"GROUP BY {group_by_col}"
+        group_by_clause = "GROUP BY group_value"
 
     # Each resolved name contributes (title ILIKE OR icd_code LIKE), all OR-combined.
     per_name_clauses: list[str] = []
@@ -832,7 +1087,9 @@ def _compile_diagnosis_count(
     # (mirrors the cohort-registry Tier-1 prefix match). The LIKE branch still
     # catches ICD-9 admissions outside OMOPHub's ICD10CM-only coverage. Empty
     # list defensively treated as "no grounding".
-    params: list[Any] = []
+    # ``group_by_col`` (when present) leads the SELECT, so its params precede
+    # the WHERE-clause params positionally.
+    params: list[Any] = list(group_by_params)
     code_prefix_clauses: list[str] = []
     code_prefix_params: list[str] = []
     if icd_codes:
@@ -844,12 +1101,16 @@ def _compile_diagnosis_count(
             code_prefix_clauses.append("di.icd_code LIKE ?")
             code_prefix_params.append(norm + "%")
     if code_prefix_clauses:
-        cohort_clause = f"(({' OR '.join(code_prefix_clauses)}) OR {like_or})"
+        # Codes-only when grounded: drop the broad title-LIKE so a precise ICD
+        # grounding isn't re-polluted by title matches (e.g. nontraumatic SAH
+        # I60+430 must not re-admit traumatic S06.6). The title-LIKE stays the
+        # fallback ONLY when nothing grounds.
+        cohort_clause = f"({' OR '.join(code_prefix_clauses)})"
         params.extend(code_prefix_params)
     else:
         cohort_clause = like_or
+        params.extend(per_name_params)
     where_clauses: list[str] = [cohort_clause]
-    params.extend(per_name_params)
     # "Primary diagnosis of X" → restrict to the principal diagnosis
     # (``seq_num = 1``); higher seq_nums are secondary diagnoses / comorbidities.
     # General for any condition (no per-condition logic).
@@ -975,7 +1236,9 @@ def _compile_outcome_rate(
     its share of the whole cohort."""
     t = backend.table
     flag_expr, flag_alias, flag_needs_rl = _outcome_flag(concept)
-    group_by_col = _comparison_group_by_col(cq, registry)
+    group_by_col, group_by_params = _comparison_group_by_col(
+        cq, registry, backend, enable_mcp_grounding=enable_mcp_grounding,
+    )
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
         _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
 
@@ -999,10 +1262,10 @@ def _compile_outcome_rate(
     joins.extend(filter_joins)
 
     where_clauses = list(filter_where)
-    params = list(filter_params)
     where_part = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
     if group_by_col is None:
+        params = list(filter_params)
         sql = (
             f"SELECT {flag_expr} AS {flag_alias}, "
             f"COUNT(DISTINCT a.hadm_id) AS count, "
@@ -1016,17 +1279,200 @@ def _compile_outcome_rate(
     else:
         # Partition the share window by the comparison axis so each group's
         # fraction is its OWN rate, not its slice of the whole cohort.
-        sql = (
-            f"SELECT {group_by_col} AS group_value, "
-            f"{flag_expr} AS {flag_alias}, "
-            f"COUNT(DISTINCT a.hadm_id) AS count, "
-            f"COUNT(DISTINCT a.hadm_id) / "
-            f"NULLIF(SUM(COUNT(DISTINCT a.hadm_id)) OVER (PARTITION BY {group_by_col}), 0) "
-            f"AS fraction "
+        #
+        # The axis is computed ONCE per admission in an inner subquery (as the
+        # ``group_value`` column), then the outer query groups + windows over
+        # that plain column. This keeps the axis expression — and its params —
+        # in a single position, which matters for the dynamic ``condition`` axis
+        # whose ``CASE WHEN EXISTS(...)`` correlates on ``a.hadm_id``: re-emitting
+        # a correlated subquery in GROUP BY/PARTITION BY is rejected by DuckDB
+        # ("column must appear in the GROUP BY"). For the fixed-column axes this
+        # is equivalent to the prior direct GROUP BY (grouping by a renamed
+        # column), so their results are unchanged.
+        params = list(group_by_params) + list(filter_params)
+        inner = (
+            f"SELECT a.hadm_id AS hadm_id, "
+            f"{group_by_col} AS group_value, "
+            f"{flag_expr} AS flag "
             f"FROM {t('admissions')} a {' '.join(joins)} "
-            f"{where_part} "
-            f"GROUP BY {group_by_col}, {flag_expr}"
+            f"{where_part}"
+        ).strip()
+        sql = (
+            f"SELECT group_value, flag AS {flag_alias}, "
+            f"COUNT(DISTINCT hadm_id) AS count, "
+            f"COUNT(DISTINCT hadm_id) / "
+            f"NULLIF(SUM(COUNT(DISTINCT hadm_id)) OVER (PARTITION BY group_value), 0) "
+            f"AS fraction "
+            f"FROM ({inner}) sub "
+            f"GROUP BY group_value, flag"
         ).strip()
         columns = ["group_value", flag_alias, "count", "fraction"]
 
     return SqlFastpathQuery(sql=sql, params=params, columns=columns)
+
+
+# ---------------------------------------------------------------------------
+# Event ordering (most-common temporal order of N events)
+# ---------------------------------------------------------------------------
+
+
+def _is_bigquery_backend(backend: Any) -> bool:
+    """Heuristic: BigQuery's ``table()`` returns a backtick-quoted FQN
+    (``` `physionet-data.…` ```); DuckDB returns a bare table name. Used to
+    decide whether the GCS-derived table FQN is available."""
+    try:
+        return backend.table("admissions").startswith("`")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _derived_table(backend: Any, name: str) -> str | None:
+    """Fully-qualified name for a ``mimiciv_3_1_derived`` table on BigQuery.
+
+    Returns ``None`` on backends that don't carry the derived dataset (DuckDB /
+    the synthetic offline fixture), so the caller can skip the GCS sub-query
+    rather than emit SQL against a table that doesn't exist. There's no derived
+    entry in ``_BQ_TABLES`` (those are raw hosp/icu sources), so the FQN is
+    composed here against the same project the raw tables live in."""
+    if _is_bigquery_backend(backend):
+        return f"`physionet-data.mimiciv_3_1_derived.{name}`"
+    return None
+
+
+def _event_ordering_event_sql(
+    concept: ClinicalConcept, backend: Any,
+) -> tuple[str, str, str, str] | None:
+    """Ground one event concept to ``(join, time_expr, where, label)`` for an
+    event_ordering sub-query, or ``None`` if it can't be grounded.
+
+    Each tuple plugs into ``SELECT a.hadm_id, '<label>' AS event_name,
+    MIN(<time_expr>) AS event_time FROM admissions a <join> WHERE <where> …``.
+    Grounding is by lower-cased substring of the concept name (sufficient for
+    the demo); ``where`` is the event-specific predicate (cohort filters are
+    AND-ed on by the caller), and ``label`` is the human event name surfaced in
+    the post-processed ordering.
+    """
+    t = backend.table
+    name = (concept.name or "").lower()
+
+    if "intubation" in name or "mechanical ventilation" in name or "intubat" in name:
+        join = f"JOIN {t('procedureevents')} pe ON pe.hadm_id = a.hadm_id"
+        return join, "pe.starttime", "pe.itemid IN (225792, 224385)", concept.name
+
+    if "mannitol" in name or "hypertonic" in name or "hyperosmolar" in name or "osmotic" in name:
+        join = f"JOIN {t('prescriptions')} pr ON pr.hadm_id = a.hadm_id"
+        where = "(LOWER(pr.drug) LIKE '%mannitol%' OR LOWER(pr.drug) LIKE '%hypertonic%')"
+        return join, "pr.starttime", where, concept.name
+
+    if "gcs" in name or "glasgow" in name or "coma scale" in name:
+        gcs = _derived_table(backend, "gcs")
+        if gcs is None:
+            # Offline / DuckDB: the derived GCS table isn't available, so this
+            # event can't be grounded. Returning None drops it from the UNION;
+            # the post-processor still works on the remaining events.
+            return None
+        # First GCS DROP of ≥2 points per ICU stay → its charttime, mapped to
+        # hadm_id via icustays. The LAG window finds the first step-down.
+        drop = (
+            f"(SELECT icu.hadm_id AS hadm_id, g.charttime AS charttime FROM ("
+            f"  SELECT stay_id, charttime, gcs - LAG(gcs) OVER ("
+            f"    PARTITION BY stay_id ORDER BY charttime) AS gcs_delta"
+            f"  FROM {gcs}"
+            f") g JOIN {t('icustays')} icu ON g.stay_id = icu.stay_id "
+            f"WHERE g.gcs_delta <= -2)"
+        )
+        join = f"JOIN {drop} gcsdrop ON gcsdrop.hadm_id = a.hadm_id"
+        return join, "gcsdrop.charttime", "1 = 1", concept.name
+
+    return None
+
+
+def _compile_event_ordering(
+    cq: CompetencyQuestion,
+    backend: Any,
+    registry: OperationRegistry,
+    *,
+    enable_mcp_grounding: bool = False,
+) -> SqlFastpathQuery:
+    """Per-patient FIRST time of each named event, as a UNION ALL the
+    ``event_ordering`` post-processor turns into the most-common order.
+
+    One sub-query per event concept in ``cq.clinical_concepts``:
+
+        SELECT a.hadm_id, '<event label>' AS event_name, MIN(<time>) AS event_time
+        FROM admissions a <event join> [cohort-filter joins]
+        WHERE <event predicate> [AND cohort-filter predicates]
+        GROUP BY a.hadm_id
+
+    The cohort ``patient_filters`` (e.g. ICH diagnosis + ICP monitoring) are
+    applied in EVERY sub-query as correlated ``EXISTS`` predicates (via
+    ``_split_condition_exists``) rather than as JOINs, so every event time is
+    within the same cohort WITHOUT introducing per-filter table aliases. The
+    JOIN form hardcodes ``di``/``dd`` inside ``_compile_diagnosis``, so two
+    diagnosis filters (e.g. intracerebral hemorrhage + ICP monitoring) collided
+    on alias ``di``; the EXISTS form has no such collision (each sub-condition
+    self-contains its inner aliases). Events that can't be grounded on this
+    backend (e.g. GCS on the offline fixture with no derived dataset) are
+    skipped; the remaining events still produce an ordering.
+
+    Columns are ``["hadm_id", "event_name", "event_time"]`` — the post-processor
+    is keyed on exactly these.
+    """
+    if len(cq.clinical_concepts) < 2:
+        raise ValueError(
+            "event_ordering needs at least 2 event concepts to order"
+        )
+
+    # Compile each cohort filter to a correlated EXISTS on ``a.hadm_id`` (the
+    # outer admissions alias), reusing ``_split_condition_exists``. Build the
+    # ctx exactly like ``_filter_fragment`` does — reading the resolver /
+    # derived-formula grounding from the ambient contextvar — and inject the
+    # registry so the generic EXISTS-reuse path can look up child filter ops.
+    resolver, derived_formulas = _FILTER_GROUNDING_CTX.get()
+    filter_ctx = FilterCompileContext(
+        backend=backend, enable_mcp_grounding=enable_mcp_grounding,
+        resolver=resolver, derived_formulas=derived_formulas,
+        registry=registry,
+    )
+    cohort_exists: list[str] = []
+    cohort_exists_params: list[Any] = []
+    for f in (cq.patient_filters or []):
+        exists_sql, exists_params = _split_condition_exists(f, filter_ctx)
+        cohort_exists.append(exists_sql)
+        cohort_exists_params.extend(exists_params)
+
+    sub_selects: list[str] = []
+    params: list[Any] = []
+    for concept in cq.clinical_concepts:
+        grounded = _event_ordering_event_sql(concept, backend)
+        if grounded is None:
+            continue
+        join, time_expr, ev_where, label = grounded
+        where_clauses = [ev_where] + cohort_exists
+        # The event-grounding ``label`` is a fixed string literal — safe to
+        # interpolate (it's an event NAME from the decomposer, single-quoted).
+        safe_label = label.replace("'", "''")
+        sub = (
+            f"SELECT a.hadm_id AS hadm_id, '{safe_label}' AS event_name, "
+            f"MIN({time_expr}) AS event_time "
+            f"FROM {backend.table('admissions')} a {join} "
+            f"WHERE {' AND '.join(where_clauses)} "
+            f"GROUP BY a.hadm_id"
+        ).strip()
+        sub_selects.append(sub)
+        # The cohort-filter EXISTS params repeat once per sub-query (the same
+        # EXISTS predicates are applied in each), in sub-query order.
+        params.extend(cohort_exists_params)
+
+    if not sub_selects:
+        raise ValueError(
+            "event_ordering could not ground any of the event concepts "
+            f"{[c.name for c in cq.clinical_concepts]!r} on this backend"
+        )
+
+    sql = "\nUNION ALL\n".join(sub_selects)
+    return SqlFastpathQuery(
+        sql=sql,
+        params=params,
+        columns=["hadm_id", "event_name", "event_time"],
+    )

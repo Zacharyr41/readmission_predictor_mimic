@@ -115,15 +115,14 @@ class TestDiagnosisFilterGrounding:
         assert "E340%" in frag.params
         assert "C7A0%" in frag.params
 
-    def test_combines_code_prefix_with_like_as_or(
+    def test_emits_codes_only_when_grounded(
         self, grounded_ctx, monkeypatch,
     ):
-        """Final shape: ``((di.icd_code LIKE ?) OR (<existing LIKE>))``.
-        ICD-9 admissions stay matchable via the title-LIKE branch.
+        """When grounded, the clause is CODES-ONLY — the broad title-LIKE is
+        dropped (anti-pollution), matching the count path.
 
-        Uses 'carcinoid syndrome' so the autocode-fallback path fires
-        (Inc 10 registry-first means 'sepsis' would have routed to
-        LIKE-prefix clauses instead, defeating the test's purpose)."""
+        Uses 'carcinoid syndrome' so the autocode-fallback path fires (registry
+        -first means 'sepsis' would route to registry prefixes instead)."""
         from src.conversational import concept_resolver as cr
         from src.conversational.operations_filters import _compile_diagnosis
 
@@ -143,15 +142,15 @@ class TestDiagnosisFilterGrounding:
         sql = " ".join(frag.where)
         assert "di.icd_code LIKE ?" in sql
         assert "E340%" in frag.params  # normalized + prefix
-        # Existing title-LIKE clauses preserved.
-        sql_upper = sql.upper()
-        assert "ILIKE" in sql_upper or "LOWER" in sql_upper
-        assert "%carcinoid syndrome%" in frag.params
+        # Codes-only: the broad title-LIKE substring is NOT bound.
+        assert "%carcinoid syndrome%" not in frag.params
 
     def test_falls_back_to_like_when_unavailable(
         self, grounded_ctx, monkeypatch,
     ):
-        """MCP unavailable → no IN-list, LIKE-only preserved."""
+        """No grounding (unregistered term + MCP unavailable) → title-LIKE
+        fallback preserved. Uses 'carcinoid syndrome' (NOT a registered cohort)
+        so the registry Tier-1 doesn't ground it offline."""
         from src.conversational import concept_resolver as cr
         from src.conversational.operations_filters import _compile_diagnosis
 
@@ -159,11 +158,13 @@ class TestDiagnosisFilterGrounding:
             return {"status": "unavailable", "error": "MCP timeout"}
         monkeypatch.setattr(cr, "icd_autocode", fake_autocode, raising=False)
 
-        f = PatientFilter(field="diagnosis", operator="contains", value="sepsis")
+        f = PatientFilter(
+            field="diagnosis", operator="contains", value="carcinoid syndrome",
+        )
         frag = _compile_diagnosis(f, grounded_ctx)
         sql = " ".join(frag.where)
         assert "di.icd_code IN (" not in sql
-        assert "%sepsis%" in frag.params
+        assert "%carcinoid syndrome%" in frag.params
 
     def test_falls_back_to_like_when_grounding_disabled(
         self, offline_ctx, monkeypatch,
@@ -323,6 +324,7 @@ class TestRegistryCore:
         assert r.supported_names("filter") == frozenset({
             "age", "gender", "diagnosis", "admission_type",
             "subject_id", "readmitted_30d", "readmitted_60d",
+            "lab_value", "vital_value", "derived_value", "or_any", "icu_stay",
         })
 
     def test_supported_names_respects_kind(self):
@@ -612,13 +614,15 @@ class TestDefaultRegistry:
         assert r.supported_names("filter") == frozenset({
             "age", "gender", "diagnosis", "admission_type",
             "subject_id", "readmitted_30d", "readmitted_60d",
+            "lab_value", "vital_value", "derived_value", "or_any", "icu_stay",
         })
         assert r.supported_names("aggregate") == frozenset({
             "mean", "avg", "median", "max", "min", "count", "sum", "exists",
+            "event_ordering",
         })
         assert r.supported_names("comparison_axis") == frozenset({
             "gender", "age", "readmitted_30d", "readmitted_60d",
-            "admission_type", "discharge_location",
+            "admission_type", "discharge_location", "condition",
         })
 
     def test_default_registry_is_idempotent(self):
@@ -673,13 +677,22 @@ class TestAggregateRegistrySemantics:
 
 
 class TestComparisonRegistrySemantics:
+    # The dynamic ``condition`` axis is SQL-fast-path-only: its GROUP BY column
+    # is built from ``cq.split_condition`` at compile time, so it has neither a
+    # SPARQL clause nor a ``_COMPARISON_FIELD_MAP`` entry (the planner never
+    # routes it to the graph). The graph-path parity assertions below exclude it.
+    _SQL_ONLY_AXES = frozenset({"condition"})
+
     def test_every_comparison_axis_has_at_least_one_clause(self):
         """An axis with neither a patient nor admission clause would produce
-        malformed SPARQL."""
+        malformed SPARQL — except the SQL-only ``condition`` axis, which never
+        reaches the SPARQL path."""
         from src.conversational.operations import get_default_registry
 
         r = get_default_registry()
         for name in r.supported_names("comparison_axis"):
+            if name in self._SQL_ONLY_AXES:
+                continue
             op = r.require("comparison_axis", name)
             frag = op.compile()
             assert frag.patient_clause or frag.admission_clause, (
@@ -687,14 +700,15 @@ class TestComparisonRegistrySemantics:
             )
 
     def test_comparison_axes_match_prior_map(self):
-        """Registry must expose the same axes the pre-refactor
+        """Registry must expose the same GRAPH-path axes the pre-refactor
         _COMPARISON_FIELD_MAP did, so the reasoner's GROUP BY behaviour is
-        preserved unchanged."""
+        preserved unchanged. (The SQL-only ``condition`` axis has no map entry.)"""
         from src.conversational.operations import get_default_registry
         from src.conversational.reasoner import _COMPARISON_FIELD_MAP
 
         r = get_default_registry()
-        assert r.supported_names("comparison_axis") == frozenset(_COMPARISON_FIELD_MAP.keys())
+        graph_axes = r.supported_names("comparison_axis") - self._SQL_ONLY_AXES
+        assert graph_axes == frozenset(_COMPARISON_FIELD_MAP.keys())
         # Clause text parity.
         for name, (patient, admission) in _COMPARISON_FIELD_MAP.items():
             op = r.require("comparison_axis", name)

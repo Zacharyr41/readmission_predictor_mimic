@@ -106,6 +106,16 @@ class QueryPlanner:
             # Degenerate: drop through to the legacy classifier so the
             # existing aggregate / graph branches can still handle it.
 
+        # event_ordering is a multi-event SQL-fast-path operation: it carries
+        # ≥2 clinical_concepts and asks for their temporal ORDER, so it must be
+        # routed BEFORE the single-concept / aggregate guards below (which would
+        # otherwise send it to the graph). The compiler's dedicated
+        # ``_compile_event_ordering`` branch handles it; it needs ≥2 concepts.
+        if cq.aggregation == "event_ordering":
+            if len(cq.clinical_concepts) >= 2:
+                return QueryPlan.SQL_FAST
+            return QueryPlan.GRAPH
+
         # Temporal constraints always require the graph.
         if cq.temporal_constraints:
             return QueryPlan.GRAPH
@@ -144,6 +154,14 @@ class QueryPlanner:
         if cq.scope == "comparison":
             if not cq.comparison_field:
                 return QueryPlan.GRAPH
+            # The dynamic ``condition`` axis carries no fixed ``sql_group_by``
+            # (the GROUP BY column is built from ``split_condition`` at compile
+            # time), so it's SQL-fast-path-eligible as long as a split_condition
+            # is supplied. Without one it's underspecified → graph path.
+            if cq.comparison_field == "condition":
+                if cq.split_condition is None:
+                    return QueryPlan.GRAPH
+                return QueryPlan.SQL_FAST
             axis_op = self._registry.get("comparison_axis", cq.comparison_field)
             if axis_op is None or getattr(axis_op, "sql_group_by", None) is None:
                 return QueryPlan.GRAPH

@@ -279,3 +279,70 @@ class TestClassificationIsDeterministic:
             cq = CompetencyQuestion.model_validate(expected_cq_dict)
             # Two calls should agree; classify() must be pure.
             assert planner.classify(cq) == planner.classify(cq)
+
+
+# ---------------------------------------------------------------------------
+# New SQL-fast-path routes: split-by-condition comparison + event_ordering
+# ---------------------------------------------------------------------------
+
+
+class TestSplitByConditionRouting:
+    """``comparison_field='condition'`` carries no fixed ``sql_group_by`` (the
+    GROUP BY is built from ``split_condition`` at compile time), so the planner
+    must route it to SQL_FAST when a split_condition is present, and to GRAPH
+    when it's missing (underspecified)."""
+
+    def _cq(self, *, split_condition):
+        return CompetencyQuestion(
+            original_question="test",
+            clinical_concepts=[
+                ClinicalConcept(name="in-hospital mortality", concept_type="outcome")
+            ],
+            aggregation="count",
+            scope="comparison",
+            comparison_field="condition",
+            split_condition=split_condition,
+        )
+
+    def test_condition_with_split_routes_to_sql_fast(self):
+        from src.conversational.planner import QueryPlan, QueryPlanner
+
+        cq = self._cq(split_condition=PatientFilter(
+            field="diagnosis", operator="contains",
+            value="chronic anticoagulant use",
+        ))
+        assert QueryPlanner().classify(cq) == QueryPlan.SQL_FAST
+
+    def test_condition_without_split_routes_to_graph(self):
+        from src.conversational.planner import QueryPlan, QueryPlanner
+
+        cq = self._cq(split_condition=None)
+        assert QueryPlanner().classify(cq) == QueryPlan.GRAPH
+
+
+class TestEventOrderingRouting:
+    """``aggregation='event_ordering'`` is a multi-event SQL-fast-path op; it must
+    route to SQL_FAST with ≥2 concepts (despite having no ``sql_fn`` and >1
+    concept, which the generic guards reject)."""
+
+    def _cq(self, concepts):
+        return CompetencyQuestion(
+            original_question="test",
+            clinical_concepts=[
+                ClinicalConcept(name=n, concept_type=t) for n, t in concepts
+            ],
+            aggregation="event_ordering",
+            scope="cohort",
+        )
+
+    def test_event_ordering_with_two_events_routes_to_sql_fast(self):
+        from src.conversational.planner import QueryPlan, QueryPlanner
+
+        cq = self._cq([("intubation", "procedure"), ("mannitol", "drug")])
+        assert QueryPlanner().classify(cq) == QueryPlan.SQL_FAST
+
+    def test_event_ordering_with_one_event_routes_to_graph(self):
+        from src.conversational.planner import QueryPlan, QueryPlanner
+
+        cq = self._cq([("intubation", "procedure")])
+        assert QueryPlanner().classify(cq) == QueryPlan.GRAPH

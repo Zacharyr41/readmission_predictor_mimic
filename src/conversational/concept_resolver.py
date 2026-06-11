@@ -18,6 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from src.conversational.health_evidence.tools import (
+    clinical_formula_lookup,
     icd_autocode,
     mimic_itemid_search,
     rxnorm_lookup,
@@ -128,6 +129,47 @@ def _cached_icd_autocode(
             )
     # Sentinel-raise: never cache a failed/empty lookup.
     raise LookupError(last_error or "icd_autocode unavailable")
+
+
+# Retry budget for transient ``clinical_formula_lookup`` (PubMed) misses —
+# mirrors the ``icd_autocode`` policy. PubMed esearch/efetch can transiently
+# fail or return no abstracts under load; a single miss shouldn't strand a
+# derived-quantity question. Bounded retries with linear backoff; the cache
+# never stores a failure (sentinel-raise). Module-level so tests set the
+# backoff to 0.
+_FORMULA_LOOKUP_MAX_ATTEMPTS = 3
+_FORMULA_LOOKUP_RETRY_BACKOFF = 0.5  # seconds; multiplied by the attempt number
+
+
+@lru_cache(maxsize=128)
+def _cached_clinical_formula_evidence(name_lower: str) -> tuple:
+    """Process-wide cache of ``clinical_formula_lookup`` (PubMed) evidence.
+
+    Returns a tuple of abstract records ``({pmid,title,abstract,url}, …)`` for a
+    derived-quantity name. Retries up to ``_FORMULA_LOOKUP_MAX_ATTEMPTS`` times
+    on a transient (``status != "ok"``) or empty result, treating both as a
+    retryable miss. **Negative-result bypass:** if every attempt fails/empties,
+    raises ``LookupError`` so the cache never stores the failure and the caller
+    falls back. Only a non-empty success is cached.
+    """
+    last_error: str | None = None
+    for attempt in range(_FORMULA_LOOKUP_MAX_ATTEMPTS):
+        envelope = clinical_formula_lookup(name_lower)
+        if envelope.get("status") == "ok":
+            results = envelope.get("results") or []
+            if results:
+                return tuple(results)
+            last_error = "clinical_formula_lookup returned no evidence"
+        else:
+            last_error = envelope.get("error") or "clinical_formula_lookup unavailable"
+        if attempt + 1 < _FORMULA_LOOKUP_MAX_ATTEMPTS and _FORMULA_LOOKUP_RETRY_BACKOFF:
+            time.sleep(_FORMULA_LOOKUP_RETRY_BACKOFF * (attempt + 1))
+            logger.info(
+                "clinical_formula_lookup transient miss for %r (attempt %d/%d): "
+                "%s — retrying",
+                name_lower, attempt + 1, _FORMULA_LOOKUP_MAX_ATTEMPTS, last_error,
+            )
+    raise LookupError(last_error or "clinical_formula_lookup unavailable")
 
 
 # General pharmaceutical salt counter-ions and dose-form / route tokens. These
@@ -277,6 +319,41 @@ class DiagnosisResolution:
 
 
 @dataclass(frozen=True)
+class DiagnosisCandidate:
+    """One candidate ICD grounding for a diagnosis term, offered to the
+    clinician for disambiguation (per the candidate-disambiguation design).
+
+    A single clinical interpretation: e.g. for "subarachnoid hemorrhage",
+    OMOPHub yields {label: "Subarachnoid hemorrhage", codes: I60 (v10) + 430
+    (v9)} while the cohort registry yields the broader {label: "hemorrhagic
+    stroke", codes: I60+I61+I62 / 430-432}. When >1 distinct candidate exists
+    the orchestrator surfaces them for the user to choose.
+
+    ``icd_codes`` and ``icd_versions`` are PARALLEL (same order); codes are
+    normalised, dotless prefixes ready for ``icd_code LIKE 'code%'`` matching,
+    each version-qualified by the corresponding ``icd_versions`` entry.
+    """
+
+    label: str
+    icd_codes: tuple[str, ...]
+    icd_versions: tuple[int, ...]
+    source: str  # "omophub" | "registry"
+    confidence: float | None
+
+
+def _normalize_dx_title(title: str) -> str:
+    """Coarse clinical-title key for grouping ICD candidates across versions —
+    folds British/American spelling (haemorrhage→hemorrhage, tumour→tumor),
+    lowercases, and strips punctuation so I60 "Subarachnoid haemorrhage" (ICD10)
+    and 430 "Subarachnoid hemorrhage" (ICD9CM) collapse into ONE candidate,
+    while S06.6 "Traumatic subarachnoid hemorrhage" stays a distinct one."""
+    t = title.strip().lower().replace("haemorrhage", "hemorrhage")
+    t = t.replace("tumour", "tumor").replace("oedema", "edema")
+    t = "".join(ch if (ch.isalnum() or ch == " ") else " " for ch in t)
+    return " ".join(t.split())
+
+
+@dataclass(frozen=True)
 class BiomarkerResolution:
     """Result of resolving a biomarker concept to MIMIC labitem identifiers.
 
@@ -302,6 +379,28 @@ class BiomarkerResolution:
     names: list[str]
     loinc_code: str | None
     snomed_code: str | None
+    fallback_reason: str | None
+
+
+@dataclass(frozen=True)
+class VitalResolution:
+    """Result of resolving a vital-sign concept to MIMIC ``chartevents`` itemids.
+
+    The vital analogue of :class:`BiomarkerResolution` (chartevents instead of
+    labevents). Same three terminal shapes:
+
+    * **Grounded:** ``itemids`` non-empty (LOINC → chartitem index hit);
+      ``fallback_reason`` is ``None``.
+    * **Silent fallback (no LOINC):** ``itemids`` is ``None``, ``loinc_code``
+      ``None``, ``fallback_reason`` ``None`` — compiler uses ``names`` for a
+      label-LIKE filter on ``d_items``.
+    * **Loud fallback (LOINC supplied, no chartitem coverage):** ``itemids``
+      ``None``, ``loinc_code`` set, ``fallback_reason`` describes the miss.
+    """
+
+    itemids: list[int] | None
+    names: list[str]
+    loinc_code: str | None
     fallback_reason: str | None
 
 
@@ -399,6 +498,10 @@ class ConceptResolver:
         # on the first ``resolve_biomarker`` call that supplies a LOINC.
         self._snomed_mapper: object | None = None
         self._loinc_to_labitem: dict[str, list[int]] | None = None
+        # Vital analogue of ``_loinc_to_labitem``: {loinc → [chartevents itemid]}
+        # built lazily from chartitem_to_snomed.json on the first
+        # ``resolve_vital`` call that supplies a LOINC.
+        self._loinc_to_chartitem: dict[str, list[int]] | None = None
 
     def _load_category_map(self) -> dict:
         if self._category_map is not None:
@@ -694,6 +797,66 @@ class ConceptResolver:
             ),
         )
 
+    def _build_loinc_to_chartitem_index(self) -> None:
+        """Build ``{loinc → [chartevents itemid]}`` from chartitem_to_snomed.json.
+
+        The vital analogue of :meth:`_build_loinc_to_labitem_index`; built lazily
+        on the first ``resolve_vital`` call that supplies a LOINC.
+        """
+        if self._loinc_to_chartitem is not None:
+            return
+        mapper = self._get_snomed_mapper()
+        reverse: dict[str, list[int]] = {}
+        for itemid_key, entry in mapper._chartitem_map.items():
+            if not isinstance(entry, dict):
+                continue
+            loinc = entry.get("loinc")
+            if loinc:
+                try:
+                    reverse.setdefault(str(loinc), []).append(int(itemid_key))
+                except ValueError:
+                    continue
+        self._loinc_to_chartitem = reverse
+
+    def resolve_vital(self, concept: ClinicalConcept) -> VitalResolution:
+        """Resolve a vital-sign concept to MIMIC ``chartevents`` itemids via LOINC.
+
+        The vital analogue of :meth:`resolve_biomarker` (chartevents not
+        labevents; grounds entirely in-codebase from chartitem_to_snomed.json —
+        no MCP). Three terminal cases mirror the biomarker resolver: no-LOINC
+        silent fallback, LOINC-with-coverage success, LOINC-without-coverage
+        loud fallback.
+        """
+        names = self.resolve(concept)  # LIKE-fallback names (pass-through for vitals)
+
+        if not concept.loinc_code:
+            return VitalResolution(
+                itemids=None, names=names, loinc_code=None, fallback_reason=None,
+            )
+
+        self._build_loinc_to_chartitem_index()
+        assert self._loinc_to_chartitem is not None
+        itemids = sorted(self._loinc_to_chartitem.get(concept.loinc_code, []))
+
+        if itemids:
+            logger.info(
+                "Resolved vital %r via LOINC %s → %d chartevents itemids: %s",
+                concept.name, concept.loinc_code, len(itemids), itemids,
+            )
+            return VitalResolution(
+                itemids=itemids, names=names,
+                loinc_code=concept.loinc_code, fallback_reason=None,
+            )
+
+        return VitalResolution(
+            itemids=None, names=names, loinc_code=concept.loinc_code,
+            fallback_reason=(
+                f"LOINC {concept.loinc_code!r} has no MIMIC chartevents "
+                "coverage — falling back to label match; result may pool "
+                "variants."
+            ),
+        )
+
     def _ground_via_mimic_itemid_search(
         self, name: str,
     ) -> list[int] | None:
@@ -840,6 +1003,148 @@ class ConceptResolver:
             fallback_reason=None,
             confidence_floor=floor,
         )
+
+    # -- Candidate-disambiguation diagnosis resolution ---------------------
+
+    def resolve_diagnosis_candidates(
+        self, concept: ClinicalConcept,
+    ) -> list[DiagnosisCandidate]:
+        """Gather the DISTINCT candidate ICD groundings for a diagnosis term so
+        the orchestrator can disambiguate (surface the choices to the clinician)
+        instead of silently picking registry-vs-OMOPHub.
+
+        Two sources, each contributing candidates:
+
+        * **OMOPHub** ``icd_autocode`` (semantic search) — its returned codes are
+          grouped by normalised clinical title, version-tagged from the
+          vocabulary. A precise, term-specific grouping (SAH → I60 v10 + 430 v9).
+        * **Cohort registry** (``resolve_cohort_name`` / ``clinical_cohorts.json``)
+          — a curated, possibly-broader grouping (SAH → ``stroke_hemorrhagic`` =
+          I60+I61+I62). Correct for exact-specificity terms (ischemic stroke →
+          I63) but coarse for subtypes.
+
+        Returns 0 candidates (caller falls back to title-LIKE), 1 (ground
+        directly), or >1 (genuine ambiguity → disambiguate). Never raises;
+        an unavailable MCP simply contributes no OMOPHub candidate.
+        """
+        from src.conversational.health_evidence.cohorts import (
+            load_cohorts, normalize_icd_prefix, resolve_cohort_name,
+        )
+        name = concept.name
+        candidates: list[DiagnosisCandidate] = []
+
+        # Source 1 — OMOPHub, grouped by clinical title (cross-version merge).
+        if self._enable_mcp_grounding:
+            try:
+                env = icd_autocode(name.lower())
+            except Exception:  # noqa: BLE001
+                env = {"status": "unavailable"}
+            if env.get("status") == "ok":
+                groups: dict[str, dict] = {}
+                for r in env.get("results") or []:
+                    code = str(r.get("code") or "")
+                    if not code:
+                        continue
+                    try:
+                        ver = int(r.get("version") or 10)
+                    except (TypeError, ValueError):
+                        ver = 10
+                    title = str(r.get("title") or name)
+                    g = groups.setdefault(
+                        _normalize_dx_title(title),
+                        {"label": title, "codes": [], "versions": [], "conf": []},
+                    )
+                    norm = normalize_icd_prefix(code)
+                    if not norm:
+                        continue
+                    g["codes"].append(norm)
+                    g["versions"].append(ver)
+                    if r.get("confidence") is not None:
+                        g["conf"].append(r["confidence"])
+                for g in groups.values():
+                    if not g["codes"]:
+                        continue
+                    candidates.append(DiagnosisCandidate(
+                        label=g["label"],
+                        icd_codes=tuple(g["codes"]),
+                        icd_versions=tuple(g["versions"]),
+                        source="omophub",
+                        confidence=max(g["conf"]) if g["conf"] else None,
+                    ))
+
+        # Source 2 — cohort registry (a curated, possibly-broader grouping).
+        try:
+            from src.conversational.health_evidence.cohorts import (
+                load_cohorts, normalize_icd_prefix, resolve_cohort_name,
+            )
+            cohort_name = resolve_cohort_name(name)
+            if cohort_name:
+                defn = load_cohorts().get(cohort_name) or {}
+                codes: list[str] = []
+                versions: list[int] = []
+                for p in defn.get("icd10_prefixes") or []:
+                    n = normalize_icd_prefix(p)
+                    if n:
+                        codes.append(n)
+                        versions.append(10)
+                for p in defn.get("icd9_prefixes") or []:
+                    n = normalize_icd_prefix(p)
+                    if n:
+                        codes.append(n)
+                        versions.append(9)
+                if codes:
+                    candidates.append(DiagnosisCandidate(
+                        label=str(defn.get("display_name")
+                                  or cohort_name.replace("_", " ")),
+                        icd_codes=tuple(codes),
+                        icd_versions=tuple(versions),
+                        source="registry",
+                        confidence=None,
+                    ))
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Merge candidates that name the SAME clinical concept (e.g. OMOPHub
+        # "Sepsis" + registry "sepsis") into one, unioning their codes — so the
+        # bot only disambiguates when candidates are genuinely DISTINCT concepts
+        # (SAH "subarachnoid hemorrhage" vs "hemorrhagic stroke"). Merge key is
+        # the normalised label; the registry's broader, differently-named cohort
+        # therefore stays a separate candidate.
+        merged: dict[str, dict] = {}
+        order: list[str] = []
+        for c in candidates:
+            key = _normalize_dx_title(c.label)
+            if key not in merged:
+                merged[key] = {
+                    "label": c.label, "pairs": [], "source": set(),
+                    "conf": [],
+                }
+                order.append(key)
+            slot = merged[key]
+            slot["pairs"].extend(zip(c.icd_codes, c.icd_versions))
+            slot["source"].add(c.source)
+            if c.confidence is not None:
+                slot["conf"].append(c.confidence)
+        out: list[DiagnosisCandidate] = []
+        for key in order:
+            slot = merged[key]
+            seen_pairs: set[tuple[str, int]] = set()
+            codes: list[str] = []
+            versions: list[int] = []
+            for code, ver in slot["pairs"]:
+                if (code, ver) in seen_pairs:
+                    continue
+                seen_pairs.add((code, ver))
+                codes.append(code)
+                versions.append(ver)
+            out.append(DiagnosisCandidate(
+                label=slot["label"],
+                icd_codes=tuple(codes),
+                icd_versions=tuple(versions),
+                source="+".join(sorted(slot["source"])),
+                confidence=max(slot["conf"]) if slot["conf"] else None,
+            ))
+        return out
 
     # -- RxNorm-grounded drug brand→generic resolution ---------------------
 

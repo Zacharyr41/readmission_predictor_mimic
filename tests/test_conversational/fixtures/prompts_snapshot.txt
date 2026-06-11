@@ -185,6 +185,39 @@ Map clinical entities to one of these concept_type values:
                      comparison ("by sex") goes in comparison_field.
                      NOTE: Length of stay (LOS) is NOT a concept — omit clinical_concepts
                      and use aggregation (e.g. aggregation="mean") for LOS queries
+- "procedure"     → Procedures / interventions recorded as events: intubation,
+                     mechanical ventilation, extubation, dialysis lines, etc.
+                     Used as one of the events in an ``event_ordering`` question
+                     (see EVENT ORDERING below).
+
+EVENT ORDERING — when the question asks for the most common ORDER / SEQUENCE of
+several clinical events ("which usually comes first — intubation, hyperosmolar
+therapy, or a GCS drop?"), set ``aggregation: "event_ordering"`` and list EACH
+event as its own clinical_concept (≥2 of them), using the natural concept_type
+for each (a procedure like "intubation", a drug like "hyperosmolar therapy", a
+vital like "GCS drop"). Keep ``scope: "cohort"`` and put the cohort restriction
+(e.g. the diagnosis) in patient_filters. The system finds each patient's FIRST
+time of each event and reports the most common order. Do NOT add
+temporal_constraints — the ordering IS the answer.
+
+VALUE-THRESHOLD COHORTS — when the user defines a cohort by a measurement crossing
+a cutoff (e.g. "platelets < 50k", "MAP < 65", "lactate > 4") or by a named derived
+clinical index ("an elevated shock index"), express it as a patient_filter — NOT a
+diagnosis filter, and never drop the threshold:
+  - lab_value     → a lab analyte: set ``measurement`` (e.g. "platelet count"),
+                    ``loinc_code``, ``operator``, and numeric ``value``.
+  - vital_value   → a charted vital: set ``measurement`` (e.g. "mean arterial
+                    pressure"), ``loinc_code``, ``operator``, and ``value``.
+  - derived_value → a named index/score (e.g. "shock index"): set ``measurement``
+                    to the index name; its formula + abnormal threshold are looked
+                    up from the literature (operator/value are placeholders).
+  - or_any        → OR several conditions into one union cohort ("A or B or C"):
+                    put the child filters in ``sub_filters`` (operator "in").
+  - icu_stay      → "ICU patients" → {"field":"icu_stay","operator":"=","value":"1"}.
+  Common LOINCs: platelet count 777-3, mean arterial pressure 8478-0, heart rate
+  8867-4, systolic blood pressure 8480-6, creatinine 2160-0, lactate 2524-7. A
+  "proportion of patients who … and their mortality" question is an ``outcome``
+  concept (name "in-hospital mortality") + aggregation "count" + these filters.
 
 # Output Schema
 
@@ -203,12 +236,13 @@ Use this when the user's question can be answered by one structured query.
     {"relation": "<before|after|during|within>", "reference_event": "<event>", "time_window": "<e.g. 24h, 7d, or null>"}
   ],
   "patient_filters": [
-    {"field": "<see Supported Operations / filter>", "operator": "<see that filter's row>", "value": "<string or list of strings>"}
+    {"field": "<see Supported Operations / filter>", "operator": "<see that filter's row>", "value": "<string or list of strings>", "measurement": "<analyte name; lab_value/vital_value/derived_value only>", "loinc_code": "<analyte LOINC; lab_value/vital_value only>", "sub_filters": "<list of child filter objects; or_any only>"}
   ],
   "aggregation": "<see Supported Operations / aggregate; or null>",
   "return_type": "<text|table|text_and_table|visualization>",
   "scope": "<single_patient|cohort|comparison>",
   "comparison_field": "<see Supported Operations / comparison_axis; or null>",
+  "split_condition": "<a single patient_filter object; REQUIRED when comparison_field is 'condition', omit/null otherwise. Splits the cohort by presence/absence of this sub-condition (e.g. a diagnosis or ventilation), yielding 'yes'/'no' groups>",
   "interpretation_summary": "<one-sentence restatement of what the pipeline will actually compute, in clinician-readable language; always required>",
   "clarifying_question": "<question to ask the user when a field above would otherwise be a guess; null/omitted when confident>"
 }
@@ -245,16 +279,22 @@ Use ONLY the names listed here for patient_filters[].field, aggregation, and com
 
   admission_type         (=|in            ) scalar_or_list  admission type (e.g. "EW EMER.", "EU OBSERVATION", "OBSERVATION ADMIT", "URGENT", …); use operator "in" with a list value to match multiple
   age                    (<|<=|=|>|>=     ) scalar    patient anchor age in years (integer)
+  derived_value          (<|<=|=|>|>=     ) scalar    derived clinical index/score cohort (e.g. 'shock index'): set measurement to the index name — its formula and abnormal threshold are looked up from the medical literature; operator/value are placeholders
   diagnosis              (contains        ) scalar    substring match against ICD-10 long title OR ICD code prefix
   gender                 (=               ) scalar    patient gender ("M"|"F"; case-insensitive on input)
+  icu_stay               (=               ) scalar    restrict to admissions with at least one ICU stay (operator '=' value '1' for 'ICU patients')
+  lab_value              (<|<=|=|>|>=     ) scalar    lab-value threshold cohort: set measurement to the analyte (e.g. 'platelet count') and loinc_code to its LOINC; value is the numeric threshold (e.g. operator '<' value '50' for platelets < 50 K/uL)
+  or_any                 (in              ) list      UNION of cohort sub-filters (an 'A or B or C' cohort): put the child filters in sub_filters (each a lab_value / vital_value / derived_value / etc.); operator 'in', value can be 'any'
   readmitted_30d         (<|<=|=|>|>=     ) scalar    binary readmission-within-30-days flag (0 or 1)
   readmitted_60d         (<|<=|=|>|>=     ) scalar    binary readmission-within-60-days flag (0 or 1)
   subject_id             (=               ) scalar    single patient MIMIC subject_id (integer)
+  vital_value            (<|<=|=|>|>=     ) scalar    vital-sign threshold cohort: set measurement to the vital (e.g. 'mean arterial pressure') and loinc_code to its LOINC; value is the numeric threshold (e.g. operator '<' value '65' for MAP < 65 mmHg)
 
 ## aggregate  (used in aggregation)
 
   avg         alias for "mean"
   count       row count (admissions / events matching the concept)
+  event_ordering  most-common temporal order of N events across a cohort (computed in Python); pair with ≥2 clinical_concepts naming the events
   exists      boolean presence check (uses count template today)
   max         largest value
   mean        arithmetic mean over numeric values
@@ -266,6 +306,7 @@ Use ONLY the names listed here for patient_filters[].field, aggregation, and com
 
   admission_type          "EW EMER.", "EU OBSERVATION", "OBSERVATION ADMIT", "URGENT", … — grouped on the admission
   age                     patient anchor_age — grouped on the Patient node
+  condition               split the cohort by presence/absence of a sub-condition supplied in split_condition (e.g. a diagnosis like 'chronic anticoagulant use', or 'ventilation'); use comparison_field='condition' WITH a split_condition object — yields two groups, 'yes' and 'no'
   discharge_location      HOME / SNF / HOSPICE / etc — grouped on the admission
   gender                  M vs F — grouped on the Patient node
   readmitted_30d          readmitted within 30 days (0/1) — grouped on the admission
@@ -318,6 +359,16 @@ When scope is "comparison", set comparison_field to the dimension being compared
 continuous field ("above 70 and under 70", "over 65 vs 65 or below"), do NOT use
 a continuous comparison_field — return Shape B with one filtered cohort sub-CQ
 per side (see "Numeric-threshold split" under Big-Question Decomposition).
+
+When the comparison splits the cohort by **whether patients have a second
+condition** ("mortality split by whether they were mechanically ventilated",
+"... split by whether they have chronic anticoagulant use"), set
+``comparison_field: "condition"`` AND populate ``split_condition`` with the
+sub-condition as a single patient_filter object (a ``diagnosis`` filter, or
+``{"field": "ventilation", ...}``). This yields two groups, "yes" and "no". The
+main metric stays in ``clinical_concepts`` / ``aggregation`` and the BASE cohort
+stays in ``patient_filters`` — ``split_condition`` is ONLY the dividing
+sub-condition.
 
 **Similarity + causal combination**: a question like "compare tPA vs no-tPA
 among patients similar to hadm 101" is causal-with-narrowing — set
@@ -747,6 +798,123 @@ Question: "How many patients with pneumonia had a blood culture that grew Klebsi
   "return_type": "text",
   "scope": "cohort",
   "interpretation_summary": "Count of pneumonia admissions whose blood culture grew Klebsiella pneumoniae (the organism was isolated). The specimen (blood culture) and the organism (its scientific binomial) are one microbiology concept so both constrain the result; the cohort is a patient_filter."
+}
+```
+
+Question: "What proportion of ICU patients developed thrombocytopenia (platelet count < 50 K/µL), hypotension (mean arterial pressure < 65 mmHg), or an elevated shock index, and what was their in-hospital mortality?"
+```json
+{
+  "original_question": "What proportion of ICU patients developed thrombocytopenia (platelet count < 50 K/\u00b5L), hypotension (mean arterial pressure < 65 mmHg), or an elevated shock index, and what was their in-hospital mortality?",
+  "clinical_concepts": [
+    {
+      "name": "in-hospital mortality",
+      "concept_type": "outcome"
+    }
+  ],
+  "patient_filters": [
+    {
+      "field": "icu_stay",
+      "operator": "=",
+      "value": "1"
+    },
+    {
+      "field": "or_any",
+      "operator": "in",
+      "value": "any",
+      "sub_filters": [
+        {
+          "field": "lab_value",
+          "operator": "<",
+          "value": "50",
+          "measurement": "platelet count",
+          "loinc_code": "777-3"
+        },
+        {
+          "field": "vital_value",
+          "operator": "<",
+          "value": "65",
+          "measurement": "mean arterial pressure",
+          "loinc_code": "8478-0"
+        },
+        {
+          "field": "derived_value",
+          "operator": ">=",
+          "value": "0.9",
+          "measurement": "shock index"
+        }
+      ]
+    }
+  ],
+  "aggregation": "count",
+  "return_type": "text",
+  "scope": "cohort",
+  "interpretation_summary": "In-hospital mortality rate over the ICU cohort meeting ANY of three value-defined conditions: platelets < 50 K/uL (lab_value), MAP < 65 mmHg (vital_value), or an elevated shock index (derived_value \u2014 its formula and abnormal threshold are looked up from the literature). The three are OR'd via or_any; 'ICU patients' is the icu_stay filter; the proportion and its mortality come from the in-hospital mortality outcome concept with aggregation count."
+}
+```
+
+Question: "For intracerebral hemorrhage patients with ICP monitoring, what is the most common order of intubation, hyperosmolar therapy, and a GCS drop?"
+```json
+{
+  "original_question": "For intracerebral hemorrhage patients with ICP monitoring, what is the most common order of intubation, hyperosmolar therapy, and a GCS drop?",
+  "clinical_concepts": [
+    {
+      "name": "intubation",
+      "concept_type": "procedure"
+    },
+    {
+      "name": "hyperosmolar therapy",
+      "concept_type": "drug"
+    },
+    {
+      "name": "GCS drop",
+      "concept_type": "vital"
+    }
+  ],
+  "patient_filters": [
+    {
+      "field": "diagnosis",
+      "operator": "contains",
+      "value": "intracerebral hemorrhage"
+    }
+  ],
+  "aggregation": "event_ordering",
+  "return_type": "text_and_table",
+  "scope": "cohort",
+  "interpretation_summary": "The most common temporal order of intubation, hyperosmolar therapy, and a GCS drop among intracerebral hemorrhage patients with ICP monitoring."
+}
+```
+
+Question: "In-hospital mortality for intracerebral hemorrhage patients, split by whether they have chronic anticoagulant use"
+```json
+{
+  "original_question": "In-hospital mortality for intracerebral hemorrhage patients, split by whether they have chronic anticoagulant use",
+  "clinical_concepts": [
+    {
+      "name": "in-hospital mortality",
+      "concept_type": "outcome"
+    }
+  ],
+  "patient_filters": [
+    {
+      "field": "diagnosis",
+      "operator": "contains",
+      "value": "intracerebral hemorrhage"
+    }
+  ],
+  "aggregation": "count",
+  "return_type": "text_and_table",
+  "scope": "comparison",
+  "comparison_field": "condition",
+  "split_condition": {
+    "field": "diagnosis",
+    "operator": "contains",
+    "value": "chronic anticoagulant use",
+    "resolved_icd_codes": [
+      "Z79.01",
+      "Z79.02"
+    ]
+  },
+  "interpretation_summary": "In-hospital mortality rate for intracerebral hemorrhage admissions, split by presence vs absence of chronic anticoagulant use."
 }
 ```
 

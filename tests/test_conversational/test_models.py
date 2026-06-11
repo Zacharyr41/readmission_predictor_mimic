@@ -153,6 +153,45 @@ class TestPatientFilter:
         f = PatientFilter(field="gender", operator="=", value="F")
         assert f == PatientFilter.model_validate_json(f.model_dump_json())
 
+    def test_measurement_grounding_fields_default_none(self):
+        """Structural filters carry no measurement grounding — byte-identical
+        to before the measurement-value-filter feature."""
+        f = PatientFilter(field="age", operator=">", value="65")
+        assert f.measurement is None
+        assert f.loinc_code is None
+        assert f.sub_filters is None
+
+    def test_lab_value_filter_carries_analyte_and_loinc(self):
+        f = PatientFilter(
+            field="lab_value", operator="<", value="50",
+            measurement="platelet count", loinc_code="777-3",
+        )
+        assert f.measurement == "platelet count"
+        assert f.loinc_code == "777-3"
+
+    def test_loinc_code_format_validated(self):
+        with pytest.raises(ValidationError):
+            PatientFilter(
+                field="lab_value", operator="<", value="50",
+                measurement="platelet count", loinc_code="not-a-loinc",
+            )
+
+    def test_or_any_carries_nested_sub_filters(self):
+        """The or_any composite holds child filters (a union cohort); the model
+        is self-referencing and JSON round-trips."""
+        f = PatientFilter(
+            field="or_any", operator="in", value="any",
+            sub_filters=[
+                PatientFilter(field="lab_value", operator="<", value="50",
+                              measurement="platelet count", loinc_code="777-3"),
+                PatientFilter(field="vital_value", operator="<", value="65",
+                              measurement="mean arterial pressure", loinc_code="8478-0"),
+            ],
+        )
+        assert len(f.sub_filters) == 2
+        assert f.sub_filters[1].measurement == "mean arterial pressure"
+        assert f == PatientFilter.model_validate_json(f.model_dump_json())
+
 
 # --- ReturnType ---
 

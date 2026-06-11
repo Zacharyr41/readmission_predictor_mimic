@@ -92,8 +92,11 @@ def _compile_diagnosis(f: PatientFilter, ctx: FilterCompileContext) -> FilterFra
     grounded = _maybe_ground_diagnosis_filter_clause(f, ctx)
     if grounded is not None:
         clause_sql, clause_params = grounded
-        clause = f"({clause_sql} OR {like_clause})"
-        params = list(clause_params) + like_params
+        # Codes-only when grounded (drop the broad title-LIKE) — the same anti-
+        # pollution rule as the count path, so count and filter resolve to the
+        # SAME cohort instead of 1,576-vs-9,362.
+        clause = clause_sql
+        params = list(clause_params)
     else:
         clause = like_clause
         params = like_params
@@ -120,6 +123,23 @@ def _maybe_ground_diagnosis_filter_clause(
     Returns ``None`` to signal the caller to fall back to LIKE-only.
     Never raises.
     """
+    # Tier 0 — codes the orchestrator already resolved for THIS filter via
+    # candidate disambiguation (``_disambiguate_diagnoses``). Used first and
+    # unconditionally so the filter path shares the count path's exact grounding.
+    resolved = getattr(f, "resolved_icd_codes", None)
+    if resolved:
+        from src.conversational.health_evidence.cohorts import normalize_icd_prefix
+        clauses0: list[str] = []
+        params0: list[str] = []
+        for code in resolved:
+            norm = normalize_icd_prefix(code)
+            if not norm:
+                continue
+            clauses0.append("di.icd_code LIKE ?")
+            params0.append(norm + "%")
+        if clauses0:
+            return f"({' OR '.join(clauses0)})", params0
+
     if not ctx.enable_mcp_grounding:
         return None
     if f.operator != "contains":
@@ -244,6 +264,226 @@ def _compile_readmitted(field_name: str):
 
 
 # ---------------------------------------------------------------------------
+# Measurement-value cohort filters (lab / vital / derived) + composition
+# ---------------------------------------------------------------------------
+
+
+def _ground_measurement_itemids(
+    ctx: FilterCompileContext, measurement: str | None, loinc_code: str | None,
+    concept_type: str,
+) -> list[int] | None:
+    """Ground an analyte name + LOINC → MIMIC itemids via the resolver.
+
+    Returns ``None`` (→ caller falls back to label-LIKE) when no resolver is
+    available (unit tests), no measurement name was supplied, or grounding
+    misses. Reuses ``resolve_biomarker`` (labevents) / ``resolve_vital``
+    (chartevents) — no new grounding logic.
+    """
+    if ctx.resolver is None or not measurement:
+        return None
+    from src.conversational.models import ClinicalConcept
+
+    concept = ClinicalConcept(
+        name=measurement, concept_type=concept_type, loinc_code=loinc_code,
+    )
+    if concept_type == "biomarker":
+        res = ctx.resolver.resolve_biomarker(concept)
+    else:
+        res = ctx.resolver.resolve_vital(concept)
+    return res.itemids  # None on no-LOINC / no-coverage → label-LIKE fallback
+
+
+def _compile_measurement_value(
+    f: PatientFilter, ctx: FilterCompileContext, *, concept_type: str,
+) -> FilterFragment:
+    """Cohort = admissions with ≥1 reading of an analyte crossing a threshold.
+
+    Emits a correlated ``EXISTS`` on the event table (labevents for biomarker,
+    chartevents for vital): itemid-grounded when possible, else a label-LIKE
+    fallback on the dictionary table. The operator comes from the registered
+    operator set (safe to interpolate); the threshold is parameterized.
+    """
+    op = f.operator
+    try:
+        thr = float(f.value)
+    except (TypeError, ValueError):
+        return FilterFragment(where=["1 = 0"])  # malformed threshold → empty
+    t = ctx.backend.table
+    a = ctx.admission_alias
+    if concept_type == "biomarker":
+        ev, dic, table_name, dict_name = "lev", "dlab", "labevents", "d_labitems"
+    else:
+        ev, dic, table_name, dict_name = "cev", "dit", "chartevents", "d_items"
+    itemids = _ground_measurement_itemids(
+        ctx, f.measurement, f.loinc_code, concept_type,
+    )
+    correlate = f"{ev}.hadm_id = {a}.hadm_id"
+    if itemids:
+        placeholders = ",".join(["?"] * len(itemids))
+        inner = (
+            f"SELECT 1 FROM {t(table_name)} {ev} "
+            f"WHERE {correlate} AND {ev}.itemid IN ({placeholders}) "
+            f"AND {ev}.valuenum IS NOT NULL AND {ev}.valuenum {op} ?"
+        )
+        params: list = list(itemids) + [thr]
+    else:
+        analyte = f.measurement or (f.value if isinstance(f.value, str) else "")
+        inner = (
+            f"SELECT 1 FROM {t(table_name)} {ev} "
+            f"JOIN {t(dict_name)} {dic} ON {ev}.itemid = {dic}.itemid "
+            f"WHERE {correlate} AND {ctx.backend.ilike(f'{dic}.label')} "
+            f"AND {ev}.valuenum IS NOT NULL AND {ev}.valuenum {op} ?"
+        )
+        params = [f"%{analyte}%", thr]
+    return FilterFragment(where=[f"EXISTS ({inner})"], params=params)
+
+
+def _compile_lab_value(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
+    return _compile_measurement_value(f, ctx, concept_type="biomarker")
+
+
+def _compile_vital_value(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
+    return _compile_measurement_value(f, ctx, concept_type="vital")
+
+
+def _compile_derived_value(
+    f: PatientFilter, ctx: FilterCompileContext,
+) -> FilterFragment:
+    """Cohort = admissions where a derived clinical index crosses its threshold.
+
+    The :class:`DerivedFormula` (operands + arithmetic AST + operator/threshold)
+    is pre-resolved by the orchestrator from a PubMed lookup and supplied via
+    ``ctx.derived_formulas`` (keyed by the lower-cased index name). Compiled
+    through the safe AST→SQL emitter in ``per_instant`` (time-matched self-join)
+    or ``per_stay`` (per-operand scalar subqueries) mode. When no formula is
+    available (lookup failed / offline) the arm drops to ``1 = 0`` so the rest
+    of the query still returns.
+    """
+    name = (f.measurement or "").strip().lower()
+    formula = (ctx.derived_formulas or {}).get(name)
+    if formula is None:
+        return FilterFragment(where=["1 = 0"])
+    from src.conversational.derived_formula import (
+        FormulaError, validate_formula,
+    )
+    try:
+        validate_formula(formula)
+        if formula.time_semantics == "per_instant":
+            sql, params = _compile_derived_per_instant(formula, ctx)
+        else:
+            sql, params = _compile_derived_per_stay(formula, ctx)
+    except FormulaError:
+        return FilterFragment(where=["1 = 0"])
+    return FilterFragment(where=[sql], params=params)
+
+
+def _compile_derived_per_instant(formula, ctx: FilterCompileContext) -> tuple[str, list]:
+    """N-alias same-charttime self-join; the expression is evaluated per instant
+    and thresholded as a ROW-LEVEL predicate inside ``EXISTS``.
+
+    Cohort membership = the index crosses its threshold at *some* instant
+    ("ever elevated / ever low") — which is both the natural semantics for an
+    "elevated <index>" cohort and a de-correlatable semi-join. (A GROUP BY +
+    ``HAVING MAX(expr)`` would be a correlated aggregate subquery that BigQuery
+    refuses to de-correlate; the EXISTS quantifier already supplies the "ever".)
+    Operands share one event table so the charttime self-join is valid.
+    """
+    from src.conversational.derived_formula import emit_expression
+
+    t = ctx.backend.table
+    a = ctx.admission_alias
+    ops = formula.operands
+    table = ops[0].table
+    aliases = [f"dop{i}" for i in range(len(ops))]
+    base = aliases[0]
+    from_parts = [f"{t(table)} {base}"]
+    where_parts = [f"{base}.hadm_id = {a}.hadm_id"]
+    params: list = []
+    for i, (al, o) in enumerate(zip(aliases, ops)):
+        if i > 0:
+            from_parts.append(
+                f"JOIN {t(table)} {al} ON {al}.stay_id = {base}.stay_id "
+                f"AND {al}.charttime = {base}.charttime"
+            )
+        placeholders = ",".join(["?"] * len(o.itemids))
+        where_parts.append(f"{al}.itemid IN ({placeholders})")
+        params.extend(o.itemids)
+        where_parts.append(f"{al}.valuenum BETWEEN ? AND ?")
+        params.extend([o.guard_low, o.guard_high])
+    ref_col = {o.ref: f"{al}.valuenum" for al, o in zip(aliases, ops)}
+    expr_sql, expr_params = emit_expression(
+        formula.expression, lambda r: (ref_col[r], []),
+    )
+    where_parts.append(f"({expr_sql}) {formula.operator} ?")
+    params.extend(expr_params)
+    params.append(float(formula.threshold))
+    inner = (
+        f"SELECT 1 FROM {' '.join(from_parts)} "
+        f"WHERE {' AND '.join(where_parts)}"
+    )
+    return f"EXISTS ({inner})", params
+
+
+def _compile_derived_per_stay(formula, ctx: FilterCompileContext) -> tuple[str, list]:
+    """Each operand is an independent per-stay scalar subquery; the expression
+    combines the scalars and is thresholded (a scalar WHERE predicate)."""
+    from src.conversational.derived_formula import emit_expression
+
+    t = ctx.backend.table
+    a = ctx.admission_alias
+    subq: dict[str, str] = {}
+    subq_params: dict[str, list] = {}
+    for o in formula.operands:
+        placeholders = ",".join(["?"] * len(o.itemids))
+        subq[o.ref] = (
+            f"(SELECT {o.aggregate.upper()}(mv.valuenum) FROM {t(o.table)} mv "
+            f"WHERE mv.hadm_id = {a}.hadm_id AND mv.itemid IN ({placeholders}) "
+            f"AND mv.valuenum BETWEEN ? AND ?)"
+        )
+        subq_params[o.ref] = list(o.itemids) + [o.guard_low, o.guard_high]
+    expr_sql, expr_params = emit_expression(
+        formula.expression, lambda r: (subq[r], subq_params[r]),
+    )
+    return f"({expr_sql}) {formula.operator} ?", expr_params + [float(formula.threshold)]
+
+
+def _compile_or_any(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
+    """Union cohort — OR-combine the predicates of the child filters in
+    ``f.sub_filters`` into one parenthesized clause. Each child is compiled
+    through the registry, so any registered filter is a valid member. Children
+    are expected to be self-contained predicates (EXISTS-style measurement /
+    icu filters); a child that emits table JOINs is skipped, since an
+    unconditional JOIN can't participate in an OR.
+    """
+    subs = f.sub_filters or []
+    registry = ctx.registry
+    if not subs or registry is None:
+        return FilterFragment(where=["1 = 0"])
+    sub_wheres: list[str] = []
+    params: list = []
+    for sub in subs:
+        op = registry.get("filter", sub.field)
+        if op is None:
+            continue
+        frag = op.compile(sub, ctx)
+        if frag.joins or not frag.where:
+            continue  # OR can't carry an unconditional JOIN
+        sub_wheres.append("(" + " AND ".join(frag.where) + ")")
+        params.extend(frag.params)
+    if not sub_wheres:
+        return FilterFragment(where=["1 = 0"])
+    return FilterFragment(where=["(" + " OR ".join(sub_wheres) + ")"], params=params)
+
+
+def _compile_icu_stay(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
+    """Restrict to admissions with at least one ICU stay (``value`` ignored)."""
+    t = ctx.backend.table
+    a = ctx.admission_alias
+    inner = f"SELECT 1 FROM {t('icustays')} icu WHERE icu.hadm_id = {a}.hadm_id"
+    return FilterFragment(where=[f"EXISTS ({inner})"], params=[])
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -303,4 +543,60 @@ def register_default_filters(registry: OperationRegistry) -> None:
         value_type="scalar",
         description="binary readmission-within-60-days flag (0 or 1)",
         compile_fn=_compile_readmitted("readmitted_60d"),
+    ))
+    # --- measurement-value cohort filters (lab / vital / derived) + composition ---
+    registry.register(FilterOperation(
+        name="lab_value",
+        operators=COMPARISON_OPERATORS,
+        value_type="scalar",
+        description=(
+            "lab-value threshold cohort: set measurement to the analyte (e.g. "
+            "'platelet count') and loinc_code to its LOINC; value is the numeric "
+            "threshold (e.g. operator '<' value '50' for platelets < 50 K/uL)"
+        ),
+        compile_fn=_compile_lab_value,
+    ))
+    registry.register(FilterOperation(
+        name="vital_value",
+        operators=COMPARISON_OPERATORS,
+        value_type="scalar",
+        description=(
+            "vital-sign threshold cohort: set measurement to the vital (e.g. "
+            "'mean arterial pressure') and loinc_code to its LOINC; value is the "
+            "numeric threshold (e.g. operator '<' value '65' for MAP < 65 mmHg)"
+        ),
+        compile_fn=_compile_vital_value,
+    ))
+    registry.register(FilterOperation(
+        name="derived_value",
+        operators=COMPARISON_OPERATORS,
+        value_type="scalar",
+        description=(
+            "derived clinical index/score cohort (e.g. 'shock index'): set "
+            "measurement to the index name — its formula and abnormal threshold "
+            "are looked up from the medical literature; operator/value are "
+            "placeholders"
+        ),
+        compile_fn=_compile_derived_value,
+    ))
+    registry.register(FilterOperation(
+        name="or_any",
+        operators=frozenset({"in"}),
+        value_type="list",
+        description=(
+            "UNION of cohort sub-filters (an 'A or B or C' cohort): put the "
+            "child filters in sub_filters (each a lab_value / vital_value / "
+            "derived_value / etc.); operator 'in', value can be 'any'"
+        ),
+        compile_fn=_compile_or_any,
+    ))
+    registry.register(FilterOperation(
+        name="icu_stay",
+        operators=frozenset({"="}),
+        value_type="scalar",
+        description=(
+            "restrict to admissions with at least one ICU stay (operator '=' "
+            "value '1' for 'ICU patients')"
+        ),
+        compile_fn=_compile_icu_stay,
     ))

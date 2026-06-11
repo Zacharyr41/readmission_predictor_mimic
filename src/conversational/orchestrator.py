@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import math
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from src.conversational.answerer import _rename_columns, generate_answer
 from src.conversational.clinical_consult import (
@@ -109,6 +110,61 @@ def _aggregate_has_numeric(rows: list[dict], columns: list[str]) -> bool:
             if isinstance(v, (int, float)) and math.isfinite(v):
                 return True
     return False
+
+
+# Structured extraction of a derived-quantity formula from PubMed abstracts.
+# Sonnet (matches the decomposer) — a grounded extraction/judgment task; never
+# Haiku for judgment work. The forced tool returns the operands + arithmetic
+# AST + threshold the ``derived_value`` filter compiles.
+_FORMULA_EXTRACT_MODEL = "claude-sonnet-4-20250514"
+_FORMULA_EXTRACT_TOOL: dict[str, Any] = {
+    "name": "report_formula",
+    "description": (
+        "Report the clinical derived-quantity formula extracted from the "
+        "abstracts as a structured, computable definition."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "operands": {
+                "type": "array",
+                "description": "Each measurement in the formula.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "ref": {"type": "string", "description": "short id used in the expression, e.g. 'hr'"},
+                        "analyte": {"type": "string", "description": "MIMIC analyte name, e.g. 'heart rate'"},
+                        "table": {"type": "string", "enum": ["lab", "vital"]},
+                        "loinc": {"type": "string", "description": "LOINC code of the analyte"},
+                        "aggregate": {"type": "string", "enum": ["max", "min", "avg"]},
+                        "guard_low": {"type": "number"},
+                        "guard_high": {"type": "number"},
+                    },
+                    "required": ["ref", "analyte", "table", "loinc"],
+                },
+            },
+            "expression": {
+                "type": "object",
+                "description": (
+                    "Arithmetic AST over operand refs + numeric constants: "
+                    "{'op': '+|-|*|/|ln|min|max', 'args': [<ref|number|node>]}. "
+                    "E.g. shock index = {'op':'/','args':['hr','sbp']}."
+                ),
+            },
+            "operator": {"type": "string", "enum": [">", ">=", "<", "<=", "="]},
+            "threshold": {"type": "number", "description": "abnormal cutoff"},
+            "time_semantics": {
+                "type": "string", "enum": ["per_instant", "per_stay"],
+                "description": (
+                    "per_instant if operands are measured together (a ratio of "
+                    "co-charted vitals); per_stay for independent components."
+                ),
+            },
+            "stay_aggregate": {"type": "string", "enum": ["max", "min", "avg"]},
+        },
+        "required": ["operands", "expression", "operator", "threshold", "time_semantics"],
+    },
+}
 
 
 class ConversationalPipeline:
@@ -241,6 +297,10 @@ class ConversationalPipeline:
         self._registry = get_default_registry()
         self._planner = QueryPlanner(registry=self._registry)
         self._client: anthropic.Anthropic = _anthropic.Anthropic(api_key=api_key)
+        # Cache of PubMed-resolved derived-quantity formulas (e.g. shock index),
+        # keyed by lower-cased index name → DerivedFormula | None. None caches a
+        # failed resolution so a flaky PubMed lookup isn't retried every compile.
+        self._derived_formula_cache: dict[str, Any] = {}
         # Pre-aggregation biological-impossibility screening. The resolver is
         # cache-first (offline seed) with an optional EvidenceAgent derivation
         # fallback that uses ``self._client``; constructed here so it shares
@@ -306,6 +366,15 @@ class ConversationalPipeline:
             self._last_disambiguations = {}
             if self._enable_disambiguation:
                 self._try_disambiguate(decomp, original_question=question)
+
+            # Candidate-disambiguation for diagnosis terms (concepts AND filter
+            # values). Auto-grounds the codes when exactly one candidate matches
+            # the typed term; asks a clarifying question when genuinely ambiguous
+            # (>1 distinct candidate, none an exact match). Runs regardless of the
+            # literature-disambiguation flag — it's grounding, and it unifies the
+            # count and filter paths onto the SAME ICD codes (the root of the
+            # 4,033-vs-9,362 split).
+            self._disambiguate_diagnoses(decomp, original_question=question)
 
             # Clarify short-circuit: any sub-CQ with a non-empty
             # clarifying_question wins; the whole turn becomes a clarify.
@@ -633,6 +702,184 @@ class ConversationalPipeline:
                 self._disambiguations_resolved += 1
                 cq.clarifying_question = None
             self._last_disambiguations[id(cq)] = per_cq
+
+    def _disambiguate_diagnoses(self, decomp, *, original_question: str) -> None:
+        """Ground diagnosis terms to ICD codes via candidate disambiguation,
+        for BOTH ``clinical_concepts`` and diagnosis ``patient_filters`` so the
+        count and filter SQL paths use the SAME codes.
+
+        Per term: gather candidates (``resolve_diagnosis_candidates``); if one
+        candidate's clinical title matches the typed term word-for-word, ground
+        to it; if exactly one candidate exists, ground to it; if several distinct
+        candidates exist with no clear match (e.g. "stroke" → ischemic vs
+        hemorrhagic), set a clarifying question so the clinician picks. Never
+        raises. Pre-set ``icd_codes`` (LLM/prior-turn) are left untouched."""
+        for cq in decomp.competency_questions:
+            for concept in cq.clinical_concepts:
+                if concept.concept_type != "diagnosis":
+                    continue
+                # Run even when the decomposer pre-filled icd_codes: an LLM grounding
+                # is often single-version (SAH → I60 only, missing ICD-9 430). A
+                # CONFIDENT exact-match candidate (both versions) overrides it; a
+                # fuzzy candidate leaves the LLM codes untouched.
+                codes = self._resolve_diagnosis_term(
+                    cq, concept.name, has_prior=bool(concept.icd_codes),
+                )
+                if codes is not None:
+                    concept.icd_codes = codes
+            for f in (cq.patient_filters or []):
+                if getattr(f, "field", None) != "diagnosis":
+                    continue
+                if getattr(f, "resolved_icd_codes", None):
+                    continue
+                value = getattr(f, "value", None)
+                if not isinstance(value, str) or not value:
+                    continue
+                codes = self._resolve_diagnosis_term(cq, value)
+                if codes is not None:
+                    f.resolved_icd_codes = codes
+            # Ground the split-by-condition sub-condition too, when it's a
+            # diagnosis — so the comparison's CASE WHEN EXISTS uses ICD codes
+            # (codes-based EXISTS, not a broad title-LIKE). Unlike the cohort
+            # filter / clinical-concept paths above (which take the exact-match-
+            # or-ask route via ``_resolve_diagnosis_term``), a split/presence
+            # condition is grounded INCLUSIVELY: a term like "chronic
+            # anticoagulant use" yields several ambiguous candidates
+            # ({Z79.01, Z79.02} + OMOPHub variants) that the exact-match path
+            # refuses to auto-ground (leaving codes None → an empty 'yes'
+            # group). "Any chronic-antithrombotic code" is the right semantics
+            # for a presence split, so we UNION every candidate's codes. A
+            # pre-grounded split_condition (LLM/prior-turn codes) is left
+            # untouched.
+            split = getattr(cq, "split_condition", None)
+            # Ground every diagnosis LEAF of the split inclusively: a bare
+            # diagnosis split, or each diagnosis sub_filter of an ``or_any``
+            # composite (the decomposer emits "anticoagulants OR antiplatelets"
+            # as an or_any of two diagnosis leaves). Each leaf → UNION of its
+            # candidate codes (e.g. "chronic anticoagulant use" → Z79.01/V58.61).
+            for leaf in self._diagnosis_split_leaves(split):
+                if getattr(leaf, "resolved_icd_codes", None):
+                    continue
+                value = getattr(leaf, "value", None)
+                if isinstance(value, str) and value:
+                    codes = self._inclusive_diagnosis_codes(value)
+                    if codes is not None:
+                        leaf.resolved_icd_codes = codes
+
+    def _resolve_diagnosis_term(self, cq, name: str, *, has_prior: bool = False):
+        """Return the ICD codes to auto-ground for ``name``, or ``None`` to leave
+        it unchanged. ``None`` happens when the term is ambiguous (sets
+        ``cq.clarifying_question`` + disambiguation partials), unresolved (caller
+        falls back to title-LIKE), or — when ``has_prior`` — only fuzzily matched
+        (don't clobber an existing LLM/prior grounding without a confident match)."""
+        from src.conversational.concept_resolver import _normalize_dx_title
+        from src.conversational.models import ClinicalConcept
+
+        try:
+            candidates = self._resolver.resolve_diagnosis_candidates(
+                ClinicalConcept(name=name, concept_type="diagnosis")
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        if not candidates:
+            return None
+        target = frozenset(_normalize_dx_title(name).split())
+        exact = [
+            c for c in candidates
+            if frozenset(_normalize_dx_title(c.label).split()) == target
+        ]
+        if len(exact) == 1:
+            return list(exact[0].icd_codes)
+        if has_prior:
+            # The concept already carries codes; only a confident exact-match
+            # (above) overrides them — a fuzzy single candidate or an ambiguous
+            # set must not silently replace a deliberate grounding.
+            return None
+        if len(candidates) == 1:
+            return list(candidates[0].icd_codes)
+        # >1 distinct candidate, no single exact term-match → genuine ambiguity.
+        if self._enable_disambiguation:
+            opts = "; ".join(
+                f"({i + 1}) {c.label} [{', '.join(c.icd_codes)}]"
+                for i, c in enumerate(candidates)
+            )
+            cq.clarifying_question = (
+                f'"{name}" could map to more than one diagnosis grouping — '
+                f"which did you mean? {opts}"
+            )
+            self._last_disambiguations.setdefault(id(cq), []).append(
+                self._diagnosis_disambiguation(name, candidates)
+            )
+            return None
+        # Disambiguation disabled → deterministic fallback (highest-confidence
+        # candidate) so non-interactive paths still ground rather than stall.
+        best = max(candidates, key=lambda c: (c.confidence or 0.0))
+        return list(best.icd_codes)
+
+    @staticmethod
+    def _diagnosis_split_leaves(split):
+        """The diagnosis filters within a ``split_condition`` to ground
+        inclusively: the split itself when it's a bare ``diagnosis``, or the
+        diagnosis ``sub_filters`` of an ``or_any`` composite. Returns ``[]`` for
+        ventilation / non-diagnosis splits (those don't ICD-ground)."""
+        if split is None:
+            return []
+        field = getattr(split, "field", None)
+        if field == "diagnosis":
+            return [split]
+        if field == "or_any":
+            return [
+                s for s in (getattr(split, "sub_filters", None) or [])
+                if getattr(s, "field", None) == "diagnosis"
+            ]
+        return []
+
+    def _inclusive_diagnosis_codes(self, name: str) -> list[str] | None:
+        """Return the UNION of ALL candidate ICD codes for a diagnosis ``name``,
+        or ``None`` when nothing grounds. Used only for split/presence
+        conditions, where the right semantics is "carries ANY matching code"
+        — so an ambiguous term (e.g. "chronic anticoagulant use" → Z79.01,
+        Z79.02 + OMOPHub variants) grounds to every candidate's codes instead
+        of stalling on the exact-match-or-ask path (which would leave the 'yes'
+        group empty). Order-preserving dedup. Never raises."""
+        from src.conversational.models import ClinicalConcept
+
+        try:
+            candidates = self._resolver.resolve_diagnosis_candidates(
+                ClinicalConcept(name=name, concept_type="diagnosis")
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        if not candidates:
+            return None
+        seen: set[str] = set()
+        codes: list[str] = []
+        for cand in candidates:
+            for code in cand.icd_codes:
+                if code not in seen:
+                    seen.add(code)
+                    codes.append(code)
+        return codes or None
+
+    def _diagnosis_disambiguation(self, name: str, candidates):
+        """Build a ``Disambiguation`` partial from diagnosis candidates so
+        ``clarify()`` can format a literature-style menu with the ICD codes."""
+        from src.conversational.models import Disambiguation
+
+        return Disambiguation(
+            input_name=name,
+            canonical_name=candidates[0].label,
+            alternates=[
+                f"{c.label} ({', '.join(c.icd_codes)})" for c in candidates
+            ],
+            resolved_code=None,
+            code_system=None,
+            confidence="low",
+            reasoning=(
+                f"The diagnosis term {name!r} maps to multiple distinct ICD "
+                "groupings; the clinician should pick the intended one."
+            ),
+        )
 
     def _critique(
         self,
@@ -967,6 +1214,132 @@ class ConversationalPipeline:
             sub.correction_trace = trace
         return sub, sql_used, fb
 
+    def _derived_formulas_for_cq(self, cq) -> dict:
+        """Resolve every ``derived_value`` filter in a CQ to a grounded
+        DerivedFormula (PubMed → extract → ground), keyed by lower-cased index
+        name. Scans nested ``or_any`` children too. Failed resolutions are
+        omitted (the filter then drops to an empty arm). Returns ``{}`` when the
+        CQ has no derived filters."""
+        names = self._collect_derived_names(cq.patient_filters)
+        out: dict = {}
+        for nm in names:
+            formula = self._resolve_derived_formula(nm)
+            if formula is not None:
+                out[nm.strip().lower()] = formula
+        return out
+
+    @staticmethod
+    def _collect_derived_names(filters) -> list[str]:
+        names: list[str] = []
+        for f in (filters or []):
+            if getattr(f, "field", None) == "derived_value" and f.measurement:
+                names.append(f.measurement)
+            if getattr(f, "field", None) == "or_any" and f.sub_filters:
+                names.extend(ConversationalPipeline._collect_derived_names(f.sub_filters))
+        return names
+
+    def _resolve_derived_formula(self, name: str):
+        """Cached resolution of a derived-index name → DerivedFormula | None."""
+        key = name.strip().lower()
+        if key in self._derived_formula_cache:
+            return self._derived_formula_cache[key]
+        formula = None
+        try:
+            formula = self._extract_derived_formula(key)
+        except Exception:  # noqa: BLE001 — resolution must never fail the turn
+            logger.exception("derived-formula resolution failed for %r", name)
+        self._derived_formula_cache[key] = formula
+        return formula
+
+    def _extract_derived_formula(self, name: str):
+        """PubMed evidence → structured LLM extraction → LOINC-grounded operands
+        → validated DerivedFormula. Returns None on any miss (no evidence, bad
+        extraction, ungroundable operand, or invalid formula)."""
+        from src.conversational.concept_resolver import (
+            _cached_clinical_formula_evidence,
+        )
+        from src.conversational.derived_formula import (
+            DerivedFormula, FormulaError, Operand, validate_formula,
+        )
+        from src.conversational.models import ClinicalConcept
+
+        try:
+            evidence = _cached_clinical_formula_evidence(name)
+        except LookupError:
+            return None
+        abstracts = "\n\n".join(
+            f"[{r.get('pmid')}] {r.get('title')}\n{r.get('abstract')}"
+            for r in evidence
+        )
+        raw = self._call_formula_extractor(name, abstracts)
+        if not raw:
+            return None
+
+        operands: list[Operand] = []
+        for o in raw.get("operands", []):
+            ctype = "biomarker" if o.get("table") == "lab" else "vital"
+            concept = ClinicalConcept(
+                name=str(o.get("analyte", "")), concept_type=ctype,
+                loinc_code=o.get("loinc") or None,
+            )
+            res = (
+                self._resolver.resolve_biomarker(concept) if ctype == "biomarker"
+                else self._resolver.resolve_vital(concept)
+            )
+            if not res.itemids:
+                return None  # an operand couldn't be grounded → bail
+            operands.append(Operand(
+                ref=str(o["ref"]),
+                itemids=tuple(res.itemids),
+                table="labevents" if ctype == "biomarker" else "chartevents",
+                aggregate=o.get("aggregate") or "max",
+                guard_low=float(o.get("guard_low", 0.0)),
+                guard_high=float(o.get("guard_high", 1e9)),
+            ))
+        try:
+            formula = DerivedFormula(
+                operands=tuple(operands),
+                expression=raw["expression"],
+                operator=raw.get("operator", ">="),
+                threshold=float(raw["threshold"]),
+                time_semantics=raw.get("time_semantics", "per_instant"),
+                stay_aggregate=raw.get("stay_aggregate", "max"),
+                sources=tuple(str(r.get("pmid", "")) for r in evidence),
+            )
+            validate_formula(formula)
+        except (FormulaError, KeyError, ValueError, TypeError):
+            return None
+        return formula
+
+    def _call_formula_extractor(self, name: str, abstracts: str) -> dict | None:
+        """Single forced-tool LLM call extracting the formula JSON. Returns the
+        tool input dict, or None on any failure."""
+        prompt = (
+            f"From the PubMed abstracts below, extract the formula for the "
+            f"clinical index '{name}'. Give each operand (numerator / "
+            f"denominator / component) with its MIMIC analyte name, whether it "
+            f"is a 'lab' or 'vital', and its LOINC code; the arithmetic "
+            f"expression as a nested AST; the abnormal-threshold operator and "
+            f"value; and time_semantics ('per_instant' for a ratio of "
+            f"co-measured values, else 'per_stay'). Use 'ln' for natural log.\n\n"
+            f"ABSTRACTS:\n{abstracts}"
+        )
+        try:
+            resp = self._client.messages.create(
+                model=_FORMULA_EXTRACT_MODEL,
+                max_tokens=1024,
+                tools=[_FORMULA_EXTRACT_TOOL],
+                tool_choice={"type": "tool", "name": "report_formula"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("formula extractor LLM call failed for %r", name)
+            return None
+        for block in resp.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == "report_formula":
+                return block.input
+        return None
+
     def _compile_fastpath_preview(
         self,
         cq: CompetencyQuestion,
@@ -1010,6 +1383,8 @@ class ConversationalPipeline:
                 resolved_icd_codes=resolved_icd_codes,
                 enable_mcp_grounding=True,
                 outlier_screen=outlier_screen,
+                resolver=self._resolver,
+                derived_formulas=self._derived_formulas_for_cq(cq),
             )
             return query, resolved_itemids, fallback_warning
         except Exception as exc:  # noqa: BLE001
@@ -1062,6 +1437,8 @@ class ConversationalPipeline:
             resolved_icd_codes=None,
             enable_mcp_grounding=True,
             outlier_screen=outlier_screen,
+            resolver=self._resolver,
+            derived_formulas=self._derived_formulas_for_cq(cq),
         )
         raw_rows = backend.execute(query.sql, query.params)
         agg_columns = query.outlier_agg_columns or query.columns
@@ -1080,6 +1457,32 @@ class ConversationalPipeline:
             concept.loinc_code, biom.itemids, resolved_names,
         )
         return raw_rows, query, warning
+
+    def _apply_aggregate_post_processor(
+        self, cq: CompetencyQuestion, rows: list[dict],
+    ) -> tuple[list[dict], list[str]] | None:
+        """Run the CQ aggregate's Python post-processor over fast-path rows.
+
+        Returns ``(post_rows, post_columns)`` when the aggregate registered a
+        ``post_processor`` (e.g. ``event_ordering``), or ``None`` for the common
+        case of a plain SQL aggregate with no post-processing. Never raises — a
+        post-processor failure degrades to the raw rows so the turn still
+        answers.
+        """
+        if not cq.aggregation:
+            return None
+        agg_op = self._registry.get("aggregate", cq.aggregation)
+        post = getattr(agg_op, "post_processor", None) if agg_op else None
+        if post is None:
+            return None
+        try:
+            return post(rows)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "aggregate post-processor for %r failed (%s); returning raw rows",
+                cq.aggregation, exc,
+            )
+            return None
 
     def _run_sql_fastpath(
         self,
@@ -1148,6 +1551,8 @@ class ConversationalPipeline:
                 resolved_icd_codes=resolved_icd_codes,
                 enable_mcp_grounding=True,
                 outlier_screen=outlier_screen,
+                resolver=self._resolver,
+                derived_formulas=self._derived_formulas_for_cq(cq),
             )
 
         raw_rows = backend.execute(query.sql, query.params)
@@ -1156,6 +1561,21 @@ class ConversationalPipeline:
         # so ``generate_answer`` sees the same shape as the unscreened path.
         agg_columns = query.outlier_agg_columns or query.columns
         rows = [dict(zip(agg_columns, r)) for r in raw_rows]
+
+        # Aggregates that need Python post-processing (e.g. event_ordering, which
+        # the SQL returns as per-patient FIRST-event-time rows) carry a
+        # ``post_processor`` on their AggregateOperation. Apply it here, turning
+        # the raw fast-path rows into the answerer-facing rows + columns. Most
+        # aggregates (AVG/COUNT/…) have no post_processor, so this is a no-op for
+        # them. This runs BEFORE the biomarker-broaden branch — which is keyed on
+        # the unprocessed numeric-aggregate shape and never fires for these
+        # multi-row post-processed operations.
+        post_rows = self._apply_aggregate_post_processor(cq, rows)
+        if post_rows is not None:
+            rows, post_columns = post_rows
+            # Re-point ``query.columns`` so the clean-row subset + answerer use
+            # the post-processed column list.
+            query = replace(query, columns=post_columns)
 
         # Coverage repair: an itemid-grounded biomarker aggregate that came back
         # empty/all-NULL likely grounded to an unpopulated assay subtype. Retry
@@ -1637,6 +2057,7 @@ class ConversationalPipeline:
         config = self._bq_validator_mcp_config
         if config is None:
             from pathlib import Path
+            import os
             import sys
 
             repo_root = Path(__file__).parent.parent.parent
@@ -1651,7 +2072,33 @@ class ConversationalPipeline:
                 name="bq-validator",
                 transport="stdio",
                 command=sys.executable,
-                args=[str(server_path)],
+                # ``-u`` forces unbuffered stdio: the server talks JSON-RPC over
+                # a *pipe* (not a TTY), so Python block-buffers its stdout by
+                # default and the responses never reach the client → every call
+                # hangs until the timeout. Unbuffered flushes each response
+                # immediately.
+                args=["-u", str(server_path)],
+                # Pass the full parent environment so the stdio subprocess
+                # inherits BigQuery credentials. The MCP SDK otherwise spawns
+                # the server with a stripped-down default env, so the server's
+                # ``bigquery.Client()`` finds no ADC and hangs on the GCE
+                # metadata-server fallback — making every ``validate_sql`` call
+                # block until the timeout. Also pin the dry-run billing project
+                # to the pipeline's project so the cost estimate doesn't 400 on
+                # a missing default project.
+                env={
+                    **os.environ,
+                    "BQ_VALIDATOR_PROJECT": (
+                        self._bigquery_project
+                        or os.environ.get("BQ_VALIDATOR_PROJECT")
+                        or os.environ.get("BIGQUERY_PROJECT")
+                        or ""
+                    ),
+                },
+                # The pre-validator is optional and degrades gracefully; if its
+                # stdio handshake stalls (detached/backgrounded test runs), skip
+                # it after the first timeout instead of taxing every query.
+                circuit_break_on_timeout=True,
             )
 
         try:

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.conversational.health_evidence.tools import (
+    clinical_formula_lookup,
     code_map,
     icd_autocode,
     icd_lookup,
@@ -148,6 +149,34 @@ LOINC_REFERENCE_RANGE_TOOL_DEF: dict[str, Any] = {
             },
         },
         "required": ["loinc_code"],
+    },
+}
+
+
+CLINICAL_FORMULA_LOOKUP_TOOL_DEF: dict[str, Any] = {
+    "name": "clinical_formula_lookup",
+    "description": (
+        "Look up the DEFINITION / formula of a clinical derived quantity "
+        "(e.g. 'shock index', 'anion gap', 'PaO2/FiO2 ratio') from PubMed. "
+        "Returns matching article ABSTRACTS, where the numerator/denominator "
+        "and abnormal threshold are stated, as evidence for extraction. Use "
+        "when a question references a derived index/score whose formula is not "
+        "given. Returns {status: 'unavailable'} on failure or an empty result "
+        "set when nothing matches."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Name of the clinical index/score (e.g. 'shock index').",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Max abstracts to return (default 3, capped at 5).",
+            },
+        },
+        "required": ["name"],
     },
 }
 
@@ -452,6 +481,7 @@ ALL_TOOL_DEFS: list[dict[str, Any]] = [
     MIMIC_DISTRIBUTION_TOOL_DEF,
     MIMIC_ITEMID_SEARCH_TOOL_DEF,
     LOINC_REFERENCE_RANGE_TOOL_DEF,
+    CLINICAL_FORMULA_LOOKUP_TOOL_DEF,
     SNOMED_SEARCH_TOOL_DEF,
     SNOMED_EXPAND_ECL_TOOL_DEF,
     RXNORM_LOOKUP_TOOL_DEF,
@@ -468,6 +498,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     "mimic_distribution_lookup": mimic_distribution_lookup,
     "mimic_itemid_search": mimic_itemid_search,
     "loinc_reference_range": loinc_reference_range,
+    "clinical_formula_lookup": clinical_formula_lookup,
     "snomed_search": snomed_search,
     "snomed_expand_ecl": snomed_expand_ecl,
     "rxnorm_lookup": rxnorm_lookup,

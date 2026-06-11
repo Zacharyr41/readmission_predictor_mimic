@@ -1,0 +1,15 @@
+{
+  "original_question": "In-hospital mortality for intracerebral hemorrhage patients, split by whether they have chronic anticoagulant use",
+  "clinical_concepts": [
+    {"name": "in-hospital mortality", "concept_type": "outcome"}
+  ],
+  "patient_filters": [
+    {"field": "diagnosis", "operator": "contains", "value": "intracerebral hemorrhage"}
+  ],
+  "aggregation": "count",
+  "return_type": "text_and_table",
+  "scope": "comparison",
+  "comparison_field": "condition",
+  "split_condition": {"field": "diagnosis", "operator": "contains", "value": "chronic anticoagulant use", "resolved_icd_codes": ["Z79.01", "Z79.02"]},
+  "interpretation_summary": "In-hospital mortality rate for intracerebral hemorrhage admissions, split by presence vs absence of chronic anticoagulant use."
+}

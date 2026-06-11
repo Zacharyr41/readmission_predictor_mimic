@@ -504,7 +504,8 @@ class TestToolRegistration:
         assert names == {
             "pubmed_search", "mimic_distribution_lookup",
             "mimic_itemid_search",
-            "loinc_reference_range", "snomed_search", "snomed_expand_ecl",
+            "loinc_reference_range", "clinical_formula_lookup",
+            "snomed_search", "snomed_expand_ecl",
             "rxnorm_lookup", "code_map", "trials_search",
             "openfda_drug_label", "icd_lookup", "icd_autocode",
         }
@@ -843,7 +844,9 @@ class TestIcdAutocode:
 
     def test_omophub_path_uses_semantic_search(self, monkeypatch):
         """When only OMOPHUB_API_KEY is set, route through OMOPHub's
-        semantic_search filtered to vocabulary_ids=ICD10CM."""
+        semantic_search — queried BROAD (no vocabulary_ids lock; OMOPHub tags
+        ICD-10-CM codes inconsistently, so the lock dropped the right codes).
+        The ICD family is filtered + version-derived client-side."""
         monkeypatch.delenv("ICD_MCP_URL", raising=False)
         monkeypatch.setenv("OMOPHUB_API_KEY", "oh_test")
         captured = []
@@ -867,7 +870,8 @@ class TestIcdAutocode:
         )
         result = icd_autocode("acute respiratory failure")
         assert captured[0][0] == "semantic_search"
-        assert captured[0][1].get("vocabulary_ids") == "ICD10CM"
+        # No vocabulary lock — queried broad; ICD10CM record is kept + tagged v10.
+        assert captured[0][1].get("vocabulary_ids") is None
         assert result["status"] == "ok"
         rec = result["results"][0]
         assert rec["code"] == "J96.00"

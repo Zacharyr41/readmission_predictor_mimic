@@ -14,7 +14,8 @@ _ICD10_PATTERN = re.compile(r"^[A-TV-Z][0-9][0-9AB](\.?[0-9A-TV-Z]{0,4})?$")
 class ClinicalConcept(BaseModel):
     name: str
     concept_type: Literal[
-        "biomarker", "vital", "drug", "diagnosis", "microbiology", "outcome"
+        "biomarker", "vital", "drug", "diagnosis", "microbiology", "outcome",
+        "procedure",
     ]
     attributes: list[str] = []
     resolved_from_category: bool = False
@@ -67,6 +68,37 @@ class PatientFilter(BaseModel):
     field: str
     operator: Literal[">", "<", "=", ">=", "<=", "contains", "in"]
     value: str | list[str]
+    # --- measurement-value grounding (lab_value / vital_value / derived_value) ---
+    # The analyte/measurement the threshold applies to: for ``lab_value`` /
+    # ``vital_value`` the LOINC-groundable analyte name ("platelet count", "mean
+    # arterial pressure"); for ``derived_value`` the derived-index name ("shock
+    # index"). ``None`` for every structural filter (age/gender/diagnosis/...),
+    # so those filters stay byte-identical. Only read by the measurement
+    # compile_fns; ignored elsewhere.
+    measurement: str | None = None
+    # LOINC for ``lab_value`` / ``vital_value`` grounding (mirrors
+    # ``ClinicalConcept.loinc_code``). When absent the compiler falls back to a
+    # label-LIKE match and surfaces a warning.
+    loinc_code: str | None = None
+    # Child filters for the ``or_any`` composite (a UNION cohort): each is itself
+    # a PatientFilter (typically ``lab_value`` / ``vital_value`` /
+    # ``derived_value``). ``None`` for non-composite filters.
+    sub_filters: list["PatientFilter"] | None = None
+    # ICD codes the orchestrator pre-resolved for a ``field="diagnosis"`` filter
+    # via candidate disambiguation (``_disambiguate_diagnoses``). When set, the
+    # diagnosis-filter compiler emits a codes-only clause (no broad title-LIKE),
+    # keeping the count and filter paths on the SAME grounded cohort. ``None``
+    # when the term wasn't grounded (compiler falls back to title-LIKE).
+    resolved_icd_codes: list[str] | None = None
+
+    @field_validator("loinc_code")
+    @classmethod
+    def _validate_loinc(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _LOINC_PATTERN.match(v):
+            raise ValueError(f"loinc_code is not a valid LOINC code: {v!r}")
+        return v
 
 
 class ReturnType(str, Enum):
@@ -226,6 +258,16 @@ class CompetencyQuestion(BaseModel):
         "patient_similarity",
     ] = "single_patient"
     comparison_field: str | None = None
+    # Split-by-condition comparison axis. When ``comparison_field == "condition"``,
+    # the cohort is grouped by presence/absence of THIS sub-condition (a nested
+    # PatientFilter — typically a diagnosis or ventilation), emitted as
+    # ``CASE WHEN EXISTS(<correlated sub-condition>) THEN 'yes' ELSE 'no' END``
+    # in both the SELECT and GROUP BY. ``None`` for every other comparison axis
+    # (the fixed-column axes like gender/age) and for non-comparison scopes. A
+    # diagnosis split_condition is ICD-grounded by the orchestrator
+    # (``_disambiguate_diagnoses`` sets ``resolved_icd_codes``) so the EXISTS is
+    # codes-based, exactly like the diagnosis cohort filter.
+    split_condition: PatientFilter | None = None
     # Phase 4: clinician-facing echo + optional clarifying-question short-circuit.
     # ``interpretation_summary`` is always populated before the CQ reaches the
     # orchestrator — synthesised by the decomposer from the structured fields

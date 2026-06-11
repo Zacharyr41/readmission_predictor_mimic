@@ -322,6 +322,126 @@ def _pubmed_direct(query: str, max_results: int = 5) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# clinical_formula_lookup: PubMed-grounded derived-quantity definitions
+# ---------------------------------------------------------------------------
+
+
+# Accepts a clinical index/score name: letters, digits, spaces, and the few
+# punctuation chars that appear in such names (e.g. "PaO2/FiO2", "BUN/Cr").
+_FORMULA_NAME_RE = re.compile(r"^[A-Za-z0-9 _/+().\-]{2,64}$")
+_FORMULA_ABSTRACT_BUDGET = 600  # per-article abstract cap; size budget trims further
+
+
+def clinical_formula_lookup(name: str, max_results: int = 3) -> dict[str, Any]:
+    """Look up the DEFINITION / formula of a clinical derived quantity via PubMed.
+
+    Derived indices and scores (e.g. "shock index", "anion gap", "PaO2/FiO2
+    ratio") are not stored columns — their numerator/denominator/threshold live
+    in the literature. This searches PubMed for the term plus definitional cues
+    and returns the matching ABSTRACTS (where the formula is actually stated) as
+    evidence for downstream structured extraction. Titles alone rarely carry the
+    formula, so abstracts are fetched via efetch.
+
+    Returns ``{"status":"ok","results":[{pmid,title,abstract,url}]}`` (possibly
+    empty) or ``{"status":"unavailable","error":...}``. Never raises. PHI-safe —
+    only the model-supplied formula name egresses.
+    """
+    if not isinstance(name, str) or not _FORMULA_NAME_RE.match(name.strip()):
+        return {"status": "unavailable", "error": f"invalid formula name: {name!r}"}
+    try:
+        retmax = max(1, min(int(max_results), _MAX_RESULTS_CEILING))
+    except (TypeError, ValueError):
+        retmax = 3
+    term = (
+        f"{name.strip()} AND (formula OR calculation OR defined OR ratio OR index)"
+    )
+    base: dict[str, Any] = {"db": "pubmed", **_api_key_param()}
+
+    # Step 1: esearch — relevance-ranked PMIDs for the definitional query.
+    try:
+        esearch_resp = requests.get(
+            f"{_NCBI_BASE}/esearch.fcgi",
+            params={
+                **base, "retmode": "json", "term": term,
+                "retmax": str(retmax), "sort": "relevance",
+            },
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        esearch_resp.raise_for_status()
+        idlist = esearch_resp.json().get("esearchresult", {}).get("idlist") or []
+    except requests.RequestException as exc:
+        logger.warning("clinical_formula_lookup esearch failed: %s", exc)
+        return {"status": "unavailable", "error": str(exc)}
+    except (ValueError, KeyError, TypeError) as exc:
+        logger.warning("clinical_formula_lookup esearch malformed: %s", exc)
+        return {"status": "unavailable", "error": f"malformed esearch: {exc}"}
+
+    if not idlist:
+        return {"status": "ok", "results": []}
+
+    # Step 2: efetch — abstracts (XML) for the PMIDs; the formula lives here.
+    try:
+        efetch_resp = requests.get(
+            f"{_NCBI_BASE}/efetch.fcgi",
+            params={
+                **base, "id": ",".join(idlist),
+                "rettype": "abstract", "retmode": "xml",
+            },
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        efetch_resp.raise_for_status()
+        records = _parse_pubmed_abstracts(efetch_resp.text)
+    except requests.RequestException as exc:
+        logger.warning("clinical_formula_lookup efetch failed: %s", exc)
+        return {"status": "unavailable", "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — tool must never raise (XML parse etc.)
+        logger.warning("clinical_formula_lookup efetch parse failed: %s", exc)
+        return {"status": "unavailable", "error": f"malformed efetch: {exc}"}
+
+    return _enforce_size_budget({"status": "ok", "results": records})
+
+
+def _parse_pubmed_abstracts(xml_text: str) -> list[dict[str, str]]:
+    """Parse efetch PubMed XML → ``[{pmid, title, abstract, url}]``.
+
+    Abstracts are truncated per-record to ``_FORMULA_ABSTRACT_BUDGET``; the
+    global ``_enforce_size_budget`` trims the result set further if needed.
+    Structured abstracts (multiple labelled ``AbstractText`` nodes) are joined
+    in document order with their labels.
+    """
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_text)  # NCBI-sourced; ET does not resolve external entities
+    out: list[dict[str, str]] = []
+    for art in root.findall(".//PubmedArticle"):
+        pmid_el = art.find(".//MedlineCitation/PMID")
+        pmid = (pmid_el.text or "").strip() if pmid_el is not None else ""
+        if not pmid:
+            continue
+        title_el = art.find(".//Article/ArticleTitle")
+        title = (
+            "".join(title_el.itertext()).strip() if title_el is not None else ""
+        )
+        parts: list[str] = []
+        for ab in art.findall(".//Abstract/AbstractText"):
+            text = "".join(ab.itertext()).strip()
+            if not text:
+                continue
+            label = ab.get("Label")
+            parts.append(f"{label}: {text}" if label else text)
+        abstract = " ".join(parts)
+        if len(abstract) > _FORMULA_ABSTRACT_BUDGET:
+            abstract = abstract[: _FORMULA_ABSTRACT_BUDGET - 1] + "…"
+        out.append({
+            "pmid": pmid,
+            "title": _truncate_title(title),
+            "abstract": abstract,
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # mimic_distribution_lookup: offline cohort-stats registry
 # ---------------------------------------------------------------------------
 
@@ -1068,6 +1188,27 @@ def _filter_by_vocabulary(
     return out
 
 
+# OMOPHub tags ICD codes inconsistently across concepts — "subarachnoid
+# hemorrhage" comes back as I60→``ICD10`` + 430→``ICD9CM`` (the correct codes),
+# while "heart failure" comes back as I50→``ICD10CM``; and a bare
+# ``vocabulary_ids=ICD10CM`` lock drops I60/430 entirely. So we never lock to a
+# single tag — we accept the whole ICD family and derive the MIMIC ``icd_version``
+# from whichever ICD vocabulary the record carries.
+_ICD_VOCAB_TO_VERSION = {"icd9cm": 9, "icd10": 10, "icd10cm": 10}
+
+
+def _icd_version_from_vocabulary(vocab: Any) -> int | None:
+    """Map an OMOPHub ``vocabulary_id`` to the MIMIC ``icd_version`` (9 or 10),
+    or ``None`` for non-ICD / non-US vocabularies (SNOMED / MeSH / NDFRT /
+    CIM10 / ICD10GM / KCD7 / OXMIS / UK Biobank …) which we drop. The foreign
+    ICD-10 variants (CIM10/ICD10GM/KCD7) are skipped because the same code
+    already arrives tagged ``ICD10``."""
+    if not vocab:
+        return None
+    key = str(vocab).lower().replace("-", "").replace(" ", "")
+    return _ICD_VOCAB_TO_VERSION.get(key)
+
+
 def _omophub_config():
     """Build the OMOPHub MCP client config.
 
@@ -1780,13 +1921,15 @@ def icd_autocode(
         }
 
     if dialect == "omophub":
+        # Do NOT lock to ``vocabulary_ids=ICD10CM``: OMOPHub tags ICD-10-CM codes
+        # inconsistently (I60→ICD10, 430→ICD9CM, I50→ICD10CM), so the lock drops
+        # the correct codes and returns only whatever carries that exact tag (for
+        # SAH, the off-target traumatic S06.6). Query broad and filter to the ICD
+        # family below. Over-fetch because SNOMED/MeSH outrank ICD in the raw
+        # similarity ranking.
         envelope = client.call_tool(
             "semantic_search",
-            {
-                "query": text,
-                "vocabulary_ids": "ICD10CM",
-                "limit": max_results,
-            },
+            {"query": text, "limit": max(max_results * 3, 30)},
             timeout=_HTTP_TIMEOUT_SECONDS,
         )
     else:  # legacy
@@ -1799,11 +1942,11 @@ def icd_autocode(
         return envelope
     if dialect == "omophub":
         raw = _unwrap_omophub_results(envelope)
-        raw = _filter_by_vocabulary(raw, "ICD10CM")
     else:
         raw = envelope.get("results") or []
-    normalized = []
-    for r in raw[:max_results]:
+    normalized: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for r in raw:
         if not isinstance(r, dict):
             continue
         code = str(
@@ -1814,9 +1957,29 @@ def icd_autocode(
         )
         if not code:
             continue
+        if dialect == "omophub":
+            # Keep ICD-9 + ICD-10 (US) records; derive the real version from the
+            # vocabulary tag. Drops SNOMED/MeSH/foreign-ICD that OMOPHub mixes in.
+            ver = _icd_version_from_vocabulary(
+                r.get("vocabulary_id") or r.get("vocabulary")
+            )
+            if ver is None:
+                continue
+            ver_str = str(ver)
+        else:
+            ver_str = str(r.get("version") or version)
+        key = (code.upper(), ver_str)
+        if key in seen:
+            continue
+        seen.add(key)
         conf = r.get("confidence")
         if conf is None:
             conf = r.get("score")
+        if conf is None:
+            # OMOPHub semantic_search scores under ``similarity_score`` — reading
+            # only confidence/score left every candidate ``None``, silently
+            # disabling the relevance threshold downstream.
+            conf = r.get("similarity_score")
         if conf is not None:
             try:
                 conf = float(conf)
@@ -1830,9 +1993,11 @@ def icd_autocode(
                 or r.get("concept_name")
                 or ""
             )),
-            "version": str(r.get("version") or version),
+            "version": ver_str,
             "confidence": conf,
         })
+        if len(normalized) >= max_results:
+            break
     return _enforce_size_budget({"status": "ok", "results": normalized})
 
 
