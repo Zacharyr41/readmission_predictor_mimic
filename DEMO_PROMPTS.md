@@ -45,10 +45,12 @@ e.g. *"stroke"* → "did you mean ischemic (I63) or hemorrhagic (I60–I62)?"
 - "What's the in-hospital mortality for **cirrhosis** patients?"
 - "What's the **overall 30-day readmission rate**?"
 
-## Severity-defined cohort (#4)
+## Severity-defined cohort (#4 — ⚠️ FLAKY, verify live first)
 
-- "For **severe traumatic brain injury (admission GCS of 8 or below)**, plot the
-  relationship between admission GCS and in-hospital mortality."  (~632 cases, ~9.7%)
+- "What's the in-hospital mortality for **severe traumatic brain injury (admission
+  GCS of 8 or below)**?"  (~632 cases, ~9.7% **when it grounds** — but GCS isn't a
+  clean groundable measurement, so it intermittently returns an empty cohort. Not
+  gate-tested; confirm live before relying on it.)
 
 ## Lab / biomarker aggregates in a cohort
 
@@ -97,10 +99,12 @@ procedure, a chronic-use diagnosis, a lab threshold — not just the fixed axes:
 
 ## Timelines (single small cohorts)
 
-- **#5** "Among patients with **spontaneous (non-traumatic) intracerebral
+- **#5 (⚠️ FLAKY)** "Among patients with **spontaneous (non-traumatic) intracerebral
   hemorrhage** who had an **elevated admission INR (>1.7)** and received a
   coagulation-reversal agent — 4-factor PCC, vitamin K, or FFP — map the timeline
   of INR correction, the reversal-agent administration, and any neurologic change."
+  *(Restrictive cohort often misses the graph fixture's recent-150 sample → empty,
+  or the build is slow. For a reliable timeline showcase, prefer #6 below.)*
 - **#6 (patient walkthrough)** "Walk me through the entire ICU course of patient
   **18744840** as a timeline — GCS, coagulation labs, reversal agents,
   blood-pressure control, and any procedures."  *(slower: ~60–90 s; the patient is
@@ -133,3 +137,7 @@ instead of a confident wrong number:
 - **EVD-specific split** (#2 primary): mechanical ventilation grounds (above), but the
   external ventricular drain procedure code isn't wired yet — use the ventilation split
   for the demo.
+- **GCS as a first-class measurement** (#4): wire GCS (a chartevents/derived score, not
+  a LOINC lab) so "admission GCS ≤8" grounds reliably instead of intermittently empty.
+- **Match-aware cohort sampling for timelines** (#5): restrictive timeline cohorts miss
+  the recent-N graph sample; select matching admissions first, then cap.
