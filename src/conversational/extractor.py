@@ -906,14 +906,26 @@ def _extract_drugs(
     hadm_ids: list[int],
     temporal: list[TemporalConstraint],
 ) -> list[dict]:
+    from src.conversational.operations_filters import _drug_like_patterns
+
     t = backend.table
     ph, params = _in_clause(hadm_ids)
     tc_sql = _temporal_sql(temporal, "pr.starttime", "pr.hadm_id", backend)
+    # Expand a drug-GROUP phrase ("coagulation reversal agent") into its concrete
+    # member name-LIKE patterns — the SAME expansion the drug cohort FILTER uses
+    # (operations_filters._drug_like_patterns) — so the timeline concept extracts
+    # the actual prescriptions (Kcentra / phytonadione / FFP / …) instead of
+    # LIKE-matching a literal phrase that names no drug (which silently returned 0
+    # rows → an empty timeline even though the cohort filter matched). A specific
+    # drug grounds to just its own name, so non-group extractions are unchanged.
+    patterns = _drug_like_patterns(name) or [name]
+    like_or = " OR ".join(backend.ilike("pr.drug") for _ in patterns)
+    drug_params = [f"%{p}%" for p in patterns]
     sql = f"""
         SELECT pr.hadm_id, pr.subject_id, pr.drug, pr.starttime,
                pr.stoptime, pr.dose_val_rx, pr.dose_unit_rx, pr.route
         FROM {t('prescriptions')} pr
-        WHERE {backend.ilike('pr.drug')}
+        WHERE ({like_or})
           AND pr.hadm_id IN ({ph})
           {tc_sql}
         ORDER BY pr.starttime
@@ -922,7 +934,7 @@ def _extract_drugs(
         "hadm_id", "subject_id", "drug", "starttime",
         "stoptime", "dose_val_rx", "dose_unit_rx", "route",
     ]
-    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, [f"%{name}%"] + params)]
+    return [dict(zip(cols, r)) for r in backend.execute_tolerant(sql, drug_params + params)]
 
 
 def _extract_diagnoses(

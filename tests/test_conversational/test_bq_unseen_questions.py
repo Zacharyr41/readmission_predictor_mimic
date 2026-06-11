@@ -2916,43 +2916,42 @@ def test_demo_3_ich_mortality_by_antithrombotic(bq_pipeline):
     )
 
 
-@pytest.mark.skip(
-    reason="FLAKY cohort grounding: 'severe TBI / admission GCS <=8' grounds "
-    "non-deterministically — sometimes ~632 cases (~9.7% mortality), sometimes an "
-    "empty cohort, sometimes a 'how should I visualise this?' clarify. GCS is NOT a "
-    "clean LOINC-groundable measurement (it's a chartevents/derived score), so the "
-    "GCS-threshold filter doesn't ground reliably. Needs GCS wired as a first-class "
-    "groundable measurement before it can be demo-gated; tracked separately."
-)
 def test_demo_4_headinjury_gcs_vs_mortality(bq_pipeline):
     """DEMO 4 — PRIMARY: "For penetrating head-injury and gunshot-wound-to-head
     admissions, plot the relationship between admission GCS and in-hospital
     mortality.".
-    FALLBACK: "For severe traumatic brain injury (admission GCS of 8 or below),
-    plot the relationship between admission GCS and in-hospital mortality.".
+    FALLBACK: "severe traumatic brain injury AND admission GCS of 8 or below".
 
-    Oracle: a credible non-error answer with data relating GCS to mortality.
+    Oracle: a credible non-error mortality answer with proportions in [0,1].
 
-    Using the FALLBACK: "severe traumatic brain injury (admission GCS ≤8)" grounds
-    (GCS is reachable; ~632 cases, ~9.7% mortality). The primary's penetrating/GSW
-    head-injury phrasing doesn't ground a cohort. Phrased as a direct mortality
-    question (not "plot the relationship") — the latter flakily makes the answerer
-    ask how to visualise GCS-vs-mortality, which the system doesn't render."""
+    Both halves of the AND now ground from FIXED sources: GCS≤8 grounds to the
+    derived-table TOTAL `gcs` column (not the component LIKE that made it flaky),
+    and "severe traumatic brain injury" grounds via the `traumatic_brain_injury`
+    cohort-registry entry (S06 / 800-854). Verified stable + clinically correct:
+    ~748 cases at ~29% mortality (severe TBI), vs the pre-fix ~9.7% from the wrong
+    component-matched cohort. Phrased as a direct mortality question (not "plot the
+    relationship", which flakily triggered a how-to-visualise clarify)."""
     answer = bq_pipeline.ask(
         "What's the in-hospital mortality for patients with severe traumatic brain "
-        "injury, defined as an admission GCS of 8 or below?"
+        "injury and an admission GCS of 8 or below?"
     )
     assert_valid_answer(answer, min_groups=1)
+    assert _proportion_cells_in_unit_interval(answer), (
+        f"expected mortality proportions in [0,1]: {answer.data_table!r}"
+    )
 
 
 @pytest.mark.skip(
-    reason="FLAKY: the restrictive ICH + INR>1.7 + reversal-agent cohort rarely "
-    "lands inside the graph fixture's 150-most-recent-admission cap (cohort_strategy "
-    "='recent'), so it intermittently returns an empty cohort; when it does match, "
-    "the timeline graph build can exceed the 400s budget. Reliable single-patient "
-    "timelines are covered by test_demo_6. Needs match-aware cohort sampling (not "
-    "recent-N) for restrictive timeline cohorts; tracked separately."
+    reason="PARTIALLY FIXED — grounding + extraction now correct and fast (~40s): "
+    "the cohort grounds to 150 (drug cohort-filter + INR + ICH), the reversal-agent "
+    "CONCEPT now extracts (340 rows via drug-group expansion, was 0), and GCS extracts "
+    "the derived TOTAL (12k rows, was 36k components). REMAINING: the graph-reasoning "
+    "ANSWER layer returns 0 rows for this 150-patient COHORT timeline even though the "
+    "graph holds the data — the cohort-timeline answer shape isn't assembled (the "
+    "single-patient timeline path, test_demo_6, works). Tracked separately as a "
+    "graph-reasoning follow-up; the live demo leads with #6 for timelines."
 )
+@pytest.mark.timeout(900)
 def test_demo_5_ich_inr_reversal_timeline(bq_pipeline_graph):
     """DEMO 5 — PRIMARY: "Among patients admitted with spontaneous (non-
     traumatic) intracerebral hemorrhage who had an elevated admission INR (above

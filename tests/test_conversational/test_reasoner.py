@@ -206,7 +206,10 @@ class TestBuildSparql:
             ],
         )
         sparql = build_sparql("value_lookup", cq, concept_index=0)
-        assert 'LCASE(STR(?label)) = LCASE("Creatinine")' in sparql
+        # value_lookup uses a label-CONTAINS-name filter so concept names that
+        # are a substring of the graph label (e.g. "INR" → "INR(PT)") still
+        # match. The concept name must be injected into the CONTAINS predicate.
+        assert 'CONTAINS(LCASE(STR(?label)), LCASE("Creatinine"))' in sparql
         assert sparql.startswith("PREFIX")
 
     def test_sanitizes_quotes(self):
@@ -456,3 +459,194 @@ class TestLOSTemplateSelection:
         )
         templates = select_templates(cq)
         assert "admission_details" in templates
+
+
+# ---------------------------------------------------------------------------
+# Concept↔label matching robustness
+#
+# After extraction, the graph's stored label almost never *exactly* equals the
+# concept name the user/decomposer used: concept "INR" → graph label "INR(PT)";
+# concept "GCS" → "GCS - Eye Opening"; a drug-GROUP concept "coagulation
+# reversal agent" → member drug "Kcentra". The reasoner's name-filter must be a
+# robust within-type disambiguator (substring), NOT an exact key — otherwise it
+# silently drops every event the extraction already selected.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mismatched_label_extraction():
+    """Realistic MISMATCHED-label cohort: INR biomarker (label INR(PT)), a GCS
+    vital (label "GCS - Eye Opening"), and a reversal-agent drug (Kcentra).
+
+    None of the graph labels equals its concept name exactly, mirroring what
+    extraction actually writes to the graph.
+    """
+    return ExtractionResult(
+        patients=[{"subject_id": 9001, "gender": "M", "anchor_age": 60}],
+        admissions=[{
+            "hadm_id": 9101, "subject_id": 9001,
+            "admittime": datetime(2150, 6, 1, 8, 0),
+            "dischtime": datetime(2150, 6, 10, 14, 0),
+            "admission_type": "EMERGENCY",
+            "discharge_location": "HOME",
+        }],
+        icu_stays=[{
+            "stay_id": 9201, "hadm_id": 9101, "subject_id": 9001,
+            "intime": datetime(2150, 6, 1, 10, 0),
+            "outtime": datetime(2150, 6, 4, 10, 0),
+            "los": 3.0,
+        }],
+        events={
+            "biomarker": [{
+                "labevent_id": 90001, "subject_id": 9001, "hadm_id": 9101,
+                "itemid": 51237, "charttime": datetime(2150, 6, 2, 6, 0),
+                "label": "INR(PT)", "fluid": "Blood", "category": "Hematology",
+                "valuenum": 2.8, "valueuom": "",
+                "ref_range_lower": 0.9, "ref_range_upper": 1.1,
+            }],
+            "vital": [{
+                "stay_id": 9201, "subject_id": 9001, "hadm_id": 9101,
+                "itemid": 220739, "charttime": datetime(2150, 6, 1, 14, 0),
+                "label": "GCS - Eye Opening", "category": "Neurological",
+                "valuenum": 4.0,
+            }],
+            "drug": [{
+                "hadm_id": 9101, "subject_id": 9001,
+                "drug": "Kcentra", "starttime": datetime(2150, 6, 1, 12, 0),
+                "stoptime": datetime(2150, 6, 1, 13, 0),
+                "dose_val_rx": 2000.0, "dose_unit_rx": "units", "route": "IV",
+            }],
+        },
+    )
+
+
+@pytest.fixture
+def mismatched_label_graph(mismatched_label_extraction):
+    graph, _stats = build_query_graph(ONTOLOGY_DIR, mismatched_label_extraction)
+    return graph
+
+
+@pytest.fixture
+def two_biomarker_extraction():
+    """Two biomarkers on one stay: lactate and creatinine. Used to prove that
+    a CONTAINS name-filter for one concept does NOT over-match the other."""
+    return ExtractionResult(
+        patients=[{"subject_id": 9001, "gender": "M", "anchor_age": 60}],
+        admissions=[{
+            "hadm_id": 9101, "subject_id": 9001,
+            "admittime": datetime(2150, 6, 1, 8, 0),
+            "dischtime": datetime(2150, 6, 10, 14, 0),
+            "admission_type": "EMERGENCY",
+            "discharge_location": "HOME",
+        }],
+        icu_stays=[{
+            "stay_id": 9201, "hadm_id": 9101, "subject_id": 9001,
+            "intime": datetime(2150, 6, 1, 10, 0),
+            "outtime": datetime(2150, 6, 4, 10, 0),
+            "los": 3.0,
+        }],
+        events={
+            "biomarker": [
+                {
+                    "labevent_id": 90001, "subject_id": 9001, "hadm_id": 9101,
+                    "itemid": 50813, "charttime": datetime(2150, 6, 2, 6, 0),
+                    "label": "Lactate", "fluid": "Blood", "category": "Blood Gas",
+                    "valuenum": 3.5, "valueuom": "mmol/L",
+                },
+                {
+                    "labevent_id": 90002, "subject_id": 9001, "hadm_id": 9101,
+                    "itemid": 50912, "charttime": datetime(2150, 6, 2, 7, 0),
+                    "label": "Creatinine", "fluid": "Blood", "category": "Chemistry",
+                    "valuenum": 1.1, "valueuom": "mg/dL",
+                },
+            ],
+        },
+    )
+
+
+@pytest.fixture
+def two_biomarker_graph(two_biomarker_extraction):
+    graph, _stats = build_query_graph(ONTOLOGY_DIR, two_biomarker_extraction)
+    return graph
+
+
+class TestConceptLabelMatching:
+    def test_multi_concept_cohort_timeline_mismatched_labels(
+        self, mismatched_label_graph
+    ):
+        """#5 bug repro: INR biomarker + reversal-agent drug + GCS vital,
+        scope=cohort, no aggregation. Graph labels are mismatched (INR(PT),
+        Kcentra, "GCS - Eye Opening"), so an exact-name FILTER returns 0 rows.
+
+        After the fix the reasoner must return rows for ALL THREE concepts.
+        """
+        cq = CompetencyQuestion(
+            original_question=(
+                "Show the INR, coagulation reversal agents, and GCS over time "
+                "for this cohort"
+            ),
+            clinical_concepts=[
+                ClinicalConcept(name="INR", concept_type="biomarker"),
+                ClinicalConcept(
+                    name="coagulation reversal agent", concept_type="drug"
+                ),
+                ClinicalConcept(name="GCS", concept_type="vital"),
+            ],
+            scope="cohort",
+        )
+        result = reason(mismatched_label_graph, cq)
+
+        assert len(result.rows) > 0, (
+            "reasoner dropped every event despite a populated graph — "
+            "exact concept↔label FILTER mismatch"
+        )
+
+        # INR biomarker value (2.8) present.
+        values = {
+            round(float(r["value"]), 1)
+            for r in result.rows
+            if r.get("value") is not None
+        }
+        assert 2.8 in values, "INR value missing"
+        # GCS vital value (4.0) present.
+        assert 4.0 in values, "GCS value missing"
+        # Reversal-agent drug present.
+        drug_names = {
+            str(r["drugName"]) for r in result.rows if r.get("drugName") is not None
+        }
+        assert any("Kcentra" in d for d in drug_names), "reversal drug missing"
+
+    def test_value_with_timestamps_contains_match_single_biomarker(
+        self, mismatched_label_graph
+    ):
+        """value_with_timestamps for concept 'INR' matches graph label
+        'INR(PT)' via label-CONTAINS-name."""
+        cq = CompetencyQuestion(
+            original_question="INR values over time",
+            clinical_concepts=[
+                ClinicalConcept(name="INR", concept_type="biomarker"),
+            ],
+        )
+        result = reason(mismatched_label_graph, cq)
+        assert len(result.rows) == 1
+        assert abs(float(result.rows[0]["value"]) - 2.8) < 0.01
+        assert "timestamp" in result.rows[0]
+
+    def test_contains_does_not_overmatch_across_concepts(
+        self, two_biomarker_graph
+    ):
+        """GUARD: with both lactate and creatinine in the graph,
+        value_with_timestamps for 'lactate' returns ONLY lactate, not
+        creatinine (neither label contains the other's name)."""
+        cq = CompetencyQuestion(
+            original_question="lactate values over time",
+            clinical_concepts=[
+                ClinicalConcept(name="lactate", concept_type="biomarker"),
+            ],
+        )
+        result = reason(two_biomarker_graph, cq)
+        assert len(result.rows) == 1
+        # Lactate is 3.5; creatinine (1.1) must NOT appear.
+        assert abs(float(result.rows[0]["value"]) - 3.5) < 0.01
+        values = {round(float(r["value"]), 1) for r in result.rows}
+        assert 1.1 not in values, "creatinine leaked into a lactate query"

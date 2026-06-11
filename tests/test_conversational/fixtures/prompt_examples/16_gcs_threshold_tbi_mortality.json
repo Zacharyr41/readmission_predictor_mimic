@@ -1,0 +1,14 @@
+{
+  "original_question": "What is the in-hospital mortality for patients with severe traumatic brain injury, defined as an admission GCS of 8 or below?",
+  "clinical_concepts": [
+    {"name": "in-hospital mortality", "concept_type": "outcome"}
+  ],
+  "patient_filters": [
+    {"field": "diagnosis", "operator": "contains", "value": "traumatic brain injury", "icd_codes": ["S06"]},
+    {"field": "vital_value", "operator": "<=", "value": "8", "measurement": "GCS"}
+  ],
+  "aggregation": "count",
+  "return_type": "text",
+  "scope": "cohort",
+  "interpretation_summary": "In-hospital mortality rate over the cohort that is BOTH a traumatic-brain-injury admission (diagnosis, ICD-10 S06.x) AND has a recorded admission Glasgow Coma Scale total of 8 or below. The GCS cutoff is a vital_value PatientFilter (measurement 'GCS', operator '<=', value '8') — a value threshold, NOT a diagnosis: it grounds to the derived GCS TOTAL score, not a diagnosis title. 'Severe traumatic brain injury' is the S06 diagnosis cohort. The proportion and its mortality come from the in-hospital mortality outcome concept with aggregation count."
+}

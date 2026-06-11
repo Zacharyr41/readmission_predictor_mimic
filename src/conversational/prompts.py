@@ -254,7 +254,19 @@ diagnosis filter, and never drop the threshold:
                     up from the literature (operator/value are placeholders).
   - or_any        → OR several conditions into one union cohort ("A or B or C"):
                     put the child filters in ``sub_filters`` (operator "in").
+  - drug          → "received drug X" cohort → {"field":"drug","operator":"contains",
+                    "value":"<drug or group>"}. The value may be a specific drug
+                    ("vancomycin") OR a recognised group phrase ("coagulation
+                    reversal agent"), which expands to its member drugs (4-factor
+                    PCC / Kcentra, vitamin K / phytonadione, fresh frozen plasma).
+                    For an "A or B or C" drug cohort, prefer one drug filter per
+                    member inside an or_any.
   - icu_stay      → "ICU patients" → {"field":"icu_stay","operator":"=","value":"1"}.
+  GCS — "admission GCS of 8 or below" / "severe TBI (GCS ≤ 8)" is a VALUE THRESHOLD,
+  NOT a diagnosis: use {"field":"vital_value","operator":"<=","value":"8",
+  "measurement":"GCS"} (omit loinc_code — GCS grounds to the derived TOTAL score,
+  not a single labitem). If the cohort is "severe traumatic brain injury" AND a GCS
+  cutoff, add BOTH a diagnosis filter (S06) and the GCS vital_value filter.
   Common LOINCs: platelet count 777-3, mean arterial pressure 8478-0, heart rate
   8867-4, systolic blood pressure 8480-6, creatinine 2160-0, lactate 2524-7. A
   "proportion of patients who … and their mortality" question is an ``outcome``

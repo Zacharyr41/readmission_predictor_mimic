@@ -12,6 +12,8 @@ hand-rolled SQL on a synthetic DuckDB to catch any accidental semantic drift.
 
 from __future__ import annotations
 
+import logging
+
 from src.conversational.models import PatientFilter
 from src.conversational.operations import (
     COMPARISON_OPERATORS,
@@ -20,6 +22,8 @@ from src.conversational.operations import (
     FilterOperation,
     OperationRegistry,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +297,80 @@ def _ground_measurement_itemids(
     return res.itemids  # None on no-LOINC / no-coverage → label-LIKE fallback
 
 
+def _is_gcs_measurement(measurement: str | None, value: object) -> bool:
+    """True when this measurement filter is a Glasgow Coma Scale TOTAL threshold.
+
+    GCS is NOT a single-LOINC labitem — ``d_items`` only carries the three
+    COMPONENT rows (Eye 1–4 / Verbal 1–5 / Motor 1–6), so the generic label-LIKE
+    fallback (``d_items.label ILIKE '%GCS%'``) matches the components and a
+    ``valuenum <= 8`` predicate against them is meaningless. We detect a GCS
+    threshold by name and route it to the derived TOTAL ``gcs`` column instead.
+
+    Matched against the analyte name (``measurement``); also the literal value
+    when it carries the analyte (some decompositions put the term there).
+    """
+    haystacks = [measurement]
+    if isinstance(value, str):
+        haystacks.append(value)
+    for h in haystacks:
+        if not h:
+            continue
+        low = h.lower()
+        if "gcs" in low or "glasgow coma" in low:
+            return True
+    return False
+
+
+def _compile_gcs_total_exists(
+    f: PatientFilter, ctx: FilterCompileContext,
+) -> FilterFragment:
+    """Ground a GCS-total threshold to the derived ``gcs`` table's TOTAL column.
+
+    Emits a correlated ``EXISTS`` over ``mimiciv_3_1_derived.gcs`` joined to
+    ``icustays`` so the per-ICU-stay GCS rows map back to the admission:
+
+        EXISTS (SELECT 1 FROM <derived.gcs> g
+                JOIN <icustays> icu ON icu.stay_id = g.stay_id
+                WHERE icu.hadm_id = a.hadm_id AND g.gcs <op> ?)
+
+    Uses the TOTAL ``g.gcs`` (3–15), never the components. The operator comes
+    from the registered comparison-operator set (safe to interpolate); the
+    threshold is the single bound param.
+
+    The derived ``gcs`` table only exists on the BigQuery backend; on DuckDB /
+    the offline fixture ``_derived_table`` returns ``None``. Rather than emit
+    SQL against a table that doesn't exist (which would crash on execute), we
+    degrade to ``1 = 0`` (empty cohort) and log a warning — matching how
+    ``_compile_derived_value`` degrades when its formula is unavailable, and
+    deliberately NOT falling back to the meaningless component label-LIKE.
+    """
+    # Lazy import keeps the operations ↔ sql_fastpath edge off module load.
+    from src.conversational.sql_fastpath import _derived_table
+
+    gcs = _derived_table(ctx.backend, "gcs")
+    if gcs is None:
+        logger.warning(
+            "GCS-threshold cohort filter requested but the derived GCS table "
+            "(mimiciv_3_1_derived.gcs) is unavailable on this backend; "
+            "grounding to an empty cohort rather than the meaningless GCS "
+            "component label-match. Run against BigQuery for a real GCS cohort.",
+        )
+        return FilterFragment(where=["1 = 0"])
+    op = f.operator
+    try:
+        thr = float(f.value)
+    except (TypeError, ValueError):
+        return FilterFragment(where=["1 = 0"])  # malformed threshold → empty
+    t = ctx.backend.table
+    a = ctx.admission_alias
+    inner = (
+        f"SELECT 1 FROM {gcs} g "
+        f"JOIN {t('icustays')} icu ON icu.stay_id = g.stay_id "
+        f"WHERE icu.hadm_id = {a}.hadm_id AND g.gcs {op} ?"
+    )
+    return FilterFragment(where=[f"EXISTS ({inner})"], params=[thr])
+
+
 def _compile_measurement_value(
     f: PatientFilter, ctx: FilterCompileContext, *, concept_type: str,
 ) -> FilterFragment:
@@ -302,7 +380,15 @@ def _compile_measurement_value(
     chartevents for vital): itemid-grounded when possible, else a label-LIKE
     fallback on the dictionary table. The operator comes from the registered
     operator set (safe to interpolate); the threshold is parameterized.
+
+    GCS is special-cased BEFORE the generic itemid/LIKE logic: a "GCS ≤ 8"
+    threshold grounds to the derived TOTAL ``gcs`` column (3–15), not the three
+    GCS COMPONENT chartitems a label-LIKE would match. See
+    ``_compile_gcs_total_exists``. The gate is keyed on the analyte name so
+    every other vital/lab is byte-identical to before.
     """
+    if concept_type == "vital" and _is_gcs_measurement(f.measurement, f.value):
+        return _compile_gcs_total_exists(f, ctx)
     op = f.operator
     try:
         thr = float(f.value)
@@ -484,6 +570,104 @@ def _compile_icu_stay(f: PatientFilter, ctx: FilterCompileContext) -> FilterFrag
 
 
 # ---------------------------------------------------------------------------
+# Drug cohort filter ("admissions that received drug X / a drug in group G")
+# ---------------------------------------------------------------------------
+
+import json as _json  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+_DRUG_GROUPS_PATH = (
+    _Path(__file__).resolve().parents[2]
+    / "data" / "mappings" / "drug_groups.json"
+)
+
+
+def _load_drug_groups() -> dict[str, dict]:
+    """Load + cache the drug-group registry (``data/mappings/drug_groups.json``).
+
+    Returns ``{group_name: {patterns: [...], aliases: [...]}}`` with the
+    ``_metadata`` block filtered out. Missing/unreadable file degrades to an
+    empty registry (the drug filter then grounds purely by the raw drug name),
+    so the registry is a convenience layer and never a hard requirement.
+    """
+    cached = getattr(_load_drug_groups, "_cache", None)
+    if cached is not None:
+        return cached
+    try:
+        raw = _json.loads(_DRUG_GROUPS_PATH.read_text())
+        groups = {k: v for k, v in raw.items() if not k.startswith("_")}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("drug_groups.json unreadable (%s); ignoring", exc)
+        groups = {}
+    _load_drug_groups._cache = groups  # type: ignore[attr-defined]
+    return groups
+
+
+def _drug_like_patterns(value: str) -> list[str]:
+    """Resolve a drug filter value to the set of name-LIKE patterns to OR.
+
+    A vague GROUP phrase ("coagulation reversal agent") expands to its concrete
+    member patterns from the registry (``%prothrombin%``, ``%kcentra%``,
+    ``%phytonadione%``, ``%vitamin k%``, ``%fresh frozen plasma%``, ``%ffp%``);
+    a specific drug name ("vancomycin") grounds by itself. The raw phrase is
+    ALWAYS kept as an additional pattern (the escape hatch) so an unrecognised
+    drug still matches on its own name even when it also resolves to a group.
+    Matching is case-insensitive substring (``ILIKE '%pat%'``) against
+    MIMIC ``prescriptions.drug``. De-duplicated, order-stable.
+    """
+    norm = (value or "").strip().lower()
+    patterns: list[str] = []
+    if not norm:
+        return patterns
+    for name, defn in _load_drug_groups().items():
+        candidates = [name] + list(defn.get("aliases") or [])
+        if any((c or "").strip().lower() == norm for c in candidates):
+            patterns.extend(p for p in (defn.get("patterns") or []) if p)
+            break
+    # Always retain the raw phrase so a specific drug grounds by its own name
+    # (and as a safety net if a group's member list is incomplete).
+    patterns.append(norm)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for p in patterns:
+        key = p.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(key)
+    return deduped
+
+
+def _compile_drug(f: PatientFilter, ctx: FilterCompileContext) -> FilterFragment:
+    """Cohort = admissions with ≥1 prescription matching the drug (or group).
+
+    Emits a correlated ``EXISTS`` over ``prescriptions`` so the filter is a
+    self-contained predicate (no JOIN) — it can therefore participate in an
+    ``or_any`` UNION and in the event_ordering EXISTS reuse path, exactly like
+    the measurement-value filters. A vague group phrase expands to its concrete
+    member name-LIKE patterns via the drug-group registry; a specific drug
+    grounds by its own name. The patterns are OR-combined inside the EXISTS.
+
+    Mirrors the SQL-fast-path drug aggregate's ``pr.drug`` name-LIKE grounding,
+    so a "received a coagulation reversal agent" cohort restriction grounds the
+    SAME concrete drug names whether it lands in the graph cohort query or the
+    fast-path.
+    """
+    a = ctx.admission_alias
+    t = ctx.backend.table
+    value = f.value if isinstance(f.value, str) else ""
+    patterns = _drug_like_patterns(value)
+    if not patterns:
+        return FilterFragment(where=["1 = 0"])  # no drug named → empty cohort
+    name_clauses = " OR ".join(ctx.backend.ilike("pr.drug") for _ in patterns)
+    inner = (
+        f"SELECT 1 FROM {t('prescriptions')} pr "
+        f"WHERE pr.hadm_id = {a}.hadm_id AND ({name_clauses})"
+    )
+    params = [f"%{p}%" for p in patterns]
+    return FilterFragment(where=[f"EXISTS ({inner})"], params=params)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -599,4 +783,17 @@ def register_default_filters(registry: OperationRegistry) -> None:
             "value '1' for 'ICU patients')"
         ),
         compile_fn=_compile_icu_stay,
+    ))
+    registry.register(FilterOperation(
+        name="drug",
+        operators=frozenset({"contains"}),
+        value_type="scalar",
+        description=(
+            "restrict to admissions that received a drug (operator 'contains', "
+            "value a drug name like 'vancomycin' OR a recognised group phrase "
+            "like 'coagulation reversal agent', which expands to its member "
+            "drugs). For an 'A or B or C' drug cohort, prefer one drug filter "
+            "per member inside an or_any"
+        ),
+        compile_fn=_compile_drug,
     ))

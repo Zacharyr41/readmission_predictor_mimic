@@ -45,12 +45,13 @@ e.g. *"stroke"* → "did you mean ischemic (I63) or hemorrhagic (I60–I62)?"
 - "What's the in-hospital mortality for **cirrhosis** patients?"
 - "What's the **overall 30-day readmission rate**?"
 
-## Severity-defined cohort (#4 — ⚠️ FLAKY, verify live first)
+## Severity-defined cohort (#4)
 
-- "What's the in-hospital mortality for **severe traumatic brain injury (admission
-  GCS of 8 or below)**?"  (~632 cases, ~9.7% **when it grounds** — but GCS isn't a
-  clean groundable measurement, so it intermittently returns an empty cohort. Not
-  gate-tested; confirm live before relying on it.)
+- "What's the in-hospital mortality for patients with **severe traumatic brain injury
+  and an admission GCS of 8 or below**?"  (**~748 cases, ~29% mortality** — stable.
+  GCS now grounds to the derived-table TOTAL score (not the 3 components), and "severe
+  TBI" grounds via the `traumatic_brain_injury` registry — both from fixed sources.
+  The pre-fix ~9.7% was the *wrong* component-matched cohort.)
 
 ## Lab / biomarker aggregates in a cohort
 
@@ -99,12 +100,14 @@ procedure, a chronic-use diagnosis, a lab threshold — not just the fixed axes:
 
 ## Timelines (single small cohorts)
 
-- **#5 (⚠️ FLAKY)** "Among patients with **spontaneous (non-traumatic) intracerebral
-  hemorrhage** who had an **elevated admission INR (>1.7)** and received a
-  coagulation-reversal agent — 4-factor PCC, vitamin K, or FFP — map the timeline
-  of INR correction, the reversal-agent administration, and any neurologic change."
-  *(Restrictive cohort often misses the graph fixture's recent-150 sample → empty,
-  or the build is slow. For a reliable timeline showcase, prefer #6 below.)*
+- **#5 (⚠️ not for live)** "Among patients with **spontaneous (non-traumatic)
+  intracerebral hemorrhage** who had an **elevated admission INR (>1.7)** and received
+  a coagulation-reversal agent — 4-factor PCC, vitamin K, or FFP — map the timeline of
+  INR correction, the reversal-agent administration, and any neurologic change."
+  *(Grounding + extraction now correct and fast (~40s): cohort=150, reversal agents
+  and GCS-total all extract. But the 150-patient COHORT-timeline answer assembly still
+  returns empty — a graph-reasoning follow-up. **Use #6 for a reliable timeline
+  walkthrough.**)*
 - **#6 (patient walkthrough)** "Walk me through the entire ICU course of patient
   **18744840** as a timeline — GCS, coagulation labs, reversal agents,
   blood-pressure control, and any procedures."  *(slower: ~60–90 s; the patient is
@@ -137,7 +140,7 @@ instead of a confident wrong number:
 - **EVD-specific split** (#2 primary): mechanical ventilation grounds (above), but the
   external ventricular drain procedure code isn't wired yet — use the ventilation split
   for the demo.
-- **GCS as a first-class measurement** (#4): wire GCS (a chartevents/derived score, not
-  a LOINC lab) so "admission GCS ≤8" grounds reliably instead of intermittently empty.
-- **Match-aware cohort sampling for timelines** (#5): restrictive timeline cohorts miss
-  the recent-N graph sample; select matching admissions first, then cap.
+- **Cohort-timeline answer assembly** (#5): grounding + extraction are fixed (cohort
+  grounds, all concepts extract, fast ~40s), but the graph-reasoning layer doesn't
+  assemble a 150-patient cohort timeline into an answer (single-patient timelines, #6,
+  do work). Needs a cohort-timeline answer shape.

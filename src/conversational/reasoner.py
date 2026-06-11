@@ -87,14 +87,14 @@ WHERE {{
          mimic:hasBiomarkerType ?label ;
          mimic:hasValue ?value .
        OPTIONAL {{ ?e mimic:hasUnit ?unit . }}
-       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
+       FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{concept_name}")))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
          mimic:hasClinicalSignName ?label ;
          mimic:hasValue ?value .
        BIND("" AS ?unit)
-       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
+       FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{concept_name}")))
     }}
 }}
 """,
@@ -106,7 +106,7 @@ WHERE {{
          mimic:hasValue ?value ;
          time:inXSDDateTimeStamp ?timestamp .
        OPTIONAL {{ ?e mimic:hasUnit ?unit . }}
-       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
+       FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{concept_name}")))
     }}
     UNION
     {{ ?e rdf:type mimic:ClinicalSignEvent ;
@@ -114,7 +114,7 @@ WHERE {{
          mimic:hasValue ?value ;
          time:inXSDDateTimeStamp ?timestamp .
        BIND("" AS ?unit)
-       FILTER(LCASE(STR(?label)) = LCASE("{concept_name}"))
+       FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{concept_name}")))
     }}
 }}
 ORDER BY ?timestamp
@@ -596,6 +596,25 @@ def reason(graph: Graph, cq: CompetencyQuestion) -> ReasoningResult:
                     continue
 
                 rows, columns = _result_to_dicts(result)
+
+                # Drug-name fallback. ``drug_lookup`` filters prescriptions by
+                # label-CONTAINS-name, but a drug concept is often a GROUP
+                # phrase ("coagulation reversal agent") that does NOT substring-
+                # match the member drug the extraction wrote ("Kcentra"). The
+                # graph's prescriptions are ALREADY the extracted concept's
+                # drugs, so when the name filter yields nothing, fall back to
+                # every PrescriptionEvent in the (concept-scoped) graph.
+                if tname == "drug_lookup" and not rows:
+                    fallback_sparql = build_sparql("drug_lookup_all", cq, i)
+                    sparql_queries.append(fallback_sparql)
+                    try:
+                        fb_result = graph.query(fallback_sparql)
+                        rows, columns = _result_to_dicts(fb_result)
+                    except Exception:
+                        logger.warning(
+                            "SPARQL fallback drug_lookup_all failed",
+                            exc_info=True,
+                        )
 
                 # Aggregate-registered post-processing (e.g. median).
                 # The aggregate op is the single source of truth: if it has a

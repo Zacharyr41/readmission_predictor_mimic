@@ -53,6 +53,32 @@ class TestRenameColumns:
         assert renamed[0]["Value"] == 1.0
         assert renamed[0]["Some Custom Field"] == 42
 
+    def test_heterogeneous_rows_union_columns(self):
+        """A multi-concept timeline yields heterogeneous rows: value-rows
+        ({value, unit, timestamp}) plus drug-rows ({drugName, startTime, ...}).
+        The column list must UNION all keys (not just the first row's), so no
+        column is dropped from the rendered table.
+        """
+        rows = [
+            {"value": 2.8, "unit": "", "timestamp": "2150-06-02T06:00:00Z"},
+            {
+                "drugName": "Kcentra", "startTime": "2150-06-01T12:00:00Z",
+                "endTime": "2150-06-01T13:00:00Z", "dose": 2000.0,
+                "doseUnit": "units", "route": "IV",
+            },
+        ]
+        renamed, columns = _rename_columns(rows)
+        # Columns from the value-row.
+        assert "Value" in columns
+        assert "Timestamp" in columns
+        # Columns from the drug-row must NOT be dropped.
+        assert "Drug" in columns
+        assert "Start Time" in columns
+        assert "Dose" in columns
+        # Every row keeps exactly its own renamed keys (no fabricated values).
+        assert renamed[0]["Value"] == 2.8
+        assert renamed[1]["Drug"] == "Kcentra"
+
 
 # ---------------------------------------------------------------------------
 # TestGenerateAnswer

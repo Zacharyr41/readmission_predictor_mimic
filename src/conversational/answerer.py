@@ -96,7 +96,18 @@ def _rename_columns(
             for k, v in row.items()
         })
 
-    columns = list(renamed[0].keys())
+    # Union the columns across ALL rows (preserving first-seen order), not just
+    # the first row's keys. A multi-concept timeline returns heterogeneous rows
+    # — value-rows ({Value, Unit, Timestamp}) interleaved with drug-rows
+    # ({Drug, Start Time, ...}) — and a table keyed on only the first row's
+    # columns would silently drop every column unique to the later row shapes.
+    columns: list[str] = []
+    seen: set[str] = set()
+    for row in renamed:
+        for col in row:
+            if col not in seen:
+                seen.add(col)
+                columns.append(col)
     return renamed, columns
 
 

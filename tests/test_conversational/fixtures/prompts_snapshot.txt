@@ -213,7 +213,19 @@ diagnosis filter, and never drop the threshold:
                     up from the literature (operator/value are placeholders).
   - or_any        → OR several conditions into one union cohort ("A or B or C"):
                     put the child filters in ``sub_filters`` (operator "in").
+  - drug          → "received drug X" cohort → {"field":"drug","operator":"contains",
+                    "value":"<drug or group>"}. The value may be a specific drug
+                    ("vancomycin") OR a recognised group phrase ("coagulation
+                    reversal agent"), which expands to its member drugs (4-factor
+                    PCC / Kcentra, vitamin K / phytonadione, fresh frozen plasma).
+                    For an "A or B or C" drug cohort, prefer one drug filter per
+                    member inside an or_any.
   - icu_stay      → "ICU patients" → {"field":"icu_stay","operator":"=","value":"1"}.
+  GCS — "admission GCS of 8 or below" / "severe TBI (GCS ≤ 8)" is a VALUE THRESHOLD,
+  NOT a diagnosis: use {"field":"vital_value","operator":"<=","value":"8",
+  "measurement":"GCS"} (omit loinc_code — GCS grounds to the derived TOTAL score,
+  not a single labitem). If the cohort is "severe traumatic brain injury" AND a GCS
+  cutoff, add BOTH a diagnosis filter (S06) and the GCS vital_value filter.
   Common LOINCs: platelet count 777-3, mean arterial pressure 8478-0, heart rate
   8867-4, systolic blood pressure 8480-6, creatinine 2160-0, lactate 2524-7. A
   "proportion of patients who … and their mortality" question is an ``outcome``
@@ -281,6 +293,7 @@ Use ONLY the names listed here for patient_filters[].field, aggregation, and com
   age                    (<|<=|=|>|>=     ) scalar    patient anchor age in years (integer)
   derived_value          (<|<=|=|>|>=     ) scalar    derived clinical index/score cohort (e.g. 'shock index'): set measurement to the index name — its formula and abnormal threshold are looked up from the medical literature; operator/value are placeholders
   diagnosis              (contains        ) scalar    substring match against ICD-10 long title OR ICD code prefix
+  drug                   (contains        ) scalar    restrict to admissions that received a drug (operator 'contains', value a drug name like 'vancomycin' OR a recognised group phrase like 'coagulation reversal agent', which expands to its member drugs). For an 'A or B or C' drug cohort, prefer one drug filter per member inside an or_any
   gender                 (=               ) scalar    patient gender ("M"|"F"; case-insensitive on input)
   icu_stay               (=               ) scalar    restrict to admissions with at least one ICU stay (operator '=' value '1' for 'ICU patients')
   lab_value              (<|<=|=|>|>=     ) scalar    lab-value threshold cohort: set measurement to the analyte (e.g. 'platelet count') and loinc_code to its LOINC; value is the numeric threshold (e.g. operator '<' value '50' for platelets < 50 K/uL)
@@ -915,6 +928,39 @@ Question: "In-hospital mortality for intracerebral hemorrhage patients, split by
     ]
   },
   "interpretation_summary": "In-hospital mortality rate for intracerebral hemorrhage admissions, split by presence vs absence of chronic anticoagulant use."
+}
+```
+
+Question: "What is the in-hospital mortality for patients with severe traumatic brain injury, defined as an admission GCS of 8 or below?"
+```json
+{
+  "original_question": "What is the in-hospital mortality for patients with severe traumatic brain injury, defined as an admission GCS of 8 or below?",
+  "clinical_concepts": [
+    {
+      "name": "in-hospital mortality",
+      "concept_type": "outcome"
+    }
+  ],
+  "patient_filters": [
+    {
+      "field": "diagnosis",
+      "operator": "contains",
+      "value": "traumatic brain injury",
+      "icd_codes": [
+        "S06"
+      ]
+    },
+    {
+      "field": "vital_value",
+      "operator": "<=",
+      "value": "8",
+      "measurement": "GCS"
+    }
+  ],
+  "aggregation": "count",
+  "return_type": "text",
+  "scope": "cohort",
+  "interpretation_summary": "In-hospital mortality rate over the cohort that is BOTH a traumatic-brain-injury admission (diagnosis, ICD-10 S06.x) AND has a recorded admission Glasgow Coma Scale total of 8 or below. The GCS cutoff is a vital_value PatientFilter (measurement 'GCS', operator '<=', value '8') \u2014 a value threshold, NOT a diagnosis: it grounds to the derived GCS TOTAL score, not a diagnosis title. 'Severe traumatic brain injury' is the S06 diagnosis cohort. The proportion and its mortality come from the in-hospital mortality outcome concept with aggregation count."
 }
 ```
 

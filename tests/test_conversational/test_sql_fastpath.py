@@ -1080,6 +1080,91 @@ class TestFilterCompilationReused:
         assert isinstance(rows[0]["count_value"], int)
 
 
+class _FakeBQBackend:
+    """BigQuery-shaped backend whose ``table()`` returns a backtick-quoted FQN,
+    so ``_derived_table`` resolves ``mimiciv_3_1_derived.gcs``. Not executable —
+    used to assert the GCS-via-fast-path SQL shape only."""
+
+    def table(self, name: str) -> str:
+        return f"`physionet-data.x.{name}`"
+
+    @staticmethod
+    def ilike(column: str) -> str:
+        return f"{column} ILIKE ?"
+
+    def readmission_labels_expr(self) -> str:
+        return "`physionet-data.x.readmission_labels`"
+
+
+class TestGcsThresholdFilterFastpath:
+    """A GCS ``vital_value`` threshold compiles, through the fast-path, to an
+    EXISTS over the derived ``gcs`` TOTAL column — never the component
+    label-LIKE. Guards the gate: a non-GCS vital is byte-identical to before."""
+
+    def test_gcs_filter_emits_derived_total_exists_on_bigquery(self):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("in-hospital mortality", "outcome")],
+            aggregation="count",
+        )
+        cq.patient_filters = [
+            PatientFilter(
+                field="vital_value", operator="<=", value="8", measurement="GCS",
+            )
+        ]
+        q = compile_sql(cq, _FakeBQBackend(), get_default_registry())
+        # The cohort restriction is an EXISTS over the derived gcs TOTAL column.
+        assert "mimiciv_3_1_derived.gcs" in q.sql
+        assert "g.gcs <= ?" in q.sql
+        assert "icu.stay_id = g.stay_id" in q.sql
+        # Never the meaningless component label-LIKE.
+        assert "d_items" not in q.sql
+        assert 8.0 in q.params
+
+    def test_gcs_filter_offline_drops_cohort_no_derived_table(self, backend):
+        # Offline DuckDB: the derived gcs table is unavailable, so the GCS
+        # filter degrades to an empty cohort (1 = 0) and the query still
+        # compiles + executes without referencing a missing table.
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("creatinine", "biomarker")],
+            aggregation="count",
+        )
+        cq.patient_filters = [
+            PatientFilter(
+                field="vital_value", operator="<=", value="8", measurement="GCS",
+            )
+        ]
+        q = compile_sql(cq, backend, get_default_registry())
+        assert "mimiciv_3_1_derived" not in q.sql
+        assert "1 = 0" in q.sql
+        # Executes (count is an int, here 0 — no admission can satisfy 1 = 0).
+        rows = [dict(zip(q.columns, r)) for r in backend.execute(q.sql, q.params)]
+        assert rows[0]["count_value"] == 0
+
+    def test_nongcs_vital_value_filter_unchanged(self, backend):
+        # MAP threshold still compiles to the chartevents label-LIKE EXISTS —
+        # the GCS gate must not perturb other vitals.
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(concepts=[("creatinine", "biomarker")], aggregation="count")
+        cq.patient_filters = [
+            PatientFilter(
+                field="vital_value", operator="<", value="65",
+                measurement="mean arterial pressure",
+            )
+        ]
+        q = compile_sql(cq, backend, get_default_registry())
+        assert "chartevents" in q.sql and "d_items" in q.sql
+        assert "mimiciv_3_1_derived" not in q.sql
+        assert "%mean arterial pressure%" in q.params
+
+
 class TestCompileSqlMcpFlagPlumbing:
     """Inc 9.3 — compile_sql accepts ``enable_mcp_grounding`` kwarg and
     threads it through ``_filter_fragment`` to ``FilterCompileContext``.

@@ -134,5 +134,14 @@
       "long-term antiplatelet use", "long term use of antithrombotics",
       "chronic anticoagulation", "chronic antithrombotic use"
     ]
+  },
+  "traumatic_brain_injury": {
+    "icd10_prefixes": ["S06"],
+    "icd9_prefixes": ["800", "801", "803", "804", "850", "851", "852", "853", "854"],
+    "aliases": [
+      "traumatic brain injury", "tbi", "severe traumatic brain injury",
+      "intracranial injury", "head injury", "traumatic head injury",
+      "penetrating head injury", "gunshot wound to head"
+    ]
   }
 }

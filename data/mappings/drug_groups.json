@@ -1,0 +1,22 @@
+{
+  "_metadata": {
+    "purpose": "Drug-group → concrete MIMIC prescriptions.drug name-LIKE patterns. Used ONLY to EXPAND a recognised group phrase (e.g. 'coagulation reversal agent') in a `drug` cohort filter into its member name-LIKE patterns. The raw phrase is always kept as an additional fallback pattern, so an unrecognised drug still grounds by its own name — the registry is convenience, never a hard gate. Patterns are matched case-insensitively (ILIKE '%pattern%') against MIMIC-IV `prescriptions.drug`, whose values use mixed-case generic + brand names.",
+    "schema_version": "1"
+  },
+  "coagulation_reversal_agent": {
+    "patterns": [
+      "prothrombin",
+      "kcentra",
+      "phytonadione",
+      "vitamin k",
+      "fresh frozen plasma",
+      "ffp"
+    ],
+    "aliases": [
+      "coagulation reversal agent", "coagulation-reversal agent",
+      "reversal agent", "reversal-agent", "anticoagulation reversal",
+      "anticoagulation reversal agent", "4-factor pcc", "4 factor pcc",
+      "four-factor pcc", "pcc", "prothrombin complex concentrate"
+    ]
+  }
+}
