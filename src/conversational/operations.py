@@ -25,10 +25,31 @@ prompt<->registry round-trip test.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from src.conversational.models import CompetencyQuestion, PatientFilter
+
+
+# The diagnosis filter (``operations_filters._compile_diagnosis``) hardcodes the
+# table aliases ``di`` / ``dd``. When a CQ carries more than one diagnosis
+# filter, those aliases repeat in the same FROM clause and BigQuery rejects the
+# query (``400 ... Duplicate table alias di``). ``compile_filters`` disambiguates
+# the 2nd+ diagnosis filter by suffixing these aliases; the first stays
+# ``di``/``dd`` so single-diagnosis SQL is byte-identical.
+_DIAG_ALIAS_RE = re.compile(r"\b(di|dd)\b")
+
+
+def _suffix_diagnosis_aliases(sql_fragments: list[str], n: int) -> list[str]:
+    """Rewrite the diagnosis filter's ``di``/``dd`` aliases to ``di{n}``/``dd{n}``.
+
+    A single left-to-right ``re.sub`` pass — the inserted ``di{n}`` is not
+    re-scanned, and ``\\b(di|dd)\\b`` never matches inside ``diagnoses_icd`` /
+    ``d_icd_diagnoses`` (no standalone ``di``/``dd`` token there), so only the
+    aliases are rewritten.
+    """
+    return [_DIAG_ALIAS_RE.sub(lambda m: f"{m.group(1)}{n}", s) for s in sql_fragments]
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +391,21 @@ class OperationRegistry:
         if ctx.registry is None:
             ctx.registry = self
 
+        # Count diagnosis filters as we go: ``_compile_diagnosis`` hardcodes the
+        # ``di``/``dd`` aliases, so the 2nd+ diagnosis filter must be rewritten to
+        # a distinct alias or the combined FROM clause has a duplicate alias that
+        # BigQuery rejects. The first stays ``di``/``dd`` (byte-identical SQL).
+        diag_n = 0
         for f in filters:
             op = self.get("filter", f.field)
             if op is None:
                 continue
             frag = op.compile(f, ctx)
+            if f.field == "diagnosis":
+                if diag_n > 0:
+                    frag.joins = _suffix_diagnosis_aliases(frag.joins, diag_n)
+                    frag.where = _suffix_diagnosis_aliases(frag.where, diag_n)
+                diag_n += 1
             joins.extend(frag.joins)
             where.extend(frag.where)
             params.extend(frag.params)

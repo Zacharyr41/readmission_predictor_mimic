@@ -1131,3 +1131,61 @@ class TestGcsTotalFilter:
         assert "ILIKE" in sql
         assert "mimiciv_3_1_derived" not in sql
         assert frag.params == ["%mean arterial pressure%", 65.0]
+
+
+class TestMultiDiagnosisFilterAliases:
+    """``_compile_diagnosis`` hardcodes the table aliases ``di``/``dd``. With two
+    diagnosis filters in one CQ, ``compile_filters`` previously emitted the same
+    ``di``/``dd`` twice in one FROM clause, so BigQuery rejected the query with
+    ``400 ... Duplicate table alias di`` — the real crash behind "Analysis
+    failed" on *"... how many had a high anion gap metabolic acidosis vs. a non
+    high anion gap metabolic acidosis"* (and the diabetes follow-up).
+
+    Each diagnosis filter must get a DISTINCT alias; the first stays ``di``/``dd``
+    so single-diagnosis SQL is byte-identical (no regression)."""
+
+    def _registry(self):
+        r = OperationRegistry()
+        register_default_filters(r)
+        return r
+
+    def test_two_diagnosis_filters_get_distinct_table_aliases(self, duckdb_backend):
+        import re
+
+        ctx = FilterCompileContext(backend=duckdb_backend, enable_mcp_grounding=False)
+        filters = [
+            PatientFilter(field="diagnosis", operator="contains", value="metabolic acidosis"),
+            PatientFilter(field="diagnosis", operator="contains", value="diabetes"),
+        ]
+        frag = self._registry().compile_filters(filters, ctx)
+        joins_sql = " ".join(frag.joins)
+
+        # diagnoses_icd is joined once per filter; the aliases must be unique.
+        di_aliases = re.findall(r"diagnoses_icd`?\s+(\w+)\b", joins_sql)
+        di_aliases = [a for a in di_aliases if a.startswith("di")]
+        assert len(di_aliases) == 2, joins_sql
+        assert len(set(di_aliases)) == 2, f"duplicate diagnoses_icd alias: {di_aliases}"
+
+        dd_aliases = re.findall(r"d_icd_diagnoses`?\s+(\w+)\b", joins_sql)
+        assert len(set(dd_aliases)) == 2, f"duplicate d_icd_diagnoses alias: {dd_aliases}"
+
+        # First filter is byte-identical to the single-diagnosis path.
+        assert "di" in di_aliases and "dd" in dd_aliases
+
+        # Every emitted alias is actually referenced by a predicate (no orphans):
+        # the join ON-clauses and the WHERE clauses use each filter's own alias.
+        all_sql = joins_sql + " " + " ".join(frag.where)
+        for a in di_aliases:
+            assert f"{a}.icd_code" in all_sql, f"{a} unreferenced in {all_sql}"
+
+    def test_single_diagnosis_filter_unchanged(self, duckdb_backend):
+        """The common single-diagnosis case keeps the bare ``di``/``dd`` aliases —
+        the fix must not perturb existing SQL."""
+        ctx = FilterCompileContext(backend=duckdb_backend, enable_mcp_grounding=False)
+        frag = self._registry().compile_filters(
+            [PatientFilter(field="diagnosis", operator="contains", value="sepsis")],
+            ctx,
+        )
+        joins_sql = " ".join(frag.joins)
+        assert "diagnoses_icd` di " in joins_sql or "diagnoses_icd di " in joins_sql
+        assert "di1" not in joins_sql and "dd1" not in joins_sql

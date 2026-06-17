@@ -1610,3 +1610,38 @@ class TestDerivedValueFilter:
         q = compile_sql(cq, backend, get_default_registry())  # no derived_formulas
         assert "1 = 0" in q.sql
         backend.execute(q.sql, q.params)
+
+
+class TestMultiDiagnosisFilterCompileSql:
+    """End-to-end guard for the duplicate-``di``-alias crash. A cohort aggregate
+    filtered by TWO diagnoses compiled to SQL with ``di``/``dd`` repeated in one
+    FROM clause; BigQuery (and DuckDB) reject that as a duplicate table alias —
+    the ``ValidatorBlockedQueryError`` → "Analysis failed" crash on
+    *"... high anion gap metabolic acidosis vs. a non high anion gap ..."*."""
+
+    def test_two_diagnosis_filters_compile_and_execute(self, backend):
+        import re
+
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("creatinine", "biomarker")],
+            filters=[
+                ("diagnosis", "contains", "metabolic acidosis"),
+                ("diagnosis", "contains", "diabetes"),
+            ],
+            aggregation="mean",
+        )
+        q = compile_sql(cq, backend, get_default_registry())
+
+        # Each diagnosis filter joins diagnoses_icd under a DISTINCT alias.
+        di_aliases = [
+            a for a in re.findall(r"diagnoses_icd`?\s+(\w+)\b", q.sql)
+            if a.startswith("di")
+        ]
+        assert len(di_aliases) == 2, q.sql
+        assert len(set(di_aliases)) == 2, f"duplicate alias in {q.sql}"
+
+        # Executes without a "duplicate table alias" binder error (the crash).
+        backend.execute(q.sql, q.params)
