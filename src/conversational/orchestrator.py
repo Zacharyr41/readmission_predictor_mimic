@@ -116,7 +116,7 @@ def _aggregate_has_numeric(rows: list[dict], columns: list[str]) -> bool:
 # Sonnet (matches the decomposer) — a grounded extraction/judgment task; never
 # Haiku for judgment work. The forced tool returns the operands + arithmetic
 # AST + threshold the ``derived_value`` filter compiles.
-_FORMULA_EXTRACT_MODEL = "claude-sonnet-4-20250514"
+_FORMULA_EXTRACT_MODEL = "claude-sonnet-4-6"
 _FORMULA_EXTRACT_TOOL: dict[str, Any] = {
     "name": "report_formula",
     "description": (
@@ -1145,7 +1145,7 @@ class ConversationalPipeline:
                 )
                 sub.interpretation_summary = cq.interpretation_summary
                 fb = preview_fb
-                sql_used = [preview_query.sql] if preview_query is not None else []
+                sql_used = [preview_query.rendered_sql] if preview_query is not None else []
                 trace.append({
                     "attempt": attempt,
                     "loinc_used": loinc_used,
@@ -1601,7 +1601,7 @@ class ConversationalPipeline:
         answer = generate_answer(
             self._client, cq, clean_rows,
             {},  # no graph_stats on the fast-path
-            [query.sql],  # surface the SQL alongside any SPARQL
+            [query.rendered_sql],  # surface the values-filled SQL alongside any SPARQL
         )
 
         # Attach the outlier report only when the screen actually removed rows
@@ -1622,7 +1622,7 @@ class ConversationalPipeline:
                 (answer.text_summary or "")
                 + f"\n\n⚠️ Note: {fallback_warning}"
             ).strip()
-        return answer, [query.sql], fallback_warning
+        return answer, [query.rendered_sql], fallback_warning
 
     def _resolve_outlier_screen(
         self, cq: CompetencyQuestion, concept,

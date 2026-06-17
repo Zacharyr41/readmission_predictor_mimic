@@ -33,6 +33,7 @@ from src.conversational.models import (
     CompetencyQuestion,
     PatientFilter,
 )
+from src.conversational.sql_render import render_sql_with_params
 
 # Ambient grounding context for measurement-value filters, set by ``compile_sql``
 # and read by ``_filter_fragment`` — avoids threading ``resolver`` /
@@ -103,6 +104,27 @@ class SqlFastpathQuery:
     outlier_rows_columns: list[str] | None = None
     outlier_low: float | None = None
     outlier_high: float | None = None
+
+    @property
+    def rendered_sql(self) -> str:
+        """The ``sql`` template with ``params`` inlined as literals — the
+        values-filled statement shown in the "Query Details" expander.
+
+        Display only: ``sql`` + ``params`` remain what actually execute (the
+        parameterized form preserves DuckDB/BigQuery binding and typing). A
+        plain property (not cached) because the dataclass is rebuilt via
+        ``dataclasses.replace`` mid-pipeline, so it always reflects the
+        current ``sql``/``params``.
+
+        Never raises: a real compiled query always has matching placeholders
+        and params, but a *display* string must not crash a live answer — so
+        if the two ever drift (the pure renderer's strict guard fires) we fall
+        back to the parameterized template.
+        """
+        try:
+            return render_sql_with_params(self.sql, self.params)
+        except ValueError:
+            return self.sql
 
 
 # Aggregate → SELECT column name. Matches the SPARQL template's

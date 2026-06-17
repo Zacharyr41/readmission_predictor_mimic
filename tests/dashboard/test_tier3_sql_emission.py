@@ -22,6 +22,7 @@ from src.conversational.models import (
 )
 from src.conversational.operations import get_default_registry
 from src.conversational.sql_fastpath import compile_sql
+from src.conversational.sql_render import render_sql_with_params
 
 from tests.dashboard.lib.scenarios import (
     MOCK_MIMIC_ITEMID_LACTATE_RESPONSE,
@@ -78,6 +79,52 @@ def test_diagnosis_count_path_emits_in_list_parallel_or(backend, reporter):
         detail=f"params: {query.params!r}",
     )
     assert a41_in_params
+
+
+def test_rendered_sql_inlines_params_diagnosis_count(backend, reporter):
+    """Query-details feature: ``SqlFastpathQuery.rendered_sql`` inlines the
+    bound parameter values so the expander shows what actually ran — no ``?``
+    placeholders survive. Mirrors the Inc 4 diagnosis-count emission case;
+    rendering is additive (the parameterized ``query.sql`` is unchanged)."""
+    cq = CompetencyQuestion(
+        original_question="how many sepsis patients?",
+        clinical_concepts=[
+            ClinicalConcept(name="sepsis", concept_type="diagnosis"),
+        ],
+        aggregation="count", scope="cohort",
+    )
+    query = compile_sql(
+        cq, backend, get_default_registry(),
+        resolved_names=["sepsis"],
+        resolved_icd_codes=["A41.9", "R65.21"],
+    )
+    rendered = query.rendered_sql
+    _record_sql(reporter, query, "Rendered SQL inlines params (Query Details)")
+
+    no_placeholders = "?" not in rendered
+    reporter.add_assertion(
+        "rendered_sql has no leftover '?' placeholders",
+        no_placeholders,
+        detail=f"rendered: {rendered[:300]!r}",
+    )
+    assert no_placeholders
+
+    value_inlined = "'A419%'" in rendered
+    reporter.add_assertion(
+        "rendered_sql inlines the grounded ICD prefix as a quoted literal "
+        "('A419%')",
+        value_inlined,
+        detail=f"rendered: {rendered[:300]!r}",
+    )
+    assert value_inlined
+
+    # Structural tokens survive — only the ``?`` placeholders change.
+    assert "di.icd_code LIKE" in rendered
+
+    # The property is exactly the pure renderer applied to (sql, params),
+    # and is idempotent across accesses.
+    assert rendered == render_sql_with_params(query.sql, query.params)
+    assert query.rendered_sql == rendered
 
 
 def test_filter_side_emits_in_list_for_unregistered_phrase(
