@@ -373,12 +373,21 @@ class OperationRegistry:
         self,
         filters: list[PatientFilter],
         ctx: FilterCompileContext,
+        *,
+        diag_alias_start: int = 0,
     ) -> FilterFragment:
         """Compile every filter in a CQ into a single combined fragment.
 
         Unknown filter fields are skipped silently — matching the current
         extractor behaviour (it logs a warning). Callers that want strict
         validation should use ``registry.validate_cq`` first (future).
+
+        ``diag_alias_start`` seeds the diagnosis-filter alias counter. The
+        default 0 keeps the first diagnosis filter on the bare ``di``/``dd``
+        aliases. Callers whose OUTER query already binds ``di``/``dd`` — the
+        diagnosis-count / -list compile paths, which select
+        ``FROM diagnoses_icd di`` — pass ``1`` so the first diagnosis FILTER
+        starts at ``di1``/``dd1`` and doesn't collide with that base alias.
         """
         joins: list[str] = []
         where: list[str] = []
@@ -395,7 +404,7 @@ class OperationRegistry:
         # ``di``/``dd`` aliases, so the 2nd+ diagnosis filter must be rewritten to
         # a distinct alias or the combined FROM clause has a duplicate alias that
         # BigQuery rejects. The first stays ``di``/``dd`` (byte-identical SQL).
-        diag_n = 0
+        diag_n = diag_alias_start
         for f in filters:
             op = self.get("filter", f.field)
             if op is None:

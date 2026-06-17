@@ -1645,3 +1645,33 @@ class TestMultiDiagnosisFilterCompileSql:
 
         # Executes without a "duplicate table alias" binder error (the crash).
         backend.execute(q.sql, q.params)
+
+    def test_diagnosis_concept_count_with_diagnosis_filter(self, backend):
+        """The actual reported crash: a diagnosis CONCEPT counted
+        (``FROM diagnoses_icd di``) within a cohort that ALSO carries a diagnosis
+        FILTER (which joins diagnoses_icd again). The count path reserves
+        ``di``/``dd``; the filter must continue at ``di1``/``dd1``. This is what
+        *"... high anion gap metabolic acidosis among ICU admissions with a
+        metabolic acidosis"* decomposed to."""
+        import re
+
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(
+            concepts=[("high anion gap metabolic acidosis", "diagnosis")],
+            filters=[("diagnosis", "contains", "metabolic acidosis")],
+            aggregation="count",
+        )
+        q = compile_sql(cq, backend, get_default_registry())
+
+        di_aliases = [
+            a for a in re.findall(r"diagnoses_icd`?\s+(\w+)\b", q.sql)
+            if a.startswith("di")
+        ]
+        assert len(di_aliases) == 2, q.sql
+        assert len(set(di_aliases)) == 2, f"duplicate alias in {q.sql}"
+        # The base concept keeps di; the filter is pushed to di1.
+        assert "di" in di_aliases and "di1" in di_aliases, di_aliases
+
+        backend.execute(q.sql, q.params)

@@ -511,6 +511,7 @@ def _filter_fragment(
     registry: OperationRegistry,
     *,
     enable_mcp_grounding: bool = False,
+    diag_alias_start: int = 0,
 ) -> tuple[list[str], list[str], list[Any], bool, bool]:
     """Compile patient_filters to SQL fragments.
 
@@ -522,13 +523,21 @@ def _filter_fragment(
     ``FilterCompileContext`` so the diagnosis filter can ground via
     OMOPHub-backed icd_autocode in the production pipeline. Default
     False keeps unit tests offline-safe.
+
+    ``diag_alias_start`` continues the diagnosis-filter alias counter from a
+    base the OUTER query already reserved. The diagnosis-count / -list compile
+    paths select ``FROM diagnoses_icd di`` (alias ``di``/``dd``), so they pass
+    ``1`` here to push the first diagnosis FILTER to ``di1``/``dd1`` and avoid a
+    duplicate-table-alias error. Every other compile path keeps the default 0.
     """
     resolver, derived_formulas = _FILTER_GROUNDING_CTX.get()
     ctx = FilterCompileContext(
         backend=backend, enable_mcp_grounding=enable_mcp_grounding,
         resolver=resolver, derived_formulas=derived_formulas,
     )
-    frag = registry.compile_filters(cq.patient_filters, ctx)
+    frag = registry.compile_filters(
+        cq.patient_filters, ctx, diag_alias_start=diag_alias_start,
+    )
     needs_readmission = any(
         "rl." in w for w in frag.where
     ) or any("rl " in j or " rl " in j for j in frag.joins)
@@ -1054,8 +1063,14 @@ def _compile_diagnosis_count(
     group_by_col, group_by_params = _comparison_group_by_col(
         cq, registry, backend, enable_mcp_grounding=enable_mcp_grounding,
     )
+    # The base query selects FROM diagnoses_icd di, so the first diagnosis
+    # FILTER must start at di1/dd1 (diag_alias_start=1) to avoid a duplicate
+    # alias when a diagnosis CONCEPT is counted within a diagnosis cohort.
     filter_joins, filter_where, filter_params, filter_needs_patients, filter_has_readmission = \
-        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
+        _filter_fragment(
+            cq, backend, registry,
+            enable_mcp_grounding=enable_mcp_grounding, diag_alias_start=1,
+        )
 
     needs_patients = filter_needs_patients or _needs_patients_axis(group_by_col)
     needs_readmission = (
@@ -1167,8 +1182,12 @@ def _compile_diagnosis_list(
         )
 
     t = backend.table
+    # Base selects FROM diagnoses_icd di — diagnosis FILTERS start at di1/dd1.
     filter_joins, filter_where, filter_params, filter_needs_patients, _ = \
-        _filter_fragment(cq, backend, registry, enable_mcp_grounding=enable_mcp_grounding)
+        _filter_fragment(
+            cq, backend, registry,
+            enable_mcp_grounding=enable_mcp_grounding, diag_alias_start=1,
+        )
 
     joins: list[str] = [
         f"LEFT JOIN {t('d_icd_diagnoses')} dd "
