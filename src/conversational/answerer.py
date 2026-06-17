@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-20250514"
+_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS_SUMMARY = 500
 _MAX_TOKENS_VIZ = 1024
 _MAX_ROWS_FOR_LLM = 50

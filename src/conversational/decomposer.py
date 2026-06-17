@@ -19,7 +19,7 @@ from src.conversational.prompts import (
     build_decomposition_messages,
 )
 
-_MODEL = "claude-sonnet-4-20250514"
+_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 1024
 
 _VIZ_KEYWORDS = frozenset(

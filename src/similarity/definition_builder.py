@@ -47,7 +47,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Judgment/translation task → Sonnet, never Haiku (see memory:
 # feedback_critic_model_choice). Same model id the question decomposer uses.
-_MODEL = "claude-sonnet-4-20250514"
+_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 2048
 _MAX_ATTEMPTS = 2
 
