@@ -338,6 +338,24 @@ def _render_answer(
                     url = src.get("url") or "#"
                     st.markdown(f"- [{title}]({url})")
 
+    # Critic-driven corrected query: when the critic flagged a fixable bug, the
+    # orchestrator attached an executable corrected SQL. Surface it with the
+    # rationale and a button to run it. The button stashes the correction and
+    # reruns; the page-top handler executes it and appends the result as a new
+    # turn (so it renders through the history loop — no inline double-render).
+    if answer.suggested_correction is not None:
+        corr = answer.suggested_correction
+        with st.expander(
+            "🔧 Suggested corrected query — review and run", expanded=True,
+        ):
+            st.markdown(corr.rationale)
+            st.code(corr.corrected_sql, language="sql")
+            if st.button(
+                "▶ Run corrected query", key=f"{key_prefix}_run_correction",
+            ):
+                st.session_state["pending_correction"] = corr
+                st.rerun()
+
     # Biological-impossibility screening: when outliers were removed, the
     # default view is the *clean* table; a live checkbox flips to the
     # precomputed with-outliers table. Read the checkbox state before the
@@ -400,6 +418,36 @@ def _render_answer(
                 st.json(answer.graph_stats)
             for i, q in enumerate(answer.sparql_queries_used, 1):
                 st.code(q, language="sparql")
+
+
+# ---------------------------------------------------------------------------
+# Pending corrected-query run
+# ---------------------------------------------------------------------------
+
+# When the user clicks "Run corrected query" under a flagged answer, the button
+# stashes the SqlCorrection here and reruns. We pop it (pop, not read — else
+# every later rerun would re-run it), execute the corrected query, and append
+# the result as a new turn so the history loop below renders it. No inline
+# render → no double-render; the corrected answer may itself carry a fresh
+# suggested_correction, rendered uniformly.
+_pending_correction = st.session_state.pop("pending_correction", None)
+if _pending_correction is not None and st.session_state.pipeline is not None:
+    st.session_state.messages.append(
+        {"role": "user", "content": "▶ Run the corrected query"}
+    )
+    with st.spinner("Running the corrected query..."):
+        _corr_started = time.monotonic()
+        _corrected = st.session_state.pipeline.run_corrected_query(
+            _pending_correction
+        )
+    log_query_run(
+        "▶ Run the corrected query",
+        duration_s=time.monotonic() - _corr_started,
+        answer=_corrected,
+    )
+    st.session_state.messages.append(
+        {"role": "assistant", "content": _corrected}
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from src.conversational.clinical_consult import (
 )
 from src.conversational.concept_resolver import ConceptResolver
 from src.conversational.critic import critique
+from src.conversational.sql_corrector import propose_sql_correction
 from src.conversational.decomposer import decompose_question
 from src.conversational.extractor import (
     _BigQueryBackend,
@@ -39,6 +40,8 @@ from src.conversational.models import (
     DecompositionResult,
     ExtractionConfig,
     OutlierReport,
+    ReturnType,
+    SqlCorrection,
 )
 from src.conversational.outliers import BiologicalLimits, BiologicalLimitsResolver
 from src.conversational.operations import get_default_registry
@@ -82,6 +85,9 @@ PROGRESS_REVIEWING = "Reviewing the result…"
 # with a corrected LOINC, so a retry reads as a deliberate correction rather
 # than a slow first attempt.
 PROGRESS_RETRYING = "Retrying with a correction…"
+# Emitted while the corrector drafts an executable corrected query after the
+# critic flags a fixable bug (an extra LLM call on flagged turns).
+PROGRESS_DRAFTING_CORRECTION = "Drafting a corrected query…"
 
 # Single source of truth for the user-facing text when ``ask()`` catches a
 # pipeline exception. Paired with ``AnswerResult.error=True`` so the UI can
@@ -182,6 +188,7 @@ class ConversationalPipeline:
         max_workers: int = 1,
         enable_critic: bool = True,
         critic_max_retries: int = 1,
+        enable_sql_correction: bool = True,
         enable_pre_validator: bool = True,
         pre_validator_timeout: float = 5.0,
         pre_validator_max_usd: float = 0.50,
@@ -217,6 +224,14 @@ class ConversationalPipeline:
         # without unbounded latency. Configurable for tests that exercise
         # multi-retry behavior or boundary conditions.
         self._critic_max_retries = critic_max_retries
+        # Critic-driven SQL correction. When the post-execution critic flags a
+        # warn/block whose concern is a fixable query bug (e.g. mortality via an
+        # ICD code instead of hospital_expire_flag), the orchestrator asks the
+        # corrector for an executable corrected query and attaches it to
+        # ``AnswerResult.suggested_correction`` for one-click re-run. Default-ON;
+        # tests opt out to avoid extending mock LLM response lists. Requires the
+        # critic (no verdict → nothing to act on).
+        self._enable_sql_correction = enable_sql_correction
         # Pre-execution SQL validator (Phase B → E: now deterministic via
         # the bq-validator MCP, replacing the v1 LLM judge). Default-ON in
         # production; tests opt out via ``enable_pre_validator=False`` to
@@ -1212,7 +1227,102 @@ class ConversationalPipeline:
                 break
         if sub is not None and len(trace) > 1:
             sub.correction_trace = trace
+        # Offer a corrected query when the critic flagged a fixable bug that the
+        # (biomarker-only) LOINC self-heal above could not address — e.g. a
+        # structural SQL bug like mortality-via-ICD or a drug-class LIKE.
+        sub = self._maybe_suggest_correction(sub, cq, sql_used, fb)
         return sub, sql_used, fb
+
+    def _maybe_suggest_correction(
+        self,
+        sub: AnswerResult,
+        cq: CompetencyQuestion,
+        sql_used: list[str],
+        fb: str | None,
+    ) -> AnswerResult:
+        """Attach a critic-driven corrected query when one is warranted.
+
+        Fires only when SQL correction is enabled, the critic produced a
+        ``warn``/``block`` verdict, and there is SQL to correct. A no-op
+        correction (one that reproduces the SQL that already ran) is dropped —
+        a "run this identical query" button is useless. Never raises; the
+        corrector itself returns None on any failure.
+
+        Guards ``critic_verdict is not None`` BEFORE reading ``.severity``: the
+        pre-execution block path returns with no verdict, and reading severity
+        off None would crash the turn.
+        """
+        if sub is None or not self._enable_sql_correction:
+            return sub
+        verdict = sub.critic_verdict
+        if verdict is None or verdict.severity not in {"warn", "block"}:
+            return sub
+        if not sql_used:
+            return sub
+        original_sql = sql_used[-1]
+        self._progress(PROGRESS_DRAFTING_CORRECTION)
+        correction = propose_sql_correction(
+            self._client, cq, sub, verdict, original_sql, fallback_warning=fb,
+        )
+        if correction is None:
+            return sub
+        if correction.corrected_sql.strip() == (original_sql or "").strip():
+            return sub  # no-op: corrector echoed the query that already ran
+        sub.suggested_correction = correction
+        return sub
+
+    def run_corrected_query(self, correction: SqlCorrection) -> AnswerResult:
+        """Execute a critic-proposed corrected query and re-explain the result.
+
+        Invoked from the UI when the user clicks "Run corrected query". Opens a
+        backend (same data source as the pipeline), runs the corrected SQL with
+        no bound parameters (literals are inlined), zips rows into dicts via the
+        result column names, and re-explains with the answerer. The corrected
+        answer is re-critiqued and may itself carry a fresh
+        ``suggested_correction`` (the chain is bounded by user clicks — each
+        re-run is one explicit action).
+
+        Execution failures degrade to an ``AnswerResult(error=True)`` so a
+        broken corrected query surfaces a message instead of crashing the app.
+        """
+        cq = CompetencyQuestion(
+            original_question=correction.original_question,
+            return_type=correction.return_type or ReturnType.TEXT_AND_TABLE,
+            interpretation_summary=correction.interpretation_summary,
+            aggregation=correction.aggregation,
+        )
+        try:
+            with self._open_backend() as backend:
+                rows, columns = backend.execute_with_columns(
+                    correction.corrected_sql, [],
+                )
+            result_rows = [dict(zip(columns, r)) for r in rows]
+            answer = generate_answer(
+                self._client, cq, result_rows, {}, [correction.corrected_sql],
+            )
+        except Exception as exc:  # noqa: BLE001 — never crash the app on a bad fix
+            logger.warning(
+                "corrected-query execution failed: %s (%s)",
+                exc, type(exc).__name__,
+            )
+            answer = AnswerResult(
+                text_summary=(
+                    "The corrected query could not be executed: "
+                    f"{exc}. You can refine the question and try again."
+                ),
+                error=True,
+                sparql_queries_used=[correction.corrected_sql],
+                interpretation_summary=correction.interpretation_summary,
+            )
+            return answer
+
+        answer.interpretation_summary = correction.interpretation_summary
+        answer = self._critique(answer, cq)
+        answer = self._maybe_suggest_correction(
+            answer, cq, [correction.corrected_sql], None,
+        )
+        self._remember(cq, answer)
+        return answer
 
     def _derived_formulas_for_cq(self, cq) -> dict:
         """Resolve every ``derived_value`` filter in a CQ to a grounded

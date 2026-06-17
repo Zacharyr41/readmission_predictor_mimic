@@ -11,6 +11,7 @@ from src.conversational.models import (
     ExtractionResult,
     PatientFilter,
     ReturnType,
+    SqlCorrection,
     TemporalConstraint,
 )
 
@@ -306,6 +307,67 @@ class TestAnswerResult:
             sparql_queries_used=["ASK { ?s ?p ?o }"],
         )
         assert a == AnswerResult.model_validate_json(a.model_dump_json())
+
+
+# ---------------------------------------------------------------------------
+# SqlCorrection — critic-driven corrected-query proposal
+# ---------------------------------------------------------------------------
+
+
+class TestSqlCorrection:
+    """``SqlCorrection`` carries an LLM-proposed corrected query plus the
+    minimal re-run context. It deliberately stores primitives (not a full
+    ``CompetencyQuestion``) so an ``AnswerResult`` carrying one stays
+    JSON-round-trippable and free of the ``SimilaritySpec`` forward-ref."""
+
+    def test_basic_construction_defaults(self):
+        c = SqlCorrection(
+            corrected_sql="SELECT 1",
+            rationale="fixed the mortality predicate",
+            original_question="how many died?",
+        )
+        assert c.corrected_sql == "SELECT 1"
+        assert c.rationale == "fixed the mortality predicate"
+        assert c.original_question == "how many died?"
+        # Sensible defaults so a single-shot corrector need only emit the SQL.
+        assert c.return_type == ReturnType.TEXT_AND_TABLE
+        assert c.interpretation_summary is None
+        assert c.aggregation is None
+
+    def test_carries_rerun_context(self):
+        c = SqlCorrection(
+            corrected_sql="SELECT COUNT(*) AS count_value FROM t",
+            rationale="...",
+            original_question="count patients",
+            return_type=ReturnType.TABLE,
+            interpretation_summary="Count of admissions",
+            aggregation="count",
+        )
+        assert c.return_type == ReturnType.TABLE
+        assert c.interpretation_summary == "Count of admissions"
+        assert c.aggregation == "count"
+
+    def test_answer_result_suggested_correction_defaults_none(self):
+        assert AnswerResult(text_summary="x").suggested_correction is None
+
+    def test_answer_result_with_correction_round_trips(self):
+        """The serialization guard: an AnswerResult carrying a SqlCorrection
+        must survive a JSON round-trip (no nested CompetencyQuestion /
+        SimilaritySpec forward-ref to break model_dump_json)."""
+        a = AnswerResult(
+            text_summary="empty result was a query bug",
+            sparql_queries_used=["SELECT ... LIKE '%thiazide diuretic%'"],
+            suggested_correction=SqlCorrection(
+                corrected_sql="SELECT a.hospital_expire_flag, COUNT(*) FROM ...",
+                rationale="use hospital_expire_flag; match agent names",
+                original_question="thiazide by mortality group",
+                interpretation_summary="Count of HFpEF admissions ...",
+                aggregation="count",
+            ),
+        )
+        restored = AnswerResult.model_validate_json(a.model_dump_json())
+        assert restored == a
+        assert restored.suggested_correction.corrected_sql.startswith("SELECT a.")
 
 
 # ---------------------------------------------------------------------------

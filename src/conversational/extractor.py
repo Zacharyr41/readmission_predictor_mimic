@@ -160,6 +160,20 @@ class _DuckDBBackend:
     def execute(self, sql: str, params: list) -> list[tuple]:
         return self._cursor().execute(sql, params).fetchall()
 
+    def execute_with_columns(
+        self, sql: str, params: list
+    ) -> tuple[list[tuple], list[str]]:
+        """Like ``execute`` but also returns the result column names.
+
+        Used by the corrected-query re-run path
+        (``ConversationalPipeline.run_corrected_query``), which needs column
+        names to zip raw rows into the dicts the answerer consumes. Column
+        names come from the cursor's ``description`` after execution.
+        """
+        cur = self._cursor().execute(sql, params)
+        columns = [d[0] for d in cur.description] if cur.description else []
+        return cur.fetchall(), columns
+
     def execute_tolerant(self, sql: str, params: list) -> list[tuple]:
         """No validator on DuckDB (local; no cost). Passthrough to execute()."""
         return self.execute(sql, params)
@@ -301,9 +315,42 @@ class _BigQueryBackend:
         )
         return self._run_with_reconnect(bq_sql, config)
 
+    def execute_with_columns(
+        self, sql: str, params: list
+    ) -> tuple[list[tuple], list[str]]:
+        """Like ``execute`` but also returns the result column names.
+
+        Used by the corrected-query re-run path
+        (``ConversationalPipeline.run_corrected_query``). Routes through the
+        same validator gate and the SSL/transport self-heal loop as
+        ``execute`` (via ``_run_with_reconnect_cols``), so a one-shot corrected
+        query gets the same stale-socket resilience as the cohort fetch.
+        """
+        if self._validator is not None:
+            try:
+                verdict = self._validator(sql, params)
+            except Exception:  # noqa: BLE001
+                verdict = None
+            if verdict is not None and getattr(verdict, "verdict", None) == "block":
+                raise ValidatorBlockedQueryError(verdict, sql=sql)
+        bq_sql, bq_params = self._convert_params(sql, params)
+        config = self._bq.QueryJobConfig(
+            query_parameters=bq_params,
+            maximum_bytes_billed=self._max_bytes_billed,
+        )
+        return self._run_with_reconnect_cols(bq_sql, config)
+
     def _run_with_reconnect(self, bq_sql: str, config) -> list[tuple]:
+        """Run the query and return rows only (the 9 extractor call sites use
+        their own hardcoded column lists). Column names are available via
+        ``_run_with_reconnect_cols``; this is the rows-only shim over it."""
+        return self._run_with_reconnect_cols(bq_sql, config)[0]
+
+    def _run_with_reconnect_cols(
+        self, bq_sql: str, config
+    ) -> tuple[list[tuple], list[str]]:
         """Run the query with a bounded per-attempt timeout, reconnecting with
-        a fresh client on a transport error.
+        a fresh client on a transport error, returning (rows, column_names).
 
         The long-lived client's connection pool can hold a stale keep-alive
         socket; reusing it raises the intermittent macOS SSL_ERROR_SYSCALL
@@ -312,6 +359,10 @@ class _BigQueryBackend:
         we disable its retry and own the loop here: on a transport error we
         build a fresh client (new pool) and try again, which lets the blip
         self-heal. Genuine query errors are re-raised immediately.
+
+        Column names come from the ``RowIterator.schema``; a result without a
+        schema (e.g. a list in tests) yields ``[]`` columns so the rows-only
+        callers via ``_run_with_reconnect`` are unaffected.
         """
         last_exc: BaseException | None = None
         for attempt in range(self._max_attempts):
@@ -322,8 +373,10 @@ class _BigQueryBackend:
                     timeout=self._query_timeout,
                     retry=None,
                 )
-                rows = job.result(timeout=self._result_timeout)
-                return [tuple(row.values()) for row in rows]
+                result = job.result(timeout=self._result_timeout)
+                columns = [f.name for f in (getattr(result, "schema", None) or [])]
+                rows = [tuple(row.values()) for row in result]
+                return rows, columns
             except Exception as exc:  # noqa: BLE001
                 if not _is_transient_transport_error(exc):
                     raise

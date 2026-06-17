@@ -638,6 +638,38 @@ class OutlierReport(BaseModel):
     data_table_with_outliers: list[dict] | None = None
 
 
+class SqlCorrection(BaseModel):
+    """An LLM-proposed corrected SQL query plus the minimal context needed to
+    re-run it and re-explain the result.
+
+    Produced by ``src/conversational/sql_corrector.py::propose_sql_correction``
+    after the plausibility critic flags a ``warn``/``block`` whose concern is a
+    *query bug* (e.g. mortality detected via an ICD code instead of
+    ``admissions.hospital_expire_flag``; a drug filtered by the class label
+    ``'thiazide diuretic'`` instead of the agent names MIMIC actually stores).
+    The orchestrator attaches it to ``AnswerResult.suggested_correction`` so the
+    UI can surface the fix and a "run it" button.
+
+    ``corrected_sql`` is directly executable as-is: literals inlined, no ``?``
+    placeholders (the re-run path passes ``params=[]``), preserving the original
+    query's dialect and fully-qualified table names.
+
+    The re-run context is stored as *primitives* — NOT a nested
+    ``CompetencyQuestion`` — on purpose. A nested CQ would pull the
+    ``SimilaritySpec`` forward-ref into ``AnswerResult.model_dump_json()`` (a
+    serialization hazard) and would alias a CQ that the SQL fast-path mutates in
+    place. ``run_corrected_query`` reconstructs a minimal CQ from these fields,
+    which is all ``answerer.generate_answer`` consumes (``original_question`` +
+    ``return_type``)."""
+
+    corrected_sql: str
+    rationale: str
+    original_question: str
+    return_type: ReturnType = ReturnType.TEXT_AND_TABLE
+    interpretation_summary: str | None = None
+    aggregation: str | None = None
+
+
 class AnswerResult(BaseModel):
     text_summary: str
     data_table: list[dict] | None = None
@@ -668,6 +700,12 @@ class AnswerResult(BaseModel):
     # ``loinc_used`` (str|None), ``text_summary`` (str), ``fallback_warning``
     # (str|None), ``critic_verdict`` (dict|None).
     correction_trace: list[dict] | None = None
+    # Critic-driven corrected query (see SqlCorrection). Populated by the
+    # orchestrator when the plausibility critic flags a warn/block whose concern
+    # is a fixable SQL bug; the UI renders the proposed fix plus a button that
+    # calls ``ConversationalPipeline.run_corrected_query``. None on every turn
+    # the critic passed or had no actionable fix (the common case).
+    suggested_correction: "SqlCorrection | None" = None
     # Phase C: contextual citations carry the literature/registry refs that
     # informed an appended ``ContextualNote``. None when contextualization
     # is disabled or didn't fire. Same shape as ``CriticVerdict.cited_sources``

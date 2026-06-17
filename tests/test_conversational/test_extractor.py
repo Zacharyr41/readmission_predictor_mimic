@@ -410,6 +410,91 @@ class TestBigQueryReconnect:
 
 
 # ---------------------------------------------------------------------------
+# execute_with_columns — used by the corrected-query re-run path
+# ---------------------------------------------------------------------------
+
+
+def _fake_result(schema: list[str], rows: list[tuple]):
+    """A stand-in for a BigQuery ``RowIterator``: carries ``.schema``
+    (objects with ``.name``) and is iterable, yielding rows with
+    ``.values()``."""
+    res = MagicMock()
+    fields = []
+    for n in schema:
+        f = MagicMock()
+        f.name = n  # MagicMock(name=...) sets the repr name, not .name
+        fields.append(f)
+    res.schema = fields
+    row_mocks = []
+    for r in rows:
+        m = MagicMock()
+        m.values.return_value = r
+        row_mocks.append(m)
+    res.__iter__.return_value = iter(row_mocks)
+    return res
+
+
+class TestExecuteWithColumns:
+    """``execute_with_columns`` returns rows AND the result column names so the
+    corrected-query re-run can build dicts for the answerer (today's
+    ``execute`` returns only ``list[tuple]``)."""
+
+    def test_duckdb_returns_rows_and_columns(self, tmp_path):
+        import duckdb
+
+        p = tmp_path / "t.duckdb"
+        con = duckdb.connect(str(p))
+        con.execute("CREATE TABLE admissions (hadm_id INTEGER, flag INTEGER)")
+        con.execute("INSERT INTO admissions VALUES (1, 1), (2, 0), (3, 0)")
+        con.close()
+
+        backend = _DuckDBBackend(p)
+        rows, cols = backend.execute_with_columns(
+            "SELECT flag AS group_value, COUNT(*) AS count "
+            "FROM admissions GROUP BY flag ORDER BY flag",
+            [],
+        )
+        assert cols == ["group_value", "count"]
+        assert rows == [(0, 2), (1, 1)]
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_bigquery_returns_rows_and_columns(self, mock_get_bq):
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+        client = mock_bq.Client.return_value
+        job = MagicMock()
+        job.result.return_value = _fake_result(
+            schema=["group_value", "count"],
+            rows=[("yes", 3), ("no", 5)],
+        )
+        client.query.return_value = job
+
+        backend = _BigQueryBackend(project="test-project")
+        rows, cols = backend.execute_with_columns("SELECT 1", [])
+
+        assert cols == ["group_value", "count"]
+        assert rows == [("yes", 3), ("no", 5)]
+        backend.close()
+
+    @patch("src.conversational.extractor._get_bigquery_module")
+    def test_execute_still_returns_rows_only(self, mock_get_bq):
+        """Regression: the refactor to share the reconnect loop must not change
+        ``execute``'s rows-only contract (the 9 extractor call sites rely on
+        ``list[tuple]``). A result with no ``.schema`` must not crash."""
+        mock_bq = _make_mock_bq()
+        mock_get_bq.return_value = mock_bq
+        client = mock_bq.Client.return_value
+        job = MagicMock()
+        job.result.return_value = TestBigQueryReconnect._fake_rows((42,))  # plain list, no .schema
+        client.query.return_value = job
+
+        backend = _BigQueryBackend(project="test-project")
+        assert backend.execute("SELECT 1", []) == [(42,)]
+        backend.close()
+
+
+# ---------------------------------------------------------------------------
 # ExtractionConfig
 # ---------------------------------------------------------------------------
 

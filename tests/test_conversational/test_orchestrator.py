@@ -1972,6 +1972,9 @@ class TestSelfHealingCritic:
 
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key", enable_critic=True,
+            # Isolate the LOINC self-heal accounting from the general SQL
+            # corrector (which would otherwise fire on this final block verdict).
+            enable_sql_correction=False,
         )
         pipeline._client = mock_anthropic([
             _verdict_json(severity="block", concern="bad answer", suggested_loinc=None),
@@ -2006,6 +2009,9 @@ class TestSelfHealingCritic:
         pipeline = ConversationalPipeline(
             _DB_PATH, _ONTOLOGY_DIR, "test-key",
             enable_critic=True, critic_max_retries=1,
+            # Isolate the LOINC self-heal accounting from the general SQL
+            # corrector (which would otherwise fire on the final block verdict).
+            enable_sql_correction=False,
         )
         pipeline._client = mock_anthropic([
             _verdict_json(severity="block", concern="x", suggested_loinc="32693-4"),
@@ -3960,3 +3966,316 @@ class TestDiagnosisCandidateDisambiguation:
         assert split.resolved_icd_codes == ["Z7901", "Z7902", "V5861"]
         # Inclusive grounding must NOT raise a clarifying question for the split.
         assert not cq.clarifying_question
+
+
+# ---------------------------------------------------------------------------
+# TestSqlCorrectionWiring — critic flags a query bug → orchestrator offers a
+# corrected query the user can run with one click.
+#
+# Two layers: (1) unit tests of ``_maybe_suggest_correction`` and
+# ``run_corrected_query`` with ``propose_sql_correction`` / ``generate_answer``
+# / ``critique`` patched, and (2) a big-loop ``ask()`` test where the real
+# critic + corrector are driven via ``pipeline._client`` (mock_anthropic).
+# ---------------------------------------------------------------------------
+
+from contextlib import contextmanager  # noqa: E402
+
+from src.conversational.models import (  # noqa: E402
+    CriticVerdict,
+    SqlCorrection,
+)
+
+
+def _drug_count_cq() -> CompetencyQuestion:
+    """The real bug: thiazide diuretic counts split by in-hospital mortality."""
+    return CompetencyQuestion(
+        original_question=(
+            "Within each mortality group of patients with HFpEF, how many were "
+            "prescribed a thiazide diuretic?"
+        ),
+        clinical_concepts=[
+            ClinicalConcept(name="thiazide diuretic", concept_type="drug"),
+        ],
+        return_type="table",
+        scope="cohort",
+        aggregation="count",
+        interpretation_summary=(
+            "Count of HFpEF admissions on a thiazide diuretic, split by "
+            "in-hospital mortality."
+        ),
+    )
+
+
+def _warn_sub(concern: str = "use hospital_expire_flag; drug agent names") -> AnswerResult:
+    sub = AnswerResult(
+        text_summary="No matching data was found.",
+        sparql_queries_used=["SELECT ... LIKE '%thiazide diuretic%'"],
+    )
+    sub.critic_verdict = CriticVerdict(
+        plausible=False, severity="warn", concern=concern,
+    )
+    return sub
+
+
+def _correction(
+    corrected_sql: str = "SELECT a.hospital_expire_flag AS group_value, COUNT(*) AS count FROM x",
+) -> SqlCorrection:
+    return SqlCorrection(
+        corrected_sql=corrected_sql,
+        rationale="Use hospital_expire_flag and match agent names.",
+        original_question="q",
+        interpretation_summary="Interp",
+        aggregation="count",
+    )
+
+
+def _pipeline(**kw) -> ConversationalPipeline:
+    return ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key", **kw)
+
+
+class TestMaybeSuggestCorrection:
+    """``_maybe_suggest_correction`` gates the corrector on a warn/block
+    verdict, drops no-op fixes, and never crashes on the None-verdict
+    (pre-execution block) path."""
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_warn_triggers_correction(self, mock_propose):
+        mock_propose.return_value = _correction()
+        sub = _warn_sub()
+        out = _pipeline()._maybe_suggest_correction(
+            sub, _drug_count_cq(), ["SELECT ... LIKE '%thiazide diuretic%'"], "fb",
+        )
+        assert mock_propose.called
+        assert out.suggested_correction is not None
+        assert "hospital_expire_flag" in out.suggested_correction.corrected_sql
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_block_triggers_correction(self, mock_propose):
+        mock_propose.return_value = _correction()
+        sub = _warn_sub()
+        sub.critic_verdict.severity = "block"
+        _pipeline()._maybe_suggest_correction(sub, _drug_count_cq(), ["SELECT ..."], None)
+        assert mock_propose.called
+        assert sub.suggested_correction is not None
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_info_verdict_no_correction(self, mock_propose):
+        sub = _warn_sub()
+        sub.critic_verdict.severity = "info"
+        sub.critic_verdict.plausible = True
+        _pipeline()._maybe_suggest_correction(sub, _drug_count_cq(), ["SELECT ..."], None)
+        assert not mock_propose.called
+        assert sub.suggested_correction is None
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_none_verdict_no_crash(self, mock_propose):
+        # Pre-execution block path: critic never ran, verdict is None, sql empty.
+        sub = AnswerResult(text_summary="blocked before execution")
+        out = _pipeline()._maybe_suggest_correction(sub, _drug_count_cq(), [], None)
+        assert not mock_propose.called
+        assert out.suggested_correction is None
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_disabled_flag_no_correction(self, mock_propose):
+        sub = _warn_sub()
+        _pipeline(enable_sql_correction=False)._maybe_suggest_correction(
+            sub, _drug_count_cq(), ["SELECT ..."], None,
+        )
+        assert not mock_propose.called
+        assert sub.suggested_correction is None
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_empty_sql_no_correction(self, mock_propose):
+        sub = _warn_sub()
+        _pipeline()._maybe_suggest_correction(sub, _drug_count_cq(), [], None)
+        assert not mock_propose.called
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_noop_correction_dropped(self, mock_propose):
+        # Corrector echoes the original SQL (modulo whitespace) → drop it; a
+        # "run this identical query" button is useless.
+        mock_propose.return_value = _correction(corrected_sql="  SELECT 1  ")
+        sub = _warn_sub()
+        _pipeline()._maybe_suggest_correction(sub, _drug_count_cq(), ["SELECT 1"], None)
+        assert mock_propose.called
+        assert sub.suggested_correction is None
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    def test_unfixable_correction_none(self, mock_propose):
+        sub = _warn_sub()
+        _pipeline()._maybe_suggest_correction(sub, _drug_count_cq(), ["SELECT 1"], None)
+        assert mock_propose.called
+        assert sub.suggested_correction is None
+
+
+class TestRunCorrectedQuery:
+    """``run_corrected_query`` executes the corrected SQL, re-explains, re-
+    critiques, remembers the turn, and degrades gracefully on error."""
+
+    @staticmethod
+    def _attach_backend(pipeline, backend):
+        @contextmanager
+        def _cm():
+            yield backend
+        pipeline._open_backend = _cm
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    @patch("src.conversational.orchestrator.critique", return_value=None)
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_executes_and_explains(self, mock_gen, mock_critique, mock_propose):
+        backend = MagicMock()
+        backend.execute_with_columns.return_value = (
+            [("yes", 3), ("no", 5)], ["group_value", "count"],
+        )
+        mock_gen.return_value = AnswerResult(text_summary="3 expired, 5 did not")
+        pipeline = _pipeline(enable_critic=False)
+        self._attach_backend(pipeline, backend)
+
+        corr = _correction(corrected_sql="SELECT g, c FROM x")
+        out = pipeline.run_corrected_query(corr)
+
+        backend.execute_with_columns.assert_called_once_with("SELECT g, c FROM x", [])
+        # Rows zipped with the DB column names into dicts for the answerer.
+        rows_arg = mock_gen.call_args.args[2]
+        assert rows_arg == [
+            {"group_value": "yes", "count": 3},
+            {"group_value": "no", "count": 5},
+        ]
+        # The corrected SQL is threaded to the answerer (which surfaces it in
+        # Query Details via sparql_queries_used).
+        assert mock_gen.call_args.args[4] == ["SELECT g, c FROM x"]
+        assert out.interpretation_summary == "Interp"
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    @patch("src.conversational.orchestrator.critique", return_value=None)
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_appends_to_history(self, mock_gen, mock_critique, mock_propose):
+        backend = MagicMock()
+        backend.execute_with_columns.return_value = ([(1,)], ["count"])
+        mock_gen.return_value = AnswerResult(text_summary="ok")
+        pipeline = _pipeline(enable_critic=False)
+        self._attach_backend(pipeline, backend)
+
+        out = pipeline.run_corrected_query(_correction())
+        assert len(pipeline.conversation_history) == 1
+        assert pipeline.conversation_history[0][1] is out
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_recritiques_corrected_result(self, mock_gen, mock_propose):
+        backend = MagicMock()
+        backend.execute_with_columns.return_value = ([(2,)], ["count"])
+        mock_gen.return_value = AnswerResult(text_summary="corrected")
+        pipeline = _pipeline(enable_critic=True)
+        self._attach_backend(pipeline, backend)
+        with patch(
+            "src.conversational.orchestrator.critique",
+            return_value=CriticVerdict(plausible=True, severity="info"),
+        ):
+            out = pipeline.run_corrected_query(_correction())
+        assert out.critic_verdict is not None
+        assert out.critic_verdict.severity == "info"
+
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_chain_continues_when_still_flagged(self, mock_gen):
+        backend = MagicMock()
+        backend.execute_with_columns.return_value = ([(0,)], ["count"])
+        mock_gen.return_value = AnswerResult(text_summary="still wrong")
+        pipeline = _pipeline(enable_critic=True)
+        self._attach_backend(pipeline, backend)
+        with patch(
+            "src.conversational.orchestrator.critique",
+            return_value=CriticVerdict(plausible=False, severity="warn", concern="still wrong"),
+        ), patch(
+            "src.conversational.orchestrator.propose_sql_correction",
+            return_value=_correction(corrected_sql="SELECT fixed_again FROM x"),
+        ):
+            out = pipeline.run_corrected_query(_correction())
+        # A corrected answer that's still flagged offers a fresh correction —
+        # the chain is bounded by user clicks, not auto-looped.
+        assert out.suggested_correction is not None
+        assert out.suggested_correction.corrected_sql == "SELECT fixed_again FROM x"
+
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_chain_terminates_when_plausible(self, mock_gen):
+        backend = MagicMock()
+        backend.execute_with_columns.return_value = ([(7,)], ["count"])
+        mock_gen.return_value = AnswerResult(text_summary="now correct")
+        pipeline = _pipeline(enable_critic=True)
+        self._attach_backend(pipeline, backend)
+        with patch(
+            "src.conversational.orchestrator.critique",
+            return_value=CriticVerdict(plausible=True, severity="info"),
+        ), patch(
+            "src.conversational.orchestrator.propose_sql_correction",
+        ) as mock_propose:
+            out = pipeline.run_corrected_query(_correction())
+        assert not mock_propose.called
+        assert out.suggested_correction is None
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    @patch("src.conversational.orchestrator.critique", return_value=None)
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_execution_error_degrades_gracefully(self, mock_gen, mock_critique, mock_propose):
+        backend = MagicMock()
+        backend.execute_with_columns.side_effect = RuntimeError("syntax error near 'SELCT'")
+        pipeline = _pipeline(enable_critic=False)
+        self._attach_backend(pipeline, backend)
+
+        out = pipeline.run_corrected_query(_correction(corrected_sql="SELCT bad"))
+        assert out.error is True
+        assert not mock_gen.called
+        # The broken corrected SQL is surfaced for transparency.
+        assert out.sparql_queries_used == ["SELCT bad"]
+        # An errored re-run is not remembered as conversation context.
+        assert pipeline.conversation_history == []
+
+
+class TestSqlCorrectionBigLoop:
+    """End-to-end through ``ask()``: a SQL-fast-path turn the critic flags
+    ``warn`` gets a ``suggested_correction`` attached, driven by the REAL
+    critic + corrector via ``pipeline._client``."""
+
+    @_patch_for_self_healing
+    def test_warn_turn_attaches_suggested_correction(
+        self, mock_decompose, mock_run_sql_fastpath,
+    ):
+        from tests.test_conversational.conftest import mock_anthropic
+        from src.conversational.models import DecompositionResult
+
+        # Reuse the proven SQL_FAST lactate CQ (the correction path is concept-
+        # type-agnostic; the drug example is covered by the unit tests). The
+        # warn verdict carries NO suggested_loinc, so the LOINC self-heal does
+        # not fire and the general SQL-correction path is what runs.
+        cq = _make_lactate_cq(loinc_code=None)
+        mock_decompose.return_value = DecompositionResult(competency_questions=[cq])
+        mock_run_sql_fastpath.return_value = (
+            AnswerResult(
+                text_summary="No matching data was found.",
+                sparql_queries_used=["SELECT ... LIKE '%lactate%'"],
+            ),
+            ["SELECT ... LIKE '%lactate%'"],
+            None,
+        )
+
+        pipeline = ConversationalPipeline(
+            _DB_PATH, _ONTOLOGY_DIR, "test-key",
+            enable_critic=True, enable_disambiguation=False,
+        )
+        pipeline._client = mock_anthropic([
+            _verdict_json(
+                severity="warn",
+                concern="The empty result is a query bug, not absent data.",
+            ),
+            json.dumps({
+                "fixable": True,
+                "corrected_sql": "SELECT AVG(valuenum) FROM labevents WHERE itemid IN (50813)",
+                "rationale": "Ground lactate to its MIMIC itemid instead of a label LIKE.",
+            }),
+        ])
+
+        answer = pipeline.ask("What is the average lactate for patients with sepsis?")
+
+        assert answer.suggested_correction is not None
+        assert "itemid IN (50813)" in answer.suggested_correction.corrected_sql
+        assert answer.suggested_correction.rationale
