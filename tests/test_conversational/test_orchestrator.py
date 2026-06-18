@@ -4279,3 +4279,114 @@ class TestSqlCorrectionBigLoop:
         assert answer.suggested_correction is not None
         assert "itemid IN (50813)" in answer.suggested_correction.corrected_sql
         assert answer.suggested_correction.rationale
+
+
+# ---------------------------------------------------------------------------
+# Multi-CQ correction batching: run ALL suggested corrections in a turn at once
+# (combined result), and sweep the corrector across sibling sub-queries so an
+# inconsistently-unflagged-but-buggy sibling still gets a correction.
+# ---------------------------------------------------------------------------
+
+
+class TestRunCorrectedQueriesBatch:
+    @staticmethod
+    def _attach_backend(pipeline, backend):
+        @contextmanager
+        def _cm():
+            yield backend
+        pipeline._open_backend = _cm
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    @patch("src.conversational.orchestrator.critique", return_value=None)
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_runs_all_and_combines_into_sub_answers(self, mock_gen, mock_crit, mock_prop):
+        backend = MagicMock()
+        backend.execute_with_columns.side_effect = [
+            ([("yes", 3)], ["group_value", "count"]),
+            ([("no", 5)], ["group_value", "count"]),
+        ]
+        mock_gen.side_effect = [
+            AnswerResult(text_summary="part1 corrected"),
+            AnswerResult(text_summary="part2 corrected"),
+        ]
+        pipeline = _pipeline(enable_critic=False)
+        self._attach_backend(pipeline, backend)
+
+        out = pipeline.run_corrected_queries([
+            _correction(corrected_sql="SELECT a FROM x"),
+            _correction(corrected_sql="SELECT b FROM y"),
+        ])
+        assert out.sub_answers is not None and len(out.sub_answers) == 2
+        assert out.sub_answers[0].text_summary == "part1 corrected"
+        assert out.sub_answers[1].text_summary == "part2 corrected"
+        assert backend.execute_with_columns.call_count == 2
+        # The combined turn is remembered once (not once per part).
+        assert len(pipeline.conversation_history) == 1
+        assert pipeline.conversation_history[0][1] is out
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=None)
+    @patch("src.conversational.orchestrator.critique", return_value=None)
+    @patch("src.conversational.orchestrator.generate_answer")
+    def test_single_correction_not_wrapped(self, mock_gen, mock_crit, mock_prop):
+        backend = MagicMock()
+        backend.execute_with_columns.return_value = ([(7,)], ["count"])
+        mock_gen.return_value = AnswerResult(text_summary="one corrected")
+        pipeline = _pipeline(enable_critic=False)
+        self._attach_backend(pipeline, backend)
+
+        out = pipeline.run_corrected_queries([_correction()])
+        # A single correction returns the answer directly (no sub_answers wrapper).
+        assert out.sub_answers is None
+        assert out.text_summary == "one corrected"
+
+    def test_empty_list_degrades_gracefully(self):
+        out = _pipeline().run_corrected_queries([])
+        assert out.error is True
+
+
+class TestSiblingSweepCorrections:
+    """When one sub-query in a turn is flagged+corrected, the corrector is swept
+    across sibling sub-queries that ran SQL but weren't flagged (the critic is
+    inconsistent across siblings), so each buggy part gets a correction."""
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_unflagged_sibling_gets_correction(self, mock_prop):
+        mock_prop.return_value = _correction(corrected_sql="SELECT fixed FROM y")
+        flagged = _warn_sub()
+        flagged.suggested_correction = _correction(corrected_sql="SELECT flagged_fix FROM x")
+        unflagged = AnswerResult(
+            text_summary="0 cases", sparql_queries_used=["SELECT buggy FROM y"],
+        )
+        pairs = [(_drug_count_cq(), flagged), (_drug_count_cq(), unflagged)]
+        _pipeline()._sweep_sibling_corrections(pairs)
+        assert mock_prop.called
+        assert unflagged.suggested_correction is not None
+        assert unflagged.suggested_correction.corrected_sql == "SELECT fixed FROM y"
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_no_flagged_sibling_no_sweep(self, mock_prop):
+        a = AnswerResult(text_summary="x", sparql_queries_used=["SELECT 1"])
+        b = AnswerResult(text_summary="y", sparql_queries_used=["SELECT 2"])
+        _pipeline()._sweep_sibling_corrections([(_drug_count_cq(), a), (_drug_count_cq(), b)])
+        assert not mock_prop.called
+
+    @patch("src.conversational.orchestrator.propose_sql_correction")
+    def test_disabled_flag_no_sweep(self, mock_prop):
+        flagged = _warn_sub()
+        flagged.suggested_correction = _correction()
+        unflagged = AnswerResult(text_summary="0", sparql_queries_used=["SELECT 1"])
+        _pipeline(enable_sql_correction=False)._sweep_sibling_corrections(
+            [(_drug_count_cq(), flagged), (_drug_count_cq(), unflagged)],
+        )
+        assert not mock_prop.called
+
+    @patch("src.conversational.orchestrator.propose_sql_correction", return_value=_correction())
+    def test_sibling_without_sql_skipped(self, mock_prop):
+        flagged = _warn_sub()
+        flagged.suggested_correction = _correction()
+        no_sql = AnswerResult(text_summary="text only")  # no sparql_queries_used
+        _pipeline()._sweep_sibling_corrections(
+            [(_drug_count_cq(), flagged), (_drug_count_cq(), no_sql)],
+        )
+        assert not mock_prop.called
+        assert no_sql.suggested_correction is None

@@ -37,6 +37,7 @@ from src.graph_construction.terminology import DrugCategoryResolver
 from src.conversational.models import (
     AnswerResult,
     CompetencyQuestion,
+    CriticVerdict,
     DecompositionResult,
     ExtractionConfig,
     OutlierReport,
@@ -458,6 +459,9 @@ class ConversationalPipeline:
                 graph_cqs: list[tuple[int, CompetencyQuestion]] = []
                 graph_extractions: list = []
                 fastpath_sparql: list[str] = []
+                # (cq, sub) for each SQL-fast sub-CQ, for the post-turn sibling
+                # correction sweep (the critic flags siblings inconsistently).
+                sqlfast_pairs: list[tuple[CompetencyQuestion, AnswerResult]] = []
 
                 for idx, cq in enumerate(decomp.competency_questions):
                     plan = self._planner.classify(cq)
@@ -471,6 +475,7 @@ class ConversationalPipeline:
                         sub = self._contextualize(sub, cq)
                         sub_answers[idx] = sub
                         fastpath_sparql.extend(sql_used)  # stash for aggregation
+                        sqlfast_pairs.append((cq, sub))
                     elif plan == QueryPlan.CAUSAL:
                         # Phase 8a: wired to a stub that returns a
                         # well-shaped but NaN-valued CausalEffectResult so
@@ -538,6 +543,11 @@ class ConversationalPipeline:
                         sub = self._critique(sub, cq)
                         sub = self._contextualize(sub, cq)
                         sub_answers[idx] = sub
+
+            # Cross-check: when one SQL sub-query was flagged + corrected, sweep
+            # the corrector across sibling sub-queries the critic inconsistently
+            # left unflagged, so each buggy part of a multi-part turn gets a fix.
+            self._sweep_sibling_corrections(sqlfast_pairs)
 
             # All slots filled now (planner produces exactly one plan per CQ).
             completed: list[AnswerResult] = [a for a in sub_answers if a is not None]
@@ -1271,26 +1281,23 @@ class ConversationalPipeline:
         sub.suggested_correction = correction
         return sub
 
-    def run_corrected_query(self, correction: SqlCorrection) -> AnswerResult:
-        """Execute a critic-proposed corrected query and re-explain the result.
-
-        Invoked from the UI when the user clicks "Run corrected query". Opens a
-        backend (same data source as the pipeline), runs the corrected SQL with
-        no bound parameters (literals are inlined), zips rows into dicts via the
-        result column names, and re-explains with the answerer. The corrected
-        answer is re-critiqued and may itself carry a fresh
-        ``suggested_correction`` (the chain is bounded by user clicks — each
-        re-run is one explicit action).
-
-        Execution failures degrade to an ``AnswerResult(error=True)`` so a
-        broken corrected query surfaces a message instead of crashing the app.
-        """
-        cq = CompetencyQuestion(
+    @staticmethod
+    def _cq_from_correction(correction: SqlCorrection) -> CompetencyQuestion:
+        """Reconstruct the minimal CQ a correction needs to be re-explained."""
+        return CompetencyQuestion(
             original_question=correction.original_question,
             return_type=correction.return_type or ReturnType.TEXT_AND_TABLE,
             interpretation_summary=correction.interpretation_summary,
             aggregation=correction.aggregation,
         )
+
+    def _execute_one_correction(self, correction: SqlCorrection) -> AnswerResult:
+        """Execute a single corrected query, re-explain, re-critique, and offer a
+        further correction. Does NOT record conversation history — the caller
+        (``run_corrected_query`` / ``run_corrected_queries``) decides what to
+        remember (one combined turn for a batch). Execution failures degrade to
+        an ``AnswerResult(error=True)``."""
+        cq = self._cq_from_correction(correction)
         try:
             with self._open_backend() as backend:
                 rows, columns = backend.execute_with_columns(
@@ -1305,7 +1312,7 @@ class ConversationalPipeline:
                 "corrected-query execution failed: %s (%s)",
                 exc, type(exc).__name__,
             )
-            answer = AnswerResult(
+            return AnswerResult(
                 text_summary=(
                     "The corrected query could not be executed: "
                     f"{exc}. You can refine the question and try again."
@@ -1314,15 +1321,113 @@ class ConversationalPipeline:
                 sparql_queries_used=[correction.corrected_sql],
                 interpretation_summary=correction.interpretation_summary,
             )
-            return answer
 
         answer.interpretation_summary = correction.interpretation_summary
         answer = self._critique(answer, cq)
         answer = self._maybe_suggest_correction(
             answer, cq, [correction.corrected_sql], None,
         )
-        self._remember(cq, answer)
         return answer
+
+    def run_corrected_query(self, correction: SqlCorrection) -> AnswerResult:
+        """Execute a single critic-proposed corrected query and re-explain it.
+
+        Opens a backend (same data source as the pipeline), runs the corrected
+        SQL with no bound parameters (literals are inlined), zips rows into dicts
+        via the result column names, re-explains with the answerer, and
+        re-critiques (the corrected answer may itself carry a fresh
+        ``suggested_correction`` — the chain is bounded by user clicks).
+        """
+        answer = self._execute_one_correction(correction)
+        # An errored re-run is a dead end, not conversation context — don't
+        # record it (mirrors the original early-return-on-error behavior).
+        if not answer.error:
+            self._remember(self._cq_from_correction(correction), answer)
+        return answer
+
+    def run_corrected_queries(
+        self, corrections: list[SqlCorrection],
+    ) -> AnswerResult:
+        """Run ALL corrected queries for a turn at once and combine the results.
+
+        For a multi-part question whose sub-queries were each corrected, the UI's
+        single "Run corrected queries" button passes every suggested correction
+        here. Each runs independently; the corrected parts are wrapped into one
+        combined multi-part ``AnswerResult`` (sub_answers) so the user sees the
+        whole corrected turn in one action — mirroring the original multi-part
+        turn. A single correction returns its answer directly (no wrapper).
+        """
+        valid = [c for c in (corrections or []) if c is not None]
+        if not valid:
+            return AnswerResult(
+                text_summary="No corrected queries to run.", error=True,
+            )
+        if len(valid) == 1:
+            return self.run_corrected_query(valid[0])
+
+        subs = [self._execute_one_correction(c) for c in valid]
+        combined = AnswerResult(
+            text_summary=f"Re-ran {len(subs)} corrected queries:",
+            sub_answers=subs,
+            sparql_queries_used=[c.corrected_sql for c in valid],
+        )
+        self._remember(self._cq_from_correction(valid[0]), combined)
+        return combined
+
+    def _sweep_sibling_corrections(
+        self, cq_sub_pairs: list[tuple[CompetencyQuestion, AnswerResult]],
+    ) -> None:
+        """Propagate correction-checking across sibling sub-queries of a turn.
+
+        The post-execution critic is inconsistent across siblings — on a
+        "X vs non-X" turn it often flags one part's implausible result but not
+        the other, even though both share the same query bug. When ANY sub-query
+        in the turn is flagged (carries a ``suggested_correction``), run the
+        corrector on every OTHER sub-query that ran SQL but wasn't flagged,
+        handing it the flagged sibling's concern as the bug to look for. The
+        corrector self-gates (``fixable=false`` → no correction), so genuinely
+        correct siblings are left alone. Mutates the sub-answers in place.
+        """
+        if not self._enable_sql_correction or len(cq_sub_pairs) < 2:
+            return
+        flagged = [
+            (c, s) for c, s in cq_sub_pairs if s.suggested_correction is not None
+        ]
+        if not flagged:
+            return
+        sibling_concern = next(
+            (
+                s.critic_verdict.concern
+                for c, s in flagged
+                if s.critic_verdict and s.critic_verdict.concern
+            ),
+            "a sibling sub-query in this turn returned an implausible result",
+        )
+        for cq, sub in cq_sub_pairs:
+            if sub.suggested_correction is not None:
+                continue  # already flagged + corrected
+            if not sub.sparql_queries_used:
+                continue  # no SQL to correct (graph/text-only sub-answer)
+            original_sql = sub.sparql_queries_used[-1]
+            synth = CriticVerdict(
+                plausible=False,
+                severity="warn",
+                concern=(
+                    f"A sibling sub-query in the same turn was flagged: "
+                    f"{sibling_concern} Check whether THIS sub-query's result is "
+                    "wrong for the same reason (e.g. the same label-LIKE, "
+                    "counting, or grounding bug) and fix it; if this query is "
+                    "actually correct, set fixable=false."
+                ),
+            )
+            self._progress(PROGRESS_DRAFTING_CORRECTION)
+            corr = propose_sql_correction(
+                self._client, cq, sub, synth, original_sql,
+            )
+            if corr is not None and (
+                corr.corrected_sql.strip() != (original_sql or "").strip()
+            ):
+                sub.suggested_correction = corr
 
     def _derived_formulas_for_cq(self, cq) -> dict:
         """Resolve every ``derived_value`` filter in a CQ to a grounded

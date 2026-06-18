@@ -244,6 +244,19 @@ def _render_outlier_panel(report, *, key: str, include: bool) -> None:
             )
 
 
+def _collect_corrections(answer: AnswerResult) -> list:
+    """Every suggested correction in a turn: the answer's own plus each
+    sub-answer's. A multi-part turn's corrections live on the sub-answers, so the
+    turn-level "run" button batches all of them into a single re-run."""
+    out = []
+    if answer.suggested_correction is not None:
+        out.append(answer.suggested_correction)
+    for sub in (answer.sub_answers or []):
+        if sub.suggested_correction is not None:
+            out.append(sub.suggested_correction)
+    return out
+
+
 def _render_answer(
     answer: AnswerResult, *, is_sub: bool = False, key_prefix: str = "msg",
 ) -> None:
@@ -346,15 +359,12 @@ def _render_answer(
     if answer.suggested_correction is not None:
         corr = answer.suggested_correction
         with st.expander(
-            "🔧 Suggested corrected query — review and run", expanded=True,
+            "🔧 Suggested corrected query — review", expanded=True,
         ):
             st.markdown(corr.rationale)
             st.code(corr.corrected_sql, language="sql")
-            if st.button(
-                "▶ Run corrected query", key=f"{key_prefix}_run_correction",
-            ):
-                st.session_state["pending_correction"] = corr
-                st.rerun()
+        # The run button is rendered ONCE at the turn level (see below) so a
+        # multi-part turn batches every part's correction into one re-run.
 
     # Biological-impossibility screening: when outliers were removed, the
     # default view is the *clean* table; a live checkbox flips to the
@@ -411,6 +421,22 @@ def _render_answer(
                     sub, is_sub=True, key_prefix=f"{key_prefix}_sub{i}",
                 )
 
+    # Turn-level "run corrections" button (top level only): ONE button that
+    # re-runs every suggested correction in the turn — the answer's own plus one
+    # per flagged sub-part — and renders the corrected parts together. The button
+    # stashes the list and reruns; the page-top handler executes them.
+    if not is_sub:
+        corrections = _collect_corrections(answer)
+        if corrections:
+            n = len(corrections)
+            label = (
+                "▶ Run corrected query" if n == 1
+                else f"▶ Run all {n} corrected queries"
+            )
+            if st.button(label, key=f"{key_prefix}_run_correction"):
+                st.session_state["pending_corrections"] = corrections
+                st.rerun()
+
     # Query-details expander only at the top level; aggregated across sub-CQs.
     if not is_sub and (answer.graph_stats or answer.sparql_queries_used):
         with st.expander("Query Details"):
@@ -424,24 +450,30 @@ def _render_answer(
 # Pending corrected-query run
 # ---------------------------------------------------------------------------
 
-# When the user clicks "Run corrected query" under a flagged answer, the button
-# stashes the SqlCorrection here and reruns. We pop it (pop, not read — else
-# every later rerun would re-run it), execute the corrected query, and append
-# the result as a new turn so the history loop below renders it. No inline
-# render → no double-render; the corrected answer may itself carry a fresh
-# suggested_correction, rendered uniformly.
-_pending_correction = st.session_state.pop("pending_correction", None)
-if _pending_correction is not None and st.session_state.pipeline is not None:
-    st.session_state.messages.append(
-        {"role": "user", "content": "▶ Run the corrected query"}
+# When the user clicks the turn-level "Run corrected quer{y/ies}" button, it
+# stashes the list of corrections here and reruns. We pop it (pop, not read —
+# else every later rerun would re-run it), execute ALL of them via
+# ``run_corrected_queries`` (which combines multi-part results), and append the
+# result as one new turn so the history loop below renders it. No inline render →
+# no double-render; the corrected turn may itself carry fresh corrections,
+# rendered (and re-batched) uniformly.
+_pending_corrections = st.session_state.pop("pending_corrections", None)
+if _pending_corrections and st.session_state.pipeline is not None:
+    _n = len(_pending_corrections)
+    _label = (
+        "▶ Run the corrected query" if _n == 1
+        else f"▶ Run the {_n} corrected queries"
     )
-    with st.spinner("Running the corrected query..."):
+    st.session_state.messages.append({"role": "user", "content": _label})
+    with st.spinner(
+        "Running the corrected quer{}...".format("y" if _n == 1 else "ies")
+    ):
         _corr_started = time.monotonic()
-        _corrected = st.session_state.pipeline.run_corrected_query(
-            _pending_correction
+        _corrected = st.session_state.pipeline.run_corrected_queries(
+            _pending_corrections
         )
     log_query_run(
-        "▶ Run the corrected query",
+        _label,
         duration_s=time.monotonic() - _corr_started,
         answer=_corrected,
     )

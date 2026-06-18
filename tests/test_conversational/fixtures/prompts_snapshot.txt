@@ -226,6 +226,22 @@ diagnosis filter, and never drop the threshold:
   "measurement":"GCS"} (omit loinc_code — GCS grounds to the derived TOTAL score,
   not a single labitem). If the cohort is "severe traumatic brain injury" AND a GCS
   cutoff, add BOTH a diagnosis filter (S06) and the GCS vital_value filter.
+  COMPUTED-INDEX QUALIFIERS (general rule for ANY calculable quantity) — a
+  condition or cohort named with a CALCULATED clinical index is the base
+  condition PLUS a derived_value threshold on that index — NEVER a standalone
+  diagnosis, and NEVER an assumption that the index is one stored value. The
+  index is a NUMBER computed from component labs; its formula is looked up from
+  the literature downstream (e.g. anion gap = Na − (Cl + HCO₃)). So decompose
+  "high anion gap metabolic acidosis" → a metabolic-acidosis diagnosis filter
+  PLUS {"field":"derived_value","operator":">","value":"<placeholder>",
+  "measurement":"anion gap"}; treat "elevated osmolal gap", "low P/F (PaO2/FiO2)
+  ratio", "high corrected calcium", "MELD ≥ 15", etc. the same way. NEVER match
+  the calculated qualifier against a diagnosis long_title and NEVER assume a
+  single stored labitem for it. This applies to ANY computable index, including
+  ones not listed here: if a quantity has a known clinical formula, emit a
+  derived_value filter with ``measurement`` = the index name and let the formula
+  be resolved downstream (a real stored lab, when one exists, is still fine via
+  lab_value — but a *named calculation* must never collapse to a diagnosis).
   Common LOINCs: platelet count 777-3, mean arterial pressure 8478-0, heart rate
   8867-4, systolic blood pressure 8480-6, creatinine 2160-0, lactate 2524-7. A
   "proportion of patients who … and their mortality" question is an ``outcome``

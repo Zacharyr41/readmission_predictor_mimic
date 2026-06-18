@@ -303,3 +303,81 @@ class TestSupportedFilterFields:
             assert field in DECOMPOSITION_SYSTEM_PROMPT, (
                 f"Supported filter field '{field}' missing from decomposition prompt"
             )
+
+
+class TestComputedIndexRouting:
+    """A condition qualified by a CALCULATED clinical index ("high anion gap
+    metabolic acidosis", "elevated osmolal gap", "low P/F ratio") must decompose
+    into the base condition + a value-threshold filter on the *computed* index —
+    NOT a single diagnosis whose long_title is matched by LIKE, and NOT an
+    assumption that the index exists as one stored value. The fix is a GENERAL
+    principle (any computable index), not an anion-gap special case."""
+
+    def test_prompt_teaches_general_computed_index_principle(self):
+        from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT as P
+        low = P.lower()
+        # Routes to a value-threshold filter, not a diagnosis.
+        assert "derived_value" in P
+        # Teaches the index is COMPUTED from component labs (not a stored value
+        # nor a diagnosis title).
+        assert "computed from" in low or "calculated from" in low
+        # The canonical computable example is present (derived_formula.py uses it)...
+        assert "anion gap" in low
+        # ...but the guidance is explicitly GENERAL — applies to indices not
+        # listed, so it can't be overfit to anion gap.
+        assert (
+            "any computable" in low
+            or "any computed" in low
+            or "not listed" in low
+            or "any derived" in low
+        )
+
+
+@pytest.mark.parametrize(
+    "question,index_term",
+    [
+        ("Among ICU admissions, how many had a high anion gap metabolic acidosis?", "anion gap"),
+        ("How many ICU admissions had an elevated osmolal gap?", "osmolal gap"),
+    ],
+)
+def test_live_computed_index_condition_routes_to_value_threshold(question, index_term):
+    """LIVE (gated): the real decomposer must route a computable-index-qualified
+    condition to a value-threshold measurement, not a diagnosis named after the
+    index. Two distinct indices guard against overfitting to anion gap. Skipped
+    unless ANTHROPIC_API_KEY is set."""
+    import os
+    from pathlib import Path
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        pytest.skip("ANTHROPIC_API_KEY not set")
+
+    import anthropic
+
+    from src.conversational.decomposer import decompose_question
+
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    cqs = decompose_question(client, question).competency_questions
+
+    diag_names = [
+        c.name.lower()
+        for cq in cqs
+        for c in cq.clinical_concepts
+        if c.concept_type == "diagnosis"
+    ]
+    assert not any(index_term in n for n in diag_names), (
+        f"{index_term!r} was modeled as a diagnosis concept: {diag_names}"
+    )
+
+    measurements = [
+        (f.measurement or "").lower()
+        for cq in cqs
+        for f in cq.patient_filters
+        if getattr(f, "measurement", None)
+    ]
+    assert any(index_term in m for m in measurements), (
+        f"{index_term!r} not routed to a value-threshold measurement; "
+        f"measurements={measurements}"
+    )
