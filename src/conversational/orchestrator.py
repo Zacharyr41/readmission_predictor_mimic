@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import uuid
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -47,6 +48,7 @@ from src.conversational.models import (
 from src.conversational.outliers import BiologicalLimits, BiologicalLimitsResolver
 from src.conversational.operations import get_default_registry
 from src.conversational.planner import QueryPlan, QueryPlanner
+from src.conversational.decision_log import log_routing_decision
 from src.conversational.health_evidence.mcp_client import (
     McpClient,
     McpServerConfig,
@@ -450,6 +452,12 @@ class ConversationalPipeline:
                     per_concept.append(resolved)
                 per_cq_resolved.append(per_concept)
 
+            # One correlation id per turn so the routing decision log can group
+            # all sub-CQs of a turn (a turn can mix SQL/graph routes). Generated
+            # after the clarify short-circuit above — a clarify turn makes no
+            # routing decision, so it logs nothing.
+            turn_id = uuid.uuid4().hex
+
             # Open one backend for the whole turn so SQL fast-path and
             # graph-path extractions share the same connection/client.
             with self._open_backend() as backend:
@@ -464,7 +472,15 @@ class ConversationalPipeline:
                 sqlfast_pairs: list[tuple[CompetencyQuestion, AnswerResult]] = []
 
                 for idx, cq in enumerate(decomp.competency_questions):
-                    plan = self._planner.classify(cq)
+                    decision = self._planner.explain(cq)
+                    plan = decision.plan
+                    # D0 observability: record which route this sub-CQ took and
+                    # *why* (the §4.1 rule that fired). Best-effort; never raises.
+                    log_routing_decision(
+                        cq, decision, turn_id=turn_id, cq_index=idx,
+                        n_cqs=len(decomp.competency_questions),
+                        is_multi=decomp.is_multi, question=question,
+                    )
                     if plan == QueryPlan.SQL_FAST:
                         self._progress(PROGRESS_RUNNING_QUERY)
                         sub, sql_used, _fb = self._run_with_critic_retry(

@@ -191,7 +191,24 @@ def test_filter_falls_back_to_like_only_when_omophub_unavailable(
     """Graceful degradation: when OMOPHub returns ``unavailable``, the
     filter compiler skips the IN-list and emits LIKE-only — same as the
     pre-Inc-9 behavior. The pipeline must keep answering even when the
-    MCP is unreachable."""
+    MCP is unreachable.
+
+    This exercises the *Tier-2* (OMOPHub ``icd_autocode``) grounding path, so
+    the diagnosis term must be one the offline *Tier-1* cohort registry
+    (``data/mappings/clinical_cohorts.json``) does NOT cover — otherwise it
+    grounds to ICD codes offline regardless of the MCP and the fallback never
+    runs. ``sarcoidosis`` is deliberately a non-registered diagnosis; the
+    precondition is asserted below so a future registry addition fails loudly
+    here instead of silently re-routing this test through Tier 1."""
+    from src.conversational.health_evidence.cohorts import resolve_cohort_name
+
+    term = "sarcoidosis"
+    assert resolve_cohort_name(term) is None, (
+        f"{term!r} is now a registered cohort (Tier 1), so this test no longer "
+        "exercises the OMOPHub-unavailable fallback — pick another non-cohort "
+        "diagnosis term."
+    )
+
     monkeypatch.setattr(
         cr, "icd_autocode",
         lambda *a, **kw: {"status": "unavailable", "error": "MCP timeout"},
@@ -199,12 +216,12 @@ def test_filter_falls_back_to_like_only_when_omophub_unavailable(
     )
 
     cq = CompetencyQuestion(
-        original_question="Mean lactate in sepsis (MCP down)",
+        original_question=f"Mean lactate in {term} (MCP down)",
         clinical_concepts=[
             ClinicalConcept(name="lactate", concept_type="biomarker"),
         ],
         patient_filters=[
-            PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
+            PatientFilter(field="diagnosis", operator="contains", value=term),
         ],
         aggregation="mean", scope="cohort",
     )
@@ -213,7 +230,7 @@ def test_filter_falls_back_to_like_only_when_omophub_unavailable(
         resolved_names=["lactate"],
         enable_mcp_grounding=True,
     )
-    _record_sql(reporter, query, "Mean lactate in sepsis (OMOPHub unavailable — graceful degradation)")
+    _record_sql(reporter, query, f"Mean lactate in {term} (OMOPHub unavailable — graceful degradation)")
 
     no_in_clause = "di.icd_code IN (" not in query.sql
     reporter.add_assertion(
@@ -222,7 +239,7 @@ def test_filter_falls_back_to_like_only_when_omophub_unavailable(
     )
     assert no_in_clause
 
-    has_like_param = "%sepsis%" in query.params
+    has_like_param = f"%{term}%" in query.params
     reporter.add_assertion(
         "LIKE branch params still present (back-compat)",
         has_like_param,

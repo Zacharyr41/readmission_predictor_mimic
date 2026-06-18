@@ -1,0 +1,46 @@
+{
+  "name": "count_ischemic_stroke",
+  "question": "How many patients had an ischemic stroke?",
+  "cq": {
+    "original_question": "How many patients had an ischemic stroke?",
+    "clinical_concepts": [
+      {
+        "name": "ischemic stroke",
+        "concept_type": "diagnosis",
+        "attributes": [],
+        "resolved_from_category": false,
+        "loinc_code": null,
+        "icd_codes": null,
+        "culture_status": null,
+        "primary_only": false
+      }
+    ],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "count",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "split_condition": null,
+    "interpretation_summary": null,
+    "clarifying_question": null,
+    "intervention_set": null,
+    "outcome_vector": null,
+    "aggregation_spec": null,
+    "query_patient_covariates": null,
+    "alpha": 0.05,
+    "mode": "associative",
+    "estimator_family": "t_learner",
+    "uncertainty_method": "bootstrap",
+    "uncertainty_reps": 200,
+    "random_state": 0,
+    "similarity_spec": null
+  },
+  "desired_plan": "sql_fast",
+  "current_plan": "sql_fast",
+  "tags": [
+    "fast_path",
+    "diagnosis"
+  ],
+  "notes": "Diversify cohorts beyond sepsis."
+}

@@ -82,6 +82,9 @@ Thumbs.db
 
 # Logs
 *.log
+# Append-only activity logs (dashboard queries + routing decisions). Generated
+# at runtime; never committed.
+logs/
 
 # uv lock file
 uv.lock

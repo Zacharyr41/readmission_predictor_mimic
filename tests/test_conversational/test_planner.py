@@ -205,6 +205,28 @@ def test_graph_path_cases_route_to_graph(cq):
 
 
 # ---------------------------------------------------------------------------
+# 2b. classify() is a faithful plan-only view of explain()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("cq", _FAST_PATH_CASES + _GRAPH_PATH_CASES)
+def test_classify_equals_explain_plan(cq):
+    """``classify`` is a thin wrapper that returns ``explain(cq).plan``. Pin
+    that contract so a future edit to ``explain`` can't silently desync the two
+    (the decision log + audit read ``explain``; the orchestrator reads its
+    ``.plan``). Also confirm the decision carries a reason whose ``rule`` is a
+    real §4.1 row."""
+    from src.conversational.planner import QueryPlanner, RoutingReason
+
+    planner = QueryPlanner()
+    decision = planner.explain(cq)
+    assert planner.classify(cq) == decision.plan
+    assert isinstance(decision.reason, RoutingReason)
+    assert 1 <= decision.rule <= 14
+    assert decision.detail
+
+
+# ---------------------------------------------------------------------------
 # 4. Registry-driven: coverage expands with new registrations
 # ---------------------------------------------------------------------------
 
@@ -279,6 +301,30 @@ class TestClassificationIsDeterministic:
             cq = CompetencyQuestion.model_validate(expected_cq_dict)
             # Two calls should agree; classify() must be pure.
             assert planner.classify(cq) == planner.classify(cq)
+
+    def test_decomposer_cases_with_expected_plan_are_pinned(self):
+        """Decomposer fixtures may carry an optional ``expected_plan`` key that
+        pins the route their post-processed CQ must take. This exercises the
+        decomposer→planner seam with *real* decomposer output (vs. the
+        hand-built CQs in the routing corpus). Fixtures without the key are
+        unaffected (the loader ignores unknown keys)."""
+        from tests.test_conversational.conftest import load_decomposer_cases
+        from src.conversational.planner import QueryPlan, QueryPlanner
+
+        planner = QueryPlanner()
+        pinned = 0
+        for param in load_decomposer_cases():
+            case = param.values[0]
+            if "expected_plan" not in case:
+                continue
+            cq = CompetencyQuestion.model_validate(case["expected_cq"])
+            expected = QueryPlan(case["expected_plan"])
+            assert planner.classify(cq) == expected, (
+                f"{case.get('name')!r}: expected_plan={expected}, "
+                f"got {planner.classify(cq)}"
+            )
+            pinned += 1
+        assert pinned >= 1, "no decomposer case carries expected_plan yet"
 
 
 # ---------------------------------------------------------------------------

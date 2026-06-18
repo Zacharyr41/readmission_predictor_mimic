@@ -12,5 +12,6 @@
     "scope": "cohort",
     "comparison_field": null
   },
+  "expected_plan": "graph",
   "tags": ["cohort", "biomarker", "filter:diagnosis", "temporal"]
 }

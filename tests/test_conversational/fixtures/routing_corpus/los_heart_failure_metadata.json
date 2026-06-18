@@ -1,0 +1,45 @@
+{
+  "name": "los_heart_failure_metadata",
+  "question": "What is the average length of stay for heart failure patients?",
+  "cq": {
+    "original_question": "What is the average length of stay for heart failure patients?",
+    "clinical_concepts": [],
+    "temporal_constraints": [],
+    "patient_filters": [
+      {
+        "field": "diagnosis",
+        "operator": "contains",
+        "value": "heart failure",
+        "measurement": null,
+        "loinc_code": null,
+        "sub_filters": null,
+        "resolved_icd_codes": null
+      }
+    ],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "split_condition": null,
+    "interpretation_summary": null,
+    "clarifying_question": null,
+    "intervention_set": null,
+    "outcome_vector": null,
+    "aggregation_spec": null,
+    "query_patient_covariates": null,
+    "alpha": 0.05,
+    "mode": "associative",
+    "estimator_family": "t_learner",
+    "uncertainty_method": "bootstrap",
+    "uncertainty_reps": 200,
+    "random_state": 0,
+    "similarity_spec": null
+  },
+  "desired_plan": "sql_fast",
+  "current_plan": "graph",
+  "tags": [
+    "known_misroute",
+    "metadata"
+  ],
+  "notes": "\u00a76.3 / Direction C: metadata-only LOS has a fast-path compiler branch; rule 5 keeps it on graph 'for now'."
+}

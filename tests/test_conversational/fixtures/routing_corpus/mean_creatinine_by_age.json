@@ -1,0 +1,46 @@
+{
+  "name": "mean_creatinine_by_age",
+  "question": "Compare average creatinine across age groups.",
+  "cq": {
+    "original_question": "Compare average creatinine across age groups.",
+    "clinical_concepts": [
+      {
+        "name": "creatinine",
+        "concept_type": "biomarker",
+        "attributes": [],
+        "resolved_from_category": false,
+        "loinc_code": null,
+        "icd_codes": null,
+        "culture_status": null,
+        "primary_only": false
+      }
+    ],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "comparison",
+    "comparison_field": "age",
+    "split_condition": null,
+    "interpretation_summary": null,
+    "clarifying_question": null,
+    "intervention_set": null,
+    "outcome_vector": null,
+    "aggregation_spec": null,
+    "query_patient_covariates": null,
+    "alpha": 0.05,
+    "mode": "associative",
+    "estimator_family": "t_learner",
+    "uncertainty_method": "bootstrap",
+    "uncertainty_reps": 200,
+    "random_state": 0,
+    "similarity_spec": null
+  },
+  "desired_plan": "sql_fast",
+  "current_plan": "sql_fast",
+  "tags": [
+    "fast_path",
+    "comparison"
+  ],
+  "notes": "Age axis."
+}

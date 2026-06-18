@@ -1,0 +1,56 @@
+{
+  "name": "peak_troponin_mi",
+  "question": "What is the peak troponin in myocardial infarction patients?",
+  "cq": {
+    "original_question": "What is the peak troponin in myocardial infarction patients?",
+    "clinical_concepts": [
+      {
+        "name": "troponin",
+        "concept_type": "biomarker",
+        "attributes": [],
+        "resolved_from_category": false,
+        "loinc_code": null,
+        "icd_codes": null,
+        "culture_status": null,
+        "primary_only": false
+      }
+    ],
+    "temporal_constraints": [],
+    "patient_filters": [
+      {
+        "field": "diagnosis",
+        "operator": "contains",
+        "value": "myocardial infarction",
+        "measurement": null,
+        "loinc_code": null,
+        "sub_filters": null,
+        "resolved_icd_codes": null
+      }
+    ],
+    "aggregation": "max",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "split_condition": null,
+    "interpretation_summary": null,
+    "clarifying_question": null,
+    "intervention_set": null,
+    "outcome_vector": null,
+    "aggregation_spec": null,
+    "query_patient_covariates": null,
+    "alpha": 0.05,
+    "mode": "associative",
+    "estimator_family": "t_learner",
+    "uncertainty_method": "bootstrap",
+    "uncertainty_reps": 200,
+    "random_state": 0,
+    "similarity_spec": null
+  },
+  "desired_plan": "sql_fast",
+  "current_plan": "sql_fast",
+  "tags": [
+    "fast_path",
+    "biomarker"
+  ],
+  "notes": "Peak (MAX) with a diagnosis filter."
+}

@@ -12,5 +12,6 @@
     "scope": "cohort",
     "comparison_field": null
   },
+  "expected_plan": "sql_fast",
   "tags": ["cohort", "diagnosis", "count", "return_type_text_preserved"]
 }

@@ -1,0 +1,53 @@
+{
+  "name": "lactate_first_24h_admission",
+  "question": "What is the mean lactate in the first 24 hours of admission?",
+  "cq": {
+    "original_question": "What is the mean lactate in the first 24 hours of admission?",
+    "clinical_concepts": [
+      {
+        "name": "lactate",
+        "concept_type": "biomarker",
+        "attributes": [],
+        "resolved_from_category": false,
+        "loinc_code": null,
+        "icd_codes": null,
+        "culture_status": null,
+        "primary_only": false
+      }
+    ],
+    "temporal_constraints": [
+      {
+        "relation": "within",
+        "reference_event": "admission",
+        "time_window": "24 hours"
+      }
+    ],
+    "patient_filters": [],
+    "aggregation": "mean",
+    "return_type": "text_and_table",
+    "scope": "cohort",
+    "comparison_field": null,
+    "split_condition": null,
+    "interpretation_summary": null,
+    "clarifying_question": null,
+    "intervention_set": null,
+    "outcome_vector": null,
+    "aggregation_spec": null,
+    "query_patient_covariates": null,
+    "alpha": 0.05,
+    "mode": "associative",
+    "estimator_family": "t_learner",
+    "uncertainty_method": "bootstrap",
+    "uncertainty_reps": 200,
+    "random_state": 0,
+    "similarity_spec": null
+  },
+  "desired_plan": "sql_fast",
+  "current_plan": "graph",
+  "tags": [
+    "known_misroute",
+    "temporal",
+    "window"
+  ],
+  "notes": "\u00a76.1: 'first 24h' relative to admission is a time-bound filter, not Allen."
+}

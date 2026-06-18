@@ -1,0 +1,34 @@
+{
+  "name": "patient_similarity_query",
+  "question": "Find patients similar to a 68-year-old with acute kidney injury.",
+  "cq": {
+    "original_question": "Find patients similar to a 68-year-old with acute kidney injury.",
+    "clinical_concepts": [],
+    "temporal_constraints": [],
+    "patient_filters": [],
+    "aggregation": null,
+    "return_type": "text_and_table",
+    "scope": "patient_similarity",
+    "comparison_field": null,
+    "split_condition": null,
+    "interpretation_summary": null,
+    "clarifying_question": null,
+    "intervention_set": null,
+    "outcome_vector": null,
+    "aggregation_spec": null,
+    "query_patient_covariates": null,
+    "alpha": 0.05,
+    "mode": "associative",
+    "estimator_family": "t_learner",
+    "uncertainty_method": "bootstrap",
+    "uncertainty_reps": 200,
+    "random_state": 0,
+    "similarity_spec": null
+  },
+  "desired_plan": "similarity",
+  "current_plan": "similarity",
+  "tags": [
+    "similarity"
+  ],
+  "notes": "Similarity scope short-circuits (rule 1)."
+}

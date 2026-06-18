@@ -34,6 +34,7 @@ Everything else falls through to the graph path, which is unchanged.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 
 from src.conversational.models import CompetencyQuestion
@@ -73,6 +74,65 @@ _SQL_FAST_CONCEPT_TYPES: frozenset[str] = frozenset({
 })
 
 
+class RoutingReason(Enum):
+    """*Why* the planner chose a plan — one member per distinct ``return`` leg of
+    the :meth:`QueryPlanner.explain` cascade.
+
+    These map 1:1 to the rule table in ``querytriagesystem.md`` §4.1 (the
+    ``rule`` attribute is that table's row number). Note that rule 3
+    (``event_ordering``) and rule 12 (``condition`` axis) each have *two* legs —
+    an SQL_FAST leg and a GRAPH leg — so there are 16 reasons over 14 rules.
+
+    The enum *value* is a stable snake_case string code, safe to serialize into
+    the decision log; ``RoutingReason.X.rule`` is the numeric rule.
+    """
+
+    SCOPE_PATIENT_SIMILARITY = ("scope_patient_similarity", 1)
+    CAUSAL_WELL_FORMED = ("causal_well_formed", 2)
+    EVENT_ORDERING_MULTI_CONCEPT = ("event_ordering_multi_concept", 3)
+    EVENT_ORDERING_UNDERSPECIFIED = ("event_ordering_underspecified", 3)
+    TEMPORAL_CONSTRAINTS_PRESENT = ("temporal_constraints_present", 4)
+    NO_CLINICAL_CONCEPTS = ("no_clinical_concepts", 5)
+    MULTI_CONCEPT = ("multi_concept", 6)
+    CONCEPT_TYPE_UNSUPPORTED = ("concept_type_unsupported", 7)
+    DIAGNOSIS_LIST = ("diagnosis_list", 8)
+    RAW_VALUE_NON_DIAGNOSIS = ("raw_value_non_diagnosis", 9)
+    AGGREGATE_NO_SQL_FN = ("aggregate_no_sql_fn", 10)
+    COMPARISON_NO_FIELD = ("comparison_no_field", 11)
+    CONDITION_SPLIT_MISSING = ("condition_split_missing", 12)
+    CONDITION_SPLIT_PRESENT = ("condition_split_present", 12)
+    COMPARISON_AXIS_UNREGISTERED = ("comparison_axis_unregistered", 13)
+    FALLTHROUGH_SQL_FAST = ("fallthrough_sql_fast", 14)
+
+    rule: int
+
+    def __new__(cls, code: str, rule: int) -> "RoutingReason":
+        obj = object.__new__(cls)
+        obj._value_ = code
+        obj.rule = rule
+        return obj
+
+
+@dataclass(frozen=True)
+class RoutingDecision:
+    """The full result of classifying a CQ: the chosen ``plan`` plus *why*.
+
+    :meth:`QueryPlanner.classify` returns only ``.plan`` for backward
+    compatibility; callers that want the rationale (the decision log, the routing
+    audit) call :meth:`QueryPlanner.explain` and read ``.reason`` / ``.rule`` /
+    ``.detail``. ``rule`` is derived from ``reason`` so the two can never drift.
+    """
+
+    plan: QueryPlan
+    reason: RoutingReason
+    detail: str = ""
+
+    @property
+    def rule(self) -> int:
+        """The ``querytriagesystem.md`` §4.1 rule-table number that fired."""
+        return self.reason.rule
+
+
 class QueryPlanner:
     """Stateless classifier. Inject a custom ``OperationRegistry`` in tests
     that want to observe the widening contract (register a new aggregate →
@@ -84,8 +144,20 @@ class QueryPlanner:
     def classify(self, cq: CompetencyQuestion) -> QueryPlan:
         """Return the plan decision for ``cq``.
 
-        Pure; does not mutate state. Called once per sub-CQ in the
+        Thin plan-only wrapper over :meth:`explain` (which also carries the
+        reason). Pure; does not mutate state. Called once per sub-CQ in the
         orchestrator.
+        """
+        return self.explain(cq).plan
+
+    def explain(self, cq: CompetencyQuestion) -> RoutingDecision:
+        """Return the full routing decision for ``cq`` — the chosen plan *and*
+        the reason it was chosen.
+
+        This is the routing cascade itself; :meth:`classify` is the plan-only
+        wrapper over it. Pure; does not mutate state. The first matching rule
+        wins, so the rule order below is load-bearing (e.g. ``event_ordering``
+        must short-circuit before the temporal veto).
         """
         # Phase 9: standalone similarity CQ. Takes priority over the
         # causal check because a similarity-only CQ has no intervention
@@ -93,7 +165,11 @@ class QueryPlanner:
         # CQ that also carries a similarity_spec stays on CAUSAL
         # (cohort narrowing there, not standalone).
         if cq.scope == "patient_similarity":
-            return QueryPlan.SIMILARITY
+            return RoutingDecision(
+                QueryPlan.SIMILARITY,
+                RoutingReason.SCOPE_PATIENT_SIMILARITY,
+                "scope=patient_similarity",
+            )
 
         # Phase 8a: causal route takes priority when the CQ is well-formed
         # for causal inference. A causal CQ with |I| < 2 is degenerate
@@ -102,7 +178,11 @@ class QueryPlanner:
         if cq.scope == "causal_effect":
             interventions = cq.intervention_set or []
             if len(interventions) >= 2:
-                return QueryPlan.CAUSAL
+                return RoutingDecision(
+                    QueryPlan.CAUSAL,
+                    RoutingReason.CAUSAL_WELL_FORMED,
+                    f"scope=causal_effect with {len(interventions)} interventions",
+                )
             # Degenerate: drop through to the legacy classifier so the
             # existing aggregate / graph branches can still handle it.
 
@@ -113,25 +193,51 @@ class QueryPlanner:
         # ``_compile_event_ordering`` branch handles it; it needs ≥2 concepts.
         if cq.aggregation == "event_ordering":
             if len(cq.clinical_concepts) >= 2:
-                return QueryPlan.SQL_FAST
-            return QueryPlan.GRAPH
+                return RoutingDecision(
+                    QueryPlan.SQL_FAST,
+                    RoutingReason.EVENT_ORDERING_MULTI_CONCEPT,
+                    f"event_ordering over {len(cq.clinical_concepts)} concepts",
+                )
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.EVENT_ORDERING_UNDERSPECIFIED,
+                "event_ordering needs ≥2 concepts",
+            )
 
         # Temporal constraints always require the graph.
         if cq.temporal_constraints:
-            return QueryPlan.GRAPH
+            rels = ", ".join(tc.relation for tc in cq.temporal_constraints)
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.TEMPORAL_CONSTRAINTS_PRESENT,
+                f"temporal_constraints present ({rels})",
+            )
 
         # Metadata-only CQs (mortality_count etc.) have no clinical concepts
         # and no aggregation — the fast-path still handles them via dedicated
         # branches in the compiler. These are narrow; keep them on graph-path
         # for now and widen in a follow-up.
         if not cq.clinical_concepts:
-            return QueryPlan.GRAPH
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.NO_CLINICAL_CONCEPTS,
+                "no clinical_concepts (metadata-only)",
+            )
 
         # Fast-path requires exactly one concept of a supported type.
         if len(cq.clinical_concepts) != 1:
-            return QueryPlan.GRAPH
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.MULTI_CONCEPT,
+                f"{len(cq.clinical_concepts)} concepts (fast-path needs exactly 1)",
+            )
         if cq.clinical_concepts[0].concept_type not in _SQL_FAST_CONCEPT_TYPES:
-            return QueryPlan.GRAPH
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.CONCEPT_TYPE_UNSUPPORTED,
+                f"concept_type={cq.clinical_concepts[0].concept_type!r} "
+                "not in fast-path set",
+            )
 
         # Aggregation must be SQL-compilable. None aggregation + diagnosis
         # concept is a plain patient-list query — also fast-path compilable.
@@ -139,31 +245,63 @@ class QueryPlanner:
             if cq.clinical_concepts[0].concept_type == "diagnosis":
                 # Bare "list patients with X" — handled by the fast-path's
                 # diagnosis-list branch.
-                return QueryPlan.SQL_FAST
+                return RoutingDecision(
+                    QueryPlan.SQL_FAST,
+                    RoutingReason.DIAGNOSIS_LIST,
+                    "bare diagnosis list (no aggregation)",
+                )
             # Raw-values query: could be SQL too, but the answerer/UI
             # pattern for raw values expects the graph's timestamp handling.
             # Keep on graph-path for now.
-            return QueryPlan.GRAPH
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.RAW_VALUE_NON_DIAGNOSIS,
+                "raw-value lookup (no aggregation) kept on graph",
+            )
 
         agg_op = self._registry.get("aggregate", cq.aggregation)
         if agg_op is None or getattr(agg_op, "sql_fn", None) is None:
-            return QueryPlan.GRAPH
+            return RoutingDecision(
+                QueryPlan.GRAPH,
+                RoutingReason.AGGREGATE_NO_SQL_FN,
+                f"aggregate={cq.aggregation!r} has no sql_fn",
+            )
 
         # Comparison scope: axis must be a registered comparison_axis with
         # a SQL group-by descriptor.
         if cq.scope == "comparison":
             if not cq.comparison_field:
-                return QueryPlan.GRAPH
+                return RoutingDecision(
+                    QueryPlan.GRAPH,
+                    RoutingReason.COMPARISON_NO_FIELD,
+                    "comparison scope with no comparison_field",
+                )
             # The dynamic ``condition`` axis carries no fixed ``sql_group_by``
             # (the GROUP BY column is built from ``split_condition`` at compile
             # time), so it's SQL-fast-path-eligible as long as a split_condition
             # is supplied. Without one it's underspecified → graph path.
             if cq.comparison_field == "condition":
                 if cq.split_condition is None:
-                    return QueryPlan.GRAPH
-                return QueryPlan.SQL_FAST
+                    return RoutingDecision(
+                        QueryPlan.GRAPH,
+                        RoutingReason.CONDITION_SPLIT_MISSING,
+                        "condition axis with no split_condition",
+                    )
+                return RoutingDecision(
+                    QueryPlan.SQL_FAST,
+                    RoutingReason.CONDITION_SPLIT_PRESENT,
+                    "condition axis with split_condition",
+                )
             axis_op = self._registry.get("comparison_axis", cq.comparison_field)
             if axis_op is None or getattr(axis_op, "sql_group_by", None) is None:
-                return QueryPlan.GRAPH
+                return RoutingDecision(
+                    QueryPlan.GRAPH,
+                    RoutingReason.COMPARISON_AXIS_UNREGISTERED,
+                    f"comparison axis {cq.comparison_field!r} not SQL-compilable",
+                )
 
-        return QueryPlan.SQL_FAST
+        return RoutingDecision(
+            QueryPlan.SQL_FAST,
+            RoutingReason.FALLTHROUGH_SQL_FAST,
+            "single-concept SQL aggregate",
+        )

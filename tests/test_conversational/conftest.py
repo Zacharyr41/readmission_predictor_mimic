@@ -30,6 +30,7 @@ Fixture directories
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -45,6 +46,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 DECOMPOSER_CASES_DIR = FIXTURES_DIR / "decomposer_cases"
 PROMPT_EXAMPLES_DIR = FIXTURES_DIR / "prompt_examples"
 MALFORMED_JSON_DIR = FIXTURES_DIR / "malformed_json"
+ROUTING_CORPUS_DIR = FIXTURES_DIR / "routing_corpus"
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +168,29 @@ def _prompt_examples_synced() -> None:
     _sync_prompt_examples()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _routing_log_redirect(tmp_path_factory) -> None:
+    """Redirect the routing decision log to a throwaway session file.
+
+    The orchestrator calls ``log_routing_decision`` at the classify choke point,
+    so any test that runs ``ask()`` would otherwise append to the repo's
+    ``logs/routing_decisions.jsonl``. ``decision_log._resolve_path`` reads
+    ``NEUROGRAPH_ROUTING_LOG`` at call time, so setting it here (session-scoped,
+    autouse) keeps the whole conversational suite from polluting repo logs. We
+    use ``os.environ`` directly because ``monkeypatch`` is function-scoped.
+    """
+    log_path = tmp_path_factory.mktemp("routing_log") / "routing_decisions.jsonl"
+    prior = os.environ.get("NEUROGRAPH_ROUTING_LOG")
+    os.environ["NEUROGRAPH_ROUTING_LOG"] = str(log_path)
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop("NEUROGRAPH_ROUTING_LOG", None)
+        else:
+            os.environ["NEUROGRAPH_ROUTING_LOG"] = prior
+
+
 # ---------------------------------------------------------------------------
 # Fixture loaders
 # ---------------------------------------------------------------------------
@@ -190,6 +215,34 @@ def load_decomposer_cases() -> list[pytest.param]:
         return []
     params = []
     for path in sorted(DECOMPOSER_CASES_DIR.glob("*.json")):
+        data = json.loads(path.read_text())
+        params.append(pytest.param(data, id=data.get("name", path.stem)))
+    return params
+
+
+def load_routing_corpus() -> list[pytest.param]:
+    """Yield pytest params for every file in ``fixtures/routing_corpus/``.
+
+    The labeled routing corpus (§8 "D0"): real questions tagged with the route
+    they *should* take, so misrouting becomes a measurable rate and a regression
+    target. Each case file is a JSON object with at minimum::
+
+        {
+            "name": str,
+            "question": str,
+            "cq": dict,              # CompetencyQuestion model_dump (offline replay)
+            "desired_plan": str,     # ground-truth target route (does not drift)
+            "current_plan": str,     # route the planner produces today (flip gate)
+            "tags": list[str],       # optional, e.g. ["known_misroute", "temporal"]
+            "notes": str             # optional rationale / doc reference
+        }
+
+    Missing directory yields an empty list so the runner still collects.
+    """
+    if not ROUTING_CORPUS_DIR.exists():
+        return []
+    params = []
+    for path in sorted(ROUTING_CORPUS_DIR.glob("*.json")):
         data = json.loads(path.read_text())
         params.append(pytest.param(data, id=data.get("name", path.stem)))
     return params
