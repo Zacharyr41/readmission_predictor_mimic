@@ -1675,3 +1675,42 @@ class TestMultiDiagnosisFilterCompileSql:
         assert "di" in di_aliases and "di1" in di_aliases, di_aliases
 
         backend.execute(q.sql, q.params)
+
+
+class TestStoredMeasurementThreshold:
+    """A computed-but-STORED quantity (anion gap → MIMIC labevents itemid 50868)
+    must route to a lab_value threshold on the STORED value, using the FILTER's
+    operator — so 'high' (>) and 'non-high' (<=) both work and the stored value
+    is the source of truth (no flaky derived recomputation, no diagnosis LIKE,
+    no `1 = 0`). Guards the anion-gap-by-anion-gap-type fix."""
+
+    @pytest.mark.parametrize("op,val", [(">", "12"), ("<=", "12")])
+    def test_anion_gap_lab_value_uses_stored_value_and_filter_operator(
+        self, backend, op, val,
+    ):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = CompetencyQuestion(
+            original_question="count",
+            clinical_concepts=[
+                ClinicalConcept(name="metabolic acidosis", concept_type="diagnosis"),
+            ],
+            patient_filters=[
+                PatientFilter(field="diagnosis", operator="contains", value="metabolic acidosis"),
+                PatientFilter(field="lab_value", operator=op, value=val, measurement="anion gap"),
+            ],
+            aggregation="count", scope="cohort",
+        )
+        q = compile_sql(cq, backend, get_default_registry())
+        sql = q.sql.lower()
+
+        # Grounds the STORED anion-gap lab via its label (which matches itemid
+        # 50868 "Anion Gap"), and thresholds the stored valuenum with the
+        # FILTER's operator (so the high/non-high split is correct).
+        assert "labevents" in sql
+        assert "%anion gap%" in str(q.params).lower()
+        assert f"valuenum {op} ?" in sql
+        # NOT a flaky derived recomputation and NOT a tautological empty arm.
+        assert "1 = 0" not in sql
+        backend.execute(q.sql, q.params)

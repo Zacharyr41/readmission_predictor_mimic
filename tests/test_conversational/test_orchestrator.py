@@ -4390,3 +4390,53 @@ class TestSiblingSweepCorrections:
         )
         assert not mock_prop.called
         assert no_sql.suggested_correction is None
+
+
+class TestThresholdCohortNote:
+    """Measurement-threshold cohorts use 'ever crossed the threshold during the
+    stay' (EXISTS) membership, so high/non-high splits OVERLAP and need not sum
+    to the total. ``_threshold_cohort_note`` surfaces that honestly (user chose
+    'keep separate cohorts, label clearly')."""
+
+    def _cq(self, *filters) -> CompetencyQuestion:
+        return CompetencyQuestion(
+            original_question="q",
+            clinical_concepts=[ClinicalConcept(name="metabolic acidosis", concept_type="diagnosis")],
+            patient_filters=list(filters),
+            aggregation="count", scope="cohort",
+        )
+
+    def test_lab_value_threshold_gets_note(self):
+        cq = self._cq(
+            PatientFilter(field="diagnosis", operator="contains", value="metabolic acidosis"),
+            PatientFilter(field="lab_value", operator=">", value="12", measurement="anion gap"),
+        )
+        note = ConversationalPipeline._threshold_cohort_note(cq)
+        assert note is not None
+        low = note.lower()
+        assert "ever" in low and "anion gap" in low and ">" in note and "12" in note
+        # States the overlap / non-partition honestly.
+        assert "overlap" in low or "sum" in low or "mutually exclusive" in low
+
+    def test_derived_value_threshold_gets_note(self):
+        cq = self._cq(
+            PatientFilter(field="derived_value", operator="<=", value="0.9", measurement="shock index"),
+        )
+        note = ConversationalPipeline._threshold_cohort_note(cq)
+        assert note is not None and "shock index" in note.lower()
+
+    def test_or_any_nested_threshold_gets_note(self):
+        cq = self._cq(
+            PatientFilter(field="or_any", operator="in", value="", sub_filters=[
+                PatientFilter(field="vital_value", operator="<", value="65", measurement="MAP"),
+            ]),
+        )
+        note = ConversationalPipeline._threshold_cohort_note(cq)
+        assert note is not None and "map" in note.lower()
+
+    def test_no_threshold_filter_no_note(self):
+        cq = self._cq(
+            PatientFilter(field="diagnosis", operator="contains", value="metabolic acidosis"),
+            PatientFilter(field="icu_stay", operator="=", value="1"),
+        )
+        assert ConversationalPipeline._threshold_cohort_note(cq) is None

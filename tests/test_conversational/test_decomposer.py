@@ -316,21 +316,18 @@ class TestComputedIndexRouting:
     def test_prompt_teaches_general_computed_index_principle(self):
         from src.conversational.prompts import DECOMPOSITION_SYSTEM_PROMPT as P
         low = P.lower()
-        # Routes to a value-threshold filter, not a diagnosis.
-        assert "derived_value" in P
-        # Teaches the index is COMPUTED from component labs (not a stored value
-        # nor a diagnosis title).
-        assert "computed from" in low or "calculated from" in low
-        # The canonical computable example is present (derived_formula.py uses it)...
+        # A measured/computed qualifier is a VALUE-THRESHOLD filter, never a
+        # diagnosis — and both routes are offered.
+        assert "lab_value" in P and "derived_value" in P
         assert "anion gap" in low
-        # ...but the guidance is explicitly GENERAL — applies to indices not
-        # listed, so it can't be overfit to anion gap.
-        assert (
-            "any computable" in low
-            or "any computed" in low
-            or "not listed" in low
-            or "any derived" in low
-        )
+        # PREFER the stored MIMIC measurement (reliable ground truth) over
+        # recomputation — this is the key correction: anion gap IS a stored lab.
+        assert "ground truth" in low or "stored value" in low or "reliable" in low
+        # Keep the user's threshold DIRECTION so high vs non-high both work
+        # (derived_value's single literature threshold can't express "non-high").
+        assert "non-high" in low or "direction" in low
+        # General — applies to quantities NOT explicitly listed (not overfit).
+        assert "not listed here" in low or "any such quantity" in low
 
 
 @pytest.mark.parametrize(

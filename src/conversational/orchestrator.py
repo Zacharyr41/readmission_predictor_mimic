@@ -1699,6 +1699,45 @@ class ConversationalPipeline:
             )
             return None
 
+    @staticmethod
+    def _threshold_cohort_note(cq: CompetencyQuestion) -> str | None:
+        """Honest label for a measurement-threshold cohort.
+
+        A lab_value / vital_value / derived_value filter with a comparison
+        operator compiles to ``EXISTS (… valuenum <op> threshold)`` — i.e.
+        membership is "the value EVER crossed the threshold at some point during
+        the stay." Such cohorts OVERLAP: an admission whose value moves across
+        the threshold qualifies for BOTH a "high" and a "non-high" group, so a
+        high-vs-non-high split is not a partition and need not sum to the cohort
+        total. Returns a one-line note describing that, or ``None`` when the CQ
+        has no measurement-threshold filter. Scans ``or_any`` children too."""
+        cmp_ops = {">", "<", ">=", "<="}
+        measurement_fields = {"lab_value", "vital_value", "derived_value"}
+
+        def _scan(filters):
+            for f in (filters or []):
+                if (
+                    getattr(f, "field", None) in measurement_fields
+                    and getattr(f, "operator", None) in cmp_ops
+                ):
+                    return f
+                if getattr(f, "field", None) == "or_any" and getattr(f, "sub_filters", None):
+                    hit = _scan(f.sub_filters)
+                    if hit is not None:
+                        return hit
+            return None
+
+        f = _scan(cq.patient_filters)
+        if f is None:
+            return None
+        meas = (f.measurement or "the measurement").strip()
+        return (
+            f"This counts admissions whose {meas} was ever {f.operator} {f.value} "
+            "at some point during the stay. Threshold cohorts like this overlap "
+            "(a value can cross the threshold both ways), so high vs non-high "
+            "groups are not mutually exclusive and need not sum to the total."
+        )
+
     def _run_sql_fastpath(
         self,
         cq: CompetencyQuestion,
@@ -1836,6 +1875,14 @@ class ConversationalPipeline:
             answer.text_summary = (
                 (answer.text_summary or "")
                 + f"\n\n⚠️ Note: {fallback_warning}"
+            ).strip()
+        # Honest labeling for measurement-threshold cohorts: their 'ever crossed
+        # the threshold during the stay' membership means high/non-high splits
+        # overlap and need not sum to the total (co-located in text_summary).
+        cohort_note = self._threshold_cohort_note(cq)
+        if cohort_note:
+            answer.text_summary = (
+                (answer.text_summary or "") + f"\n\nℹ️ Cohort note: {cohort_note}"
             ).strip()
         return answer, [query.rendered_sql], fallback_warning
 
