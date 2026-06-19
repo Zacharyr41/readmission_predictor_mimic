@@ -7,8 +7,12 @@ output row shape is identical to what the equivalent SPARQL template
 would return, so the downstream answerer sees no difference.
 
 Supported shapes today (``QueryPlanner.classify`` gates entry):
-  - Single-concept aggregate with a portable ``sql_fn`` (AVG/MAX/MIN/COUNT),
-    no temporal constraints, over biomarker/vital/drug/microbiology/outcome.
+  - Single-concept aggregate with a portable ``sql_fn`` (AVG/MAX/MIN/COUNT)
+    over biomarker/vital/drug/microbiology/outcome, optionally bounded by a
+    *window/anchor* temporal constraint (ICU stay / hospital admission), which
+    appends a ``charttime`` ``WHERE`` bound via the shared
+    ``temporal.temporal_where_predicates`` (Part A). A *relational/Allen*
+    constraint is refused — route it to the graph.
   - Comparison (``scope == "comparison"``) on a registered axis whose
     ``sql_group_by`` is set. Emits GROUP BY in one query.
   - Diagnosis list (no aggregation, ``concept_type == "diagnosis"``).
@@ -34,6 +38,11 @@ from src.conversational.models import (
     PatientFilter,
 )
 from src.conversational.sql_render import render_sql_with_params
+from src.conversational.temporal import (
+    WINDOW_BOUNDABLE_CONCEPT_TYPES,
+    is_sql_window,
+    temporal_where_predicates,
+)
 
 # Ambient grounding context for measurement-value filters, set by ``compile_sql``
 # and read by ``_filter_fragment`` — avoids threading ``resolver`` /
@@ -234,11 +243,32 @@ def _compile_sql_dispatch(
         return _compile_event_ordering(cq, backend, registry,
                                        enable_mcp_grounding=enable_mcp_grounding)
 
+    # Part A: window/anchor temporal constraints (ICU stay / hospital
+    # admission) ARE compilable — each event branch appends the bound to its
+    # WHERE via the shared ``temporal_where_predicates``. Only relational/Allen
+    # constraints (``before``/``after`` an arbitrary event) are refused here, so
+    # a misrouted CQ fails loudly rather than emitting an unbounded aggregate the
+    # graph path would have bounded. The concept-type check guards against
+    # routing a window constraint onto a branch that doesn't time-bound it
+    # (diagnosis/outcome) — the planner already gates this, this is defensive.
     if cq.temporal_constraints:
-        raise ValueError(
-            "sql_fastpath cannot compile a CQ with temporal_constraints — "
-            "route to the graph path"
-        )
+        if not all(is_sql_window(tc) for tc in cq.temporal_constraints):
+            raise ValueError(
+                "sql_fastpath cannot compile relational/event-relative "
+                "temporal_constraints (only ICU-stay / hospital-admission "
+                "windows) — route to the graph path"
+            )
+        offending = [
+            c.concept_type
+            for c in cq.clinical_concepts
+            if c.concept_type not in WINDOW_BOUNDABLE_CONCEPT_TYPES
+        ]
+        if offending:
+            raise ValueError(
+                "sql_fastpath cannot apply a temporal window to concept_type="
+                f"{offending[0]!r}; only {sorted(WINDOW_BOUNDABLE_CONCEPT_TYPES)} "
+                "carry per-event timestamps — route to the graph path"
+            )
     if len(cq.clinical_concepts) > 1:
         raise ValueError(
             "sql_fastpath cannot compile a CQ with multiple clinical_concepts"
@@ -665,6 +695,16 @@ def _compile_event_aggregate(
     where_params: list[Any] = list(name_params)
     where_clauses.extend(filter_where)
     where_params.extend(filter_params)
+    # Part A: ICU-stay / admission window bound on this event's charttime. The
+    # predicates are parameterless (INTERVAL literals inlined), so they append
+    # to the clause list without perturbing positional params. One ``where_sql``
+    # feeds the scalar, comparison-GROUP-BY, and outlier-rows shapes alike.
+    where_clauses.extend(temporal_where_predicates(
+        cq.temporal_constraints,
+        f"{event_alias}.charttime",
+        f"{event_alias}.hadm_id",
+        backend,
+    ))
     where_sql = " AND ".join(where_clauses)
     from_sql = f"FROM {event_table} {join_dict} {' '.join(joins)}"
 
@@ -889,6 +929,10 @@ def _compile_drug_aggregate(
     params: list[Any] = list(group_by_params) + list(name_params)
     where_clauses.extend(filter_where)
     params.extend(filter_params)
+    # Part A: window bound on the prescription start time (parameterless).
+    where_clauses.extend(temporal_where_predicates(
+        cq.temporal_constraints, "pr.starttime", "pr.hadm_id", backend,
+    ))
 
     sql = (
         f"SELECT {select_cols} "
@@ -1027,6 +1071,10 @@ def _compile_microbiology_aggregate(
 
     where_clauses.extend(filter_where)
     params.extend(filter_params)
+    # Part A: window bound on the culture charttime (parameterless).
+    where_clauses.extend(temporal_where_predicates(
+        cq.temporal_constraints, "m.charttime", "m.hadm_id", backend,
+    ))
 
     sql = (
         f"SELECT {select_cols} "

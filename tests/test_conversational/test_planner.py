@@ -133,6 +133,45 @@ _FAST_PATH_CASES = [
             aggregation="count", scope="cohort"),
         id="microbiology_count",
     ),
+    # Part A: window/anchor temporal constraints are SQL-bound-able. "during
+    # the ICU stay" is a charttime WHERE on icustays.intime/outtime, not Allen
+    # reasoning — it must NOT veto the fast-path.
+    pytest.param(
+        _cq(concepts=[("creatinine", "biomarker")],
+            temporal=[("during", "ICU stay", None)],
+            aggregation="mean", scope="cohort"),
+        id="temporal_during_icu_window",
+    ),
+    pytest.param(
+        _cq(concepts=[("creatinine", "biomarker")],
+            temporal=[("during", "hospital admission", None)],
+            aggregation="mean", scope="cohort"),
+        id="temporal_during_admission_window",
+    ),
+    pytest.param(
+        _cq(concepts=[("lactate", "biomarker")],
+            temporal=[("within", "admission", "24h")],
+            aggregation="mean", scope="cohort"),
+        id="temporal_within_24h_admission",
+    ),
+    pytest.param(
+        _cq(concepts=[("heart rate", "vital")],
+            temporal=[("during", "ICU stay", None)],
+            aggregation="max", scope="cohort"),
+        id="temporal_window_vital",
+    ),
+    pytest.param(
+        _cq(concepts=[("vancomycin", "drug")],
+            temporal=[("during", "ICU stay", None)],
+            aggregation="count", scope="cohort"),
+        id="temporal_window_drug_count",
+    ),
+    pytest.param(
+        _cq(concepts=[("MRSA", "microbiology")],
+            temporal=[("during", "ICU stay", None)],
+            aggregation="count", scope="cohort"),
+        id="temporal_window_microbiology_count",
+    ),
 ]
 
 
@@ -157,17 +196,43 @@ _GRAPH_PATH_CASES = [
             aggregation="median", scope="cohort"),
         id="median_needs_python_postprocessor",
     ),
-    pytest.param(
-        _cq(concepts=[("creatinine", "biomarker")],
-            temporal=[("during", "ICU stay", None)],
-            aggregation="mean", scope="cohort"),
-        id="temporal_during_constraint",
-    ),
+    # Part A: relational/Allen constraints (before/after an arbitrary clinical
+    # *event*, not a structural interval) genuinely need the graph and stay.
     pytest.param(
         _cq(concepts=[("creatinine", "biomarker")],
             temporal=[("before", "intubation", None)],
-            scope="cohort"),
-        id="temporal_before_constraint",
+            aggregation="mean", scope="cohort"),
+        id="temporal_before_event_relational",
+    ),
+    pytest.param(
+        _cq(concepts=[("creatinine", "biomarker")],
+            temporal=[("after", "dialysis", None)],
+            aggregation="mean", scope="cohort"),
+        id="temporal_after_event_relational",
+    ),
+    # A window constraint mixed with a relational one cannot be split — the
+    # whole CQ falls to the graph.
+    pytest.param(
+        _cq(concepts=[("creatinine", "biomarker")],
+            temporal=[("during", "ICU stay", None), ("before", "intubation", None)],
+            aggregation="mean", scope="cohort"),
+        id="temporal_mixed_window_and_relational",
+    ),
+    # diagnosis/outcome have no temporal bounding in the extractor, so a
+    # window constraint on them must stay on the graph (else the SQL path
+    # would silently ignore the constraint — parity break).
+    pytest.param(
+        _cq(concepts=[("sepsis", "diagnosis")],
+            temporal=[("during", "ICU stay", None)],
+            aggregation="count", scope="cohort"),
+        id="temporal_window_on_diagnosis_stays_graph",
+    ),
+    # A window constraint over >1 concept still can't fast-path (rule 6).
+    pytest.param(
+        _cq(concepts=[("creatinine", "biomarker"), ("lactate", "biomarker")],
+            temporal=[("during", "ICU stay", None)],
+            aggregation="mean", scope="cohort"),
+        id="temporal_window_multi_concept",
     ),
     pytest.param(
         _cq(concepts=[("creatinine", "biomarker"), ("lactate", "biomarker")],
@@ -224,6 +289,46 @@ def test_classify_equals_explain_plan(cq):
     assert isinstance(decision.reason, RoutingReason)
     assert 1 <= decision.rule <= 14
     assert decision.detail
+
+
+# ---------------------------------------------------------------------------
+# 3b. Part A — the temporal veto is split by kind of constraint
+# ---------------------------------------------------------------------------
+
+
+class TestTemporalVetoSplit:
+    """Rule 4 no longer vetoes *every* temporal constraint. Window/anchor
+    constraints (ICU stay / hospital admission) fall through to the normal
+    single-concept SQL legs; only relational/Allen constraints veto to GRAPH."""
+
+    def test_window_constraint_falls_through_to_sql(self):
+        from src.conversational.planner import (
+            QueryPlan,
+            QueryPlanner,
+            RoutingReason,
+        )
+
+        cq = _cq(concepts=[("creatinine", "biomarker")],
+                 temporal=[("during", "ICU stay", None)],
+                 aggregation="mean", scope="cohort")
+        decision = QueryPlanner().explain(cq)
+        assert decision.plan == QueryPlan.SQL_FAST
+        # It reaches the generic fall-through, not a temporal-specific leg.
+        assert decision.reason == RoutingReason.FALLTHROUGH_SQL_FAST
+
+    def test_relational_constraint_still_vetoes(self):
+        from src.conversational.planner import (
+            QueryPlan,
+            QueryPlanner,
+            RoutingReason,
+        )
+
+        cq = _cq(concepts=[("creatinine", "biomarker")],
+                 temporal=[("before", "intubation", None)],
+                 aggregation="mean", scope="cohort")
+        decision = QueryPlanner().explain(cq)
+        assert decision.plan == QueryPlan.GRAPH
+        assert decision.reason == RoutingReason.TEMPORAL_CONSTRAINTS_PRESENT
 
 
 # ---------------------------------------------------------------------------

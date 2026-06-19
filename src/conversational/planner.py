@@ -17,9 +17,12 @@ CQ is eligible for the SQL fast-path if:
   - There is exactly one clinical concept of a type the fast-path knows
     how to resolve directly in SQL (biomarker, vital, drug, diagnosis,
     microbiology, outcome).
-  - There are no ``temporal_constraints``. Allen relations live in the
-    graph; lifting them into SQL would require explicit interval joins
-    and lose the semantic intent.
+  - Any ``temporal_constraints`` are *window/anchor* constraints — bounded by
+    the ICU-stay or hospital-admission interval the database records, so they
+    compile to a ``charttime`` ``WHERE`` bound (Part A). *Relational/Allen*
+    constraints (``before``/``after`` an arbitrary clinical *event*) still
+    require the graph; the split is decided by
+    ``src.conversational.temporal.is_sql_window``.
   - If the scope is "comparison", the axis is a registered
     ``comparison_axis`` operation whose ``sql_group_by`` is set.
 
@@ -39,6 +42,10 @@ from enum import Enum
 
 from src.conversational.models import CompetencyQuestion
 from src.conversational.operations import OperationRegistry, get_default_registry
+from src.conversational.temporal import (
+    WINDOW_BOUNDABLE_CONCEPT_TYPES,
+    is_sql_window,
+)
 
 
 class QueryPlan(Enum):
@@ -204,14 +211,36 @@ class QueryPlanner:
                 "event_ordering needs ≥2 concepts",
             )
 
-        # Temporal constraints always require the graph.
+        # Part A: split the temporal veto by *kind* of constraint. A
+        # window/anchor constraint ("during the ICU stay", "first 24h of
+        # admission") is a plain ``charttime`` bound against a structural
+        # interval the database records — the fast-path compiles it via the
+        # SAME generator the graph extractor uses, so parity holds. Only
+        # relational/Allen constraints (``before``/``after`` an arbitrary
+        # clinical *event*) still need the graph.
+        #
+        # Fall through ONLY when *every* constraint is a recognized window AND
+        # the single concept is an event-valued type the compiler bounds; any
+        # relational constraint, a mixed list, a non-bound-able concept type, or
+        # >1 concept vetoes to the graph (the relational one can't be split out,
+        # and diagnosis/outcome have no temporal bound — see
+        # ``WINDOW_BOUNDABLE_CONCEPT_TYPES``).
         if cq.temporal_constraints:
-            rels = ", ".join(tc.relation for tc in cq.temporal_constraints)
-            return RoutingDecision(
-                QueryPlan.GRAPH,
-                RoutingReason.TEMPORAL_CONSTRAINTS_PRESENT,
-                f"temporal_constraints present ({rels})",
+            all_window = all(is_sql_window(tc) for tc in cq.temporal_constraints)
+            concept_ok = (
+                len(cq.clinical_concepts) == 1
+                and cq.clinical_concepts[0].concept_type
+                in WINDOW_BOUNDABLE_CONCEPT_TYPES
             )
+            if not (all_window and concept_ok):
+                rels = ", ".join(tc.relation for tc in cq.temporal_constraints)
+                return RoutingDecision(
+                    QueryPlan.GRAPH,
+                    RoutingReason.TEMPORAL_CONSTRAINTS_PRESENT,
+                    f"temporal_constraints present ({rels})",
+                )
+            # else: window-bounded event aggregate — fall through to the normal
+            # single-concept SQL eligibility checks below.
 
         # Metadata-only CQs (mortality_count etc.) have no clinical concepts
         # and no aggregation — the fast-path still handles them via dedicated

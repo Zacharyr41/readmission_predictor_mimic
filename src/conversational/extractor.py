@@ -8,7 +8,6 @@ Supports two backends:
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from pathlib import Path
@@ -24,6 +23,7 @@ from src.conversational.models import (
     PatientFilter,
     TemporalConstraint,
 )
+from src.conversational.temporal import parse_time_window, temporal_where_predicates
 
 if TYPE_CHECKING:
     from google.cloud import bigquery
@@ -788,18 +788,12 @@ def _get_filtered_hadm_ids(
 # ---------------------------------------------------------------------------
 
 
-def _parse_time_window(window: str) -> str:
-    """Convert '48h', '7d', '30m' etc. to an INTERVAL literal."""
-    match = re.match(
-        r"(\d+)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
-        window.lower().strip(),
-    )
-    if not match:
-        raise ValueError(f"Cannot parse time window: {window}")
-    value = match.group(1)
-    unit_char = match.group(2)[0]
-    unit_map = {"h": "HOUR", "d": "DAY", "m": "MINUTE"}
-    return f"INTERVAL {value} {unit_map[unit_char]}"
+# ``_parse_time_window`` and the temporal-bound SQL now live in
+# ``src.conversational.temporal`` — the single source of truth shared with the
+# planner and the SQL fast-path so a window constraint produces the *identical*
+# bound on both paths (parity by construction). The alias kept for the existing
+# call sites below.
+_parse_time_window = parse_time_window
 
 
 def _temporal_sql(
@@ -808,38 +802,15 @@ def _temporal_sql(
     hadm_col: str,
     backend: _DuckDBBackend | _BigQueryBackend,
 ) -> str:
-    """Build SQL fragment for temporal constraints (empty string if none)."""
-    icu_tbl = backend.table("icustays")
-    parts: list[str] = []
-    for tc in constraints:
-        ref = tc.reference_event.lower()
-        if "icu" not in ref:
-            continue
+    """Build SQL fragment for temporal constraints (empty string if none).
 
-        exists_prefix = (
-            f"AND EXISTS (SELECT 1 FROM {icu_tbl} _icu "
-            f"WHERE _icu.hadm_id = {hadm_col}"
-        )
-
-        if tc.relation == "during":
-            parts.append(
-                f"{exists_prefix} "
-                f"AND {time_col} >= _icu.intime "
-                f"AND {time_col} <= _icu.outtime)"
-            )
-        elif tc.relation == "within" and tc.time_window:
-            interval = _parse_time_window(tc.time_window)
-            parts.append(
-                f"{exists_prefix} "
-                f"AND {time_col} >= _icu.intime "
-                f"AND {time_col} <= _icu.intime + {interval})"
-            )
-        elif tc.relation == "before":
-            parts.append(f"{exists_prefix} AND {time_col} < _icu.intime)")
-        elif tc.relation == "after":
-            parts.append(f"{exists_prefix} AND {time_col} > _icu.outtime)")
-
-    return "\n".join(parts)
+    Thin adapter over the shared :func:`temporal_where_predicates`: each bare
+    predicate is prefixed with ``AND`` and newline-joined, preserving this
+    function's prior raw-text contract (the per-concept extractors concatenate
+    the fragment directly after their ``WHERE`` clause).
+    """
+    preds = temporal_where_predicates(constraints, time_col, hadm_col, backend)
+    return "\n".join(f"AND {pred}" for pred in preds)
 
 
 # ---------------------------------------------------------------------------

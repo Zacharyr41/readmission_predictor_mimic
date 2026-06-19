@@ -73,6 +73,61 @@ def backend_with_creatinine_variants(synthetic_duckdb_with_events):
     return _ConnBackend(conn)
 
 
+@pytest.fixture
+def backend_with_temporal_events(synthetic_duckdb_with_events):
+    """Adds events that straddle hadm 101's ICU window and its admit+24h window
+    so a temporal bound is *observable*.
+
+    The base fixture's events all sit inside their ICU windows, so a window
+    bound there is indistinguishable from no bound. Here:
+
+    hadm 101: admittime 2150-01-15 08:00; ICU 1001 intime 2150-01-15 10:00 /
+    outtime 2150-01-18 08:00. Existing creatinine 1.2 @ 01-16 06:00 (inside ICU,
+    within 24h of admit). Added:
+      - 4.0 @ 01-15 09:00 — inside admission & within 24h of admit, but BEFORE
+        ICU intime → excluded by "during ICU stay".
+      - 8.0 @ 01-17 12:00 — inside ICU, but AFTER admit+24h → excluded by
+        "within 24h of admission".
+
+    hadm 107 (subject 1, a second admission with NO ICU stay) carries a vanco
+    order and a blood culture so drug/micro COUNT-during-ICU is observably
+    narrower than the unbounded count (107 drops out — no ICU interval to match).
+    """
+    conn = synthetic_duckdb_with_events
+    conn.execute(
+        "INSERT INTO admissions VALUES "
+        "(107, 1, '2150-03-01 08:00:00', '2150-03-05 10:00:00', 'EMERGENCY', 'HOME', 0)"
+    )
+    conn.execute(
+        "INSERT INTO labevents VALUES "
+        "(20, 1, 101, NULL, 50912, '2150-01-15 09:00:00', 4.0, 'mg/dL', 0.7, 1.3), "
+        "(21, 1, 101, 1001, 50912, '2150-01-17 12:00:00', 8.0, 'mg/dL', 0.7, 1.3)"
+    )
+    conn.execute(
+        "INSERT INTO prescriptions VALUES "
+        "(1, 107, '2150-03-02 10:00:00', '2150-03-03 10:00:00', 'Vancomycin', 1000.0, 'mg', 'IV')"
+    )
+    conn.execute(
+        "INSERT INTO microbiologyevents VALUES "
+        "(20, 1, 107, NULL, '2150-03-02 12:00:00', 'BLOOD CULTURE', 'STAPHYLOCOCCUS AUREUS')"
+    )
+    return _ConnBackend(conn)
+
+
+def _temporal_cq(cq, *, relation, reference_event, time_window=None):
+    """Attach a single temporal constraint to a ``_cq``-built CQ (the local
+    ``_cq`` builder has no temporal param — mirrors how the orchestrator's
+    decomposer would populate it)."""
+    from src.conversational.models import TemporalConstraint
+
+    cq.temporal_constraints = [
+        TemporalConstraint(
+            relation=relation, reference_event=reference_event, time_window=time_window
+        )
+    ]
+    return cq
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -238,6 +293,128 @@ def _run_fastpath(backend, cq) -> list[dict]:
     )
     rows = backend.execute(q.sql, q.params)
     return [dict(zip(q.columns, r)) for r in rows]
+
+
+def _direct_mean_creatinine(backend, extra_where: str = "") -> float:
+    """Direct AVG(creatinine) over the synthetic fixture, optionally with an
+    extra WHERE bound — the parity baseline for the temporal-window fast-path."""
+    rows = backend.execute(
+        "SELECT AVG(l.valuenum) "
+        "FROM labevents l "
+        "JOIN d_labitems d ON l.itemid = d.itemid "
+        "JOIN admissions a ON l.hadm_id = a.hadm_id "
+        "WHERE d.label ILIKE '%creatinine%' AND l.valuenum IS NOT NULL "
+        f"{extra_where}",
+        [],
+    )
+    return rows[0][0]
+
+
+_ICU_BOUND = (
+    "AND EXISTS (SELECT 1 FROM icustays w WHERE w.hadm_id = l.hadm_id "
+    "AND l.charttime >= w.intime AND l.charttime <= w.outtime)"
+)
+_ADMIT_24H_BOUND = (
+    "AND EXISTS (SELECT 1 FROM admissions w WHERE w.hadm_id = l.hadm_id "
+    "AND l.charttime >= w.admittime AND l.charttime <= w.admittime + INTERVAL 24 HOUR)"
+)
+
+
+class TestTemporalWindowBound:
+    """Part A: window/anchor temporal constraints (ICU stay / hospital
+    admission) are compiled as a ``charttime`` bound on the fast-path, matching
+    the graph extractor's bound. Each test proves both *parity* (fast-path ==
+    direct-SQL-with-the-same-bound) and *discrimination* (the bound actually
+    narrows the result vs unbounded), so a silently-dropped bound can't pass."""
+
+    def test_biomarker_during_icu_matches_bounded_and_differs_from_unbounded(
+        self, backend_with_temporal_events,
+    ):
+        b = backend_with_temporal_events
+        cq = _temporal_cq(
+            _cq(concepts=[("creatinine", "biomarker")], aggregation="mean"),
+            relation="during", reference_event="ICU stay",
+        )
+        fastpath = _run_fastpath(b, cq)[0]["mean_value"]
+        bounded = _direct_mean_creatinine(b, _ICU_BOUND)
+        unbounded = _direct_mean_creatinine(b)
+        assert math.isclose(fastpath, bounded, rel_tol=1e-9)
+        assert not math.isclose(bounded, unbounded, rel_tol=1e-9)
+
+    def test_biomarker_within_24h_admission_matches_bounded(
+        self, backend_with_temporal_events,
+    ):
+        b = backend_with_temporal_events
+        cq = _temporal_cq(
+            _cq(concepts=[("creatinine", "biomarker")], aggregation="mean"),
+            relation="within", reference_event="admission", time_window="24h",
+        )
+        fastpath = _run_fastpath(b, cq)[0]["mean_value"]
+        bounded = _direct_mean_creatinine(b, _ADMIT_24H_BOUND)
+        unbounded = _direct_mean_creatinine(b)
+        assert math.isclose(fastpath, bounded, rel_tol=1e-9)
+        assert not math.isclose(bounded, unbounded, rel_tol=1e-9)
+
+    def test_emitted_sql_carries_the_window_exists(self, backend_with_temporal_events):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        b = backend_with_temporal_events
+        cq = _temporal_cq(
+            _cq(concepts=[("creatinine", "biomarker")], aggregation="mean"),
+            relation="during", reference_event="ICU stay",
+        )
+        q = compile_sql(cq, b, get_default_registry())
+        assert "icustays" in q.sql
+        assert "l.charttime >= _win.intime" in q.sql
+        assert "l.charttime <= _win.outtime" in q.sql
+
+    def test_drug_count_during_icu_is_narrower(self, backend_with_temporal_events):
+        b = backend_with_temporal_events
+        unbounded = _run_fastpath(
+            b, _cq(concepts=[("vancomycin", "drug")], aggregation="count"),
+        )[0]["count_value"]
+        bounded = _run_fastpath(
+            b,
+            _temporal_cq(
+                _cq(concepts=[("vancomycin", "drug")], aggregation="count"),
+                relation="during", reference_event="ICU stay",
+            ),
+        )[0]["count_value"]
+        assert unbounded == 2  # hadm 101 (in ICU) + hadm 107 (no ICU)
+        assert bounded == 1    # only hadm 101's order falls in an ICU window
+
+    def test_microbiology_count_during_icu_is_narrower(
+        self, backend_with_temporal_events,
+    ):
+        b = backend_with_temporal_events
+        unbounded = _run_fastpath(
+            b, _cq(concepts=[("blood culture", "microbiology")], aggregation="count"),
+        )[0]["count_value"]
+        bounded = _run_fastpath(
+            b,
+            _temporal_cq(
+                _cq(concepts=[("blood culture", "microbiology")], aggregation="count"),
+                relation="during", reference_event="ICU stay",
+            ),
+        )[0]["count_value"]
+        assert unbounded == 2  # hadm 101 (in ICU) + hadm 107 (no ICU)
+        assert bounded == 1
+
+    def test_vital_max_during_icu_compiles_with_bound(
+        self, backend_with_temporal_events,
+    ):
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        b = backend_with_temporal_events
+        cq = _temporal_cq(
+            _cq(concepts=[("heart rate", "vital")], aggregation="max"),
+            relation="during", reference_event="ICU stay",
+        )
+        q = compile_sql(cq, b, get_default_registry())
+        assert "icustays" in q.sql
+        assert "c.charttime >= _win.intime" in q.sql
 
 
 class TestMicrobiologyOrganismQualifier:
@@ -1438,7 +1615,25 @@ class TestCompileRefusesUnsupportedShapes:
         with pytest.raises(ValueError, match="(?i)median|sql_fn|fast.?path"):
             compile_sql(cq, backend, get_default_registry())
 
-    def test_temporal_constraint_raises(self, backend):
+    def test_relational_temporal_constraint_raises(self, backend):
+        """Part A: a relational/Allen constraint (``before`` an arbitrary event)
+        is NOT a window — the compiler refuses it defensively so a misrouted CQ
+        fails loudly rather than emitting an unbounded SQL aggregate the graph
+        path would have bounded differently."""
+        from src.conversational.models import TemporalConstraint
+        from src.conversational.operations import get_default_registry
+        from src.conversational.sql_fastpath import compile_sql
+
+        cq = _cq(concepts=[("creatinine", "biomarker")], aggregation="mean")
+        cq.temporal_constraints = [
+            TemporalConstraint(relation="before", reference_event="intubation")
+        ]
+        with pytest.raises(ValueError, match="(?i)temporal|graph|window"):
+            compile_sql(cq, backend, get_default_registry())
+
+    def test_window_temporal_constraint_compiles(self, backend):
+        """Conversely, a window constraint ("during ICU stay") now compiles to
+        an ICU-bounded aggregate instead of raising."""
         from src.conversational.models import TemporalConstraint
         from src.conversational.operations import get_default_registry
         from src.conversational.sql_fastpath import compile_sql
@@ -1447,8 +1642,8 @@ class TestCompileRefusesUnsupportedShapes:
         cq.temporal_constraints = [
             TemporalConstraint(relation="during", reference_event="ICU stay")
         ]
-        with pytest.raises(ValueError, match="(?i)temporal|graph"):
-            compile_sql(cq, backend, get_default_registry())
+        q = compile_sql(cq, backend, get_default_registry())
+        assert "icustays" in q.sql
 
     def test_multiple_concepts_raises(self, backend):
         from src.conversational.operations import get_default_registry

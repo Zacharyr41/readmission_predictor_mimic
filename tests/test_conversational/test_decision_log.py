@@ -76,10 +76,13 @@ def test_digest_columns_are_denormalized(tmp_path):
     )
     rec = _log(cq, log_path=log)
 
-    # Temporal veto → graph, and the digest exposes *which* temporal kind drove it.
-    assert rec["plan"] == "graph"
-    assert rec["reason"] == "temporal_constraints_present"
-    assert rec["rule"] == 4
+    # Part A: a window/anchor temporal constraint ("during ICU stay") is now
+    # SQL-bound-able, so it falls through to the generic SQL leg instead of the
+    # rule-4 veto. The digest still exposes that a temporal constraint was
+    # present and which relation it carried.
+    assert rec["plan"] == "sql_fast"
+    assert rec["reason"] == "fallthrough_sql_fast"
+    assert rec["rule"] == 14
     assert rec["scope"] == "cohort"
     assert rec["aggregation"] == "mean"
     assert rec["concept_count"] == 1

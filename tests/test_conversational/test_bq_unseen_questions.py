@@ -961,13 +961,14 @@ def test_mean_lactate_during_icu_is_not_ldh_polluted(bq_pipeline_graph):
     The clinically real cohort mean is low single digits of mmol/L (the robust
     full-cohort during-ICU *median* is 1.9; see ground truth below).
 
-    Expected path: ``aggregation: "mean"`` would normally compile to the SQL
-    fast-path (``AVG``), but the ``during ICU stay`` temporal constraint forces
-    the **graph path** (``planner.classify`` routes any CQ with
-    ``temporal_constraints`` to ``GRAPH`` before the aggregation check). The
-    temporal reference contains "icu", so ``extractor._temporal_sql`` *does*
-    honor it — this test deliberately isolates the biomarker-resolution defect,
-    not the temporal one.
+    Expected path: post-Part-A the ``during ICU stay`` temporal constraint is a
+    *window/anchor* constraint, so ``aggregation: "mean"`` now compiles to the
+    SQL **fast-path** (``AVG`` with an ``icustays.intime``…``outtime`` charttime
+    bound — the same bound ``extractor._temporal_sql`` applies on the graph
+    path, so the two agree). The LDH-pollution defense below therefore rides on
+    the fast-path's LOINC-grounded ``itemid IN (...)`` resolution plus outlier
+    screening rather than the graph extractor. (Before Part A this CQ was vetoed
+    to the graph by the unconditional temporal rule.)
 
     FINDING (iteration 8 — defense-in-depth holds; the live answer is correct):
     in **full production config the pipeline answers this correctly** — the mean

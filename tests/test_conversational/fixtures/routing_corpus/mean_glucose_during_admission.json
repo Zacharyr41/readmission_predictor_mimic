@@ -43,7 +43,7 @@
     "similarity_spec": null
   },
   "desired_plan": "sql_fast",
-  "current_plan": "graph",
+  "current_plan": "sql_fast",
   "tags": [
     "known_misroute",
     "temporal",

@@ -29,10 +29,12 @@ from src.conversational.planner import QueryPlan, QueryPlanner
 from tests.test_conversational.conftest import load_routing_corpus
 
 # Ratchet: the number of corpus questions allowed to route to something other
-# than their ``desired_plan``. These are the *known* misroutes the corpus
-# documents (window-style temporal vetoes + metadata-only LOS, per §6). Lower
-# this as Directions A/B/C land and re-baseline current_plan with the seeder.
-MAX_KNOWN_MISROUTES = 4
+# than their ``desired_plan``. After Direction A (split the temporal veto) the
+# three window-style temporal cases now fast-path correctly; the one remaining
+# known misroute is the metadata-only LOS question (rule 5, awaiting Direction
+# C). Lower this further as later directions land and re-baseline current_plan
+# with the seeder.
+MAX_KNOWN_MISROUTES = 1
 
 _VALID_PLANS = {p.value for p in QueryPlan}
 

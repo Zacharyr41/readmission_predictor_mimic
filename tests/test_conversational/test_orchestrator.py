@@ -698,6 +698,57 @@ class TestSqlFastpathRouting:
         assert result.text_summary == "Mean creatinine was 1.1"
 
     @_patch_fastpath
+    def test_window_temporal_cq_fast_paths_and_skips_graph(
+        self,
+        mock_decompose_q,
+        mock_extract,
+        mock_merge,
+        mock_build,
+        mock_reason,
+        mock_answer,
+        mock_compile,
+    ):
+        """Part A: a window/anchor temporal CQ ("mean creatinine during the ICU
+        stay") routes SQL_FAST — ``compile_sql`` runs and the graph stages are
+        booby-trapped so a silent re-veto to the graph fails loudly."""
+        cq = CompetencyQuestion(
+            original_question="mean creatinine during the ICU stay",
+            clinical_concepts=[
+                ClinicalConcept(name="creatinine", concept_type="biomarker"),
+            ],
+            temporal_constraints=[
+                TemporalConstraint(relation="during", reference_event="ICU stay"),
+            ],
+            aggregation="mean",
+            scope="cohort",
+        )
+        from src.conversational.models import DecompositionResult
+
+        mock_decompose_q.return_value = DecompositionResult(
+            competency_questions=[cq],
+        )
+        mock_extract.side_effect = AssertionError("_extract must NOT run on fast-path")
+        mock_merge.side_effect = AssertionError("merge must NOT run on fast-path")
+        mock_build.side_effect = AssertionError("build_query_graph must NOT run on fast-path")
+        mock_reason.side_effect = AssertionError("reason must NOT run on fast-path")
+
+        from src.conversational.sql_fastpath import SqlFastpathQuery
+
+        mock_compile.return_value = SqlFastpathQuery(
+            sql="SELECT AVG(x) AS mean_value FROM t",
+            params=[],
+            columns=["mean_value"],
+        )
+        mock_answer.return_value = _make_answer("Mean ICU creatinine was 1.2")
+
+        pipeline = ConversationalPipeline(_DB_PATH, _ONTOLOGY_DIR, "test-key")
+        result = pipeline.ask("mean creatinine during the ICU stay")
+
+        mock_compile.assert_called_once()
+        mock_build.assert_not_called()
+        assert result.text_summary == "Mean ICU creatinine was 1.2"
+
+    @_patch_fastpath
     def test_mixed_multi_cq_routes_per_cq(
         self,
         mock_decompose_q,
@@ -724,18 +775,22 @@ class TestSqlFastpathRouting:
             aggregation="mean",
             scope="cohort",
         )
-        # Sub-CQ 2: graph path (temporal constraint).
+        # Sub-CQ 2: graph path. Post-Part-A a *window* temporal constraint
+        # ("during ICU stay") would fast-path, so use a relational/Allen
+        # constraint ("after dialysis") — that genuinely needs the graph even
+        # with a fast-path-eligible aggregate.
         cq_graph = CompetencyQuestion(
-            original_question="creatinine during ICU stay for sepsis",
+            original_question="creatinine after dialysis for sepsis",
             clinical_concepts=[
                 ClinicalConcept(name="creatinine", concept_type="biomarker"),
             ],
             temporal_constraints=[
-                TemporalConstraint(relation="during", reference_event="ICU stay"),
+                TemporalConstraint(relation="after", reference_event="dialysis"),
             ],
             patient_filters=[
                 PatientFilter(field="diagnosis", operator="contains", value="sepsis"),
             ],
+            aggregation="mean",
             scope="cohort",
         )
         from src.conversational.models import DecompositionResult
